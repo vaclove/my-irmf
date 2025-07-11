@@ -81,7 +81,7 @@ function InvitationDialog({ isOpen, onClose, guest, edition, onInvitationSent })
           <div className="mb-4 p-4 bg-gray-50 rounded-lg">
             <h3 className="font-medium text-gray-900 mb-2">Invitation Details</h3>
             <p className="text-sm text-gray-600">
-              <strong>Guest:</strong> {guest?.name} ({guest?.email})
+              <strong>Guest:</strong> {guest?.first_name} {guest?.last_name} ({guest?.email})
             </p>
             <p className="text-sm text-gray-600">
               <strong>Edition:</strong> {edition?.name} ({edition?.year})
