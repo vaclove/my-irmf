@@ -1,7 +1,12 @@
 const express = require('express');
 const { pool } = require('../models/database');
 const { logError } = require('../utils/logger');
+const { auditMiddleware, captureOriginalData } = require('../utils/auditLogger');
 const router = express.Router();
+
+// Apply audit middleware to all routes
+router.use(auditMiddleware('guests'));
+router.use(captureOriginalData('guests'));
 
 // Get all guests
 router.get('/', async (req, res) => {

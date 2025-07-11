@@ -1,7 +1,16 @@
 const express = require('express');
 const { pool } = require('../models/database');
 const { logError } = require('../utils/logger');
+const { auditMiddleware, captureOriginalData } = require('../utils/auditLogger');
 const router = express.Router();
+
+// Apply audit middleware to all routes
+router.use(auditMiddleware('tags'));
+router.use(captureOriginalData('tags'));
+
+// Special middleware for guest-tag assignments
+router.use('/assign', captureOriginalData('guest_tags', 'guest_id'));
+router.use('/assign/:guest_id/:tag_id', captureOriginalData('guest_tags', 'guest_id'));
 
 // Get all tags
 router.get('/', async (req, res) => {

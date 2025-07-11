@@ -4,7 +4,12 @@ const nodemailer = require('nodemailer');
 const mailgunService = require('../utils/mailgun');
 const { pool } = require('../models/database');
 const { logError } = require('../utils/logger');
+const { auditMiddleware, captureOriginalData } = require('../utils/auditLogger');
 const router = express.Router();
+
+// Apply audit middleware to all routes
+router.use(auditMiddleware('invitations'));
+router.use(captureOriginalData('invitations'));
 
 // Email transporter setup (fallback for SMTP)
 const createTransporter = () => {

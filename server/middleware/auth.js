@@ -1,5 +1,6 @@
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
+const { logAuthEvent } = require('../utils/auditLogger');
 
 const isLocalhost = (req) => {
   const host = req.get('host') || '';
@@ -25,6 +26,25 @@ const initializeAuth = () => {
       
       // Check if user belongs to @irmf.cz domain
       if (!email.endsWith('@irmf.cz')) {
+        // Log failed authentication attempt
+        try {
+          // Create a minimal req object for audit logging
+          const req = {
+            ip: 'unknown',
+            headers: {},
+            method: 'POST',
+            originalUrl: '/auth/google/callback',
+            body: { email }
+          };
+          await logAuthEvent(req, 'AUTH_FAIL', false, { 
+            reason: 'invalid_domain',
+            email,
+            domain: email.split('@')[1]
+          });
+        } catch (auditError) {
+          console.error('Failed to log auth failure:', auditError);
+        }
+        
         return done(null, false, { 
           message: 'Access restricted to @irmf.cz domain users only' 
         });
@@ -39,6 +59,23 @@ const initializeAuth = () => {
 
       return done(null, user);
     } catch (error) {
+      // Log authentication error
+      try {
+        const req = {
+          ip: 'unknown',
+          headers: {},
+          method: 'POST',
+          originalUrl: '/auth/google/callback',
+          body: { email: profile?.emails?.[0]?.value || 'unknown' }
+        };
+        await logAuthEvent(req, 'AUTH_FAIL', false, { 
+          reason: 'oauth_error',
+          error: error.message
+        });
+      } catch (auditError) {
+        console.error('Failed to log auth error:', auditError);
+      }
+      
       return done(error, null);
     }
   }));

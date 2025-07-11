@@ -14,6 +14,7 @@ const authRoutes = require('./routes/auth');
 const publicRoutes = require('./routes/public');
 const templateRoutes = require('./routes/templates');
 const tagRoutes = require('./routes/tags');
+const auditRoutes = require('./routes/audit');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -58,6 +59,7 @@ app.use('/api/editions', requireIrmfDomain, editionRoutes);
 app.use('/api/invitations', requireIrmfDomain, invitationRoutes);
 app.use('/api/templates', requireIrmfDomain, templateRoutes);
 app.use('/api/tags', requireIrmfDomain, tagRoutes);
+app.use('/api/audit', requireIrmfDomain, auditRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
