@@ -1,6 +1,18 @@
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
 
+const isLocalhost = (req) => {
+  const host = req.get('host') || '';
+  const ip = req.ip || req.connection.remoteAddress || '';
+  
+  return host.includes('localhost') || 
+         host.includes('127.0.0.1') || 
+         host.includes('::1') ||
+         ip === '127.0.0.1' ||
+         ip === '::1' ||
+         ip === '::ffff:127.0.0.1';
+};
+
 const initializeAuth = () => {
   passport.use(new GoogleStrategy({
     clientID: process.env.GOOGLE_CLIENT_ID,
@@ -41,6 +53,11 @@ const initializeAuth = () => {
 };
 
 const requireAuth = (req, res, next) => {
+  // Check if localhost bypass is enabled
+  if (process.env.BYPASS_AUTH_ON_LOCALHOST === 'true' && isLocalhost(req)) {
+    return next();
+  }
+  
   if (req.isAuthenticated()) {
     return next();
   }
@@ -48,6 +65,11 @@ const requireAuth = (req, res, next) => {
 };
 
 const requireIrmfDomain = (req, res, next) => {
+  // Check if localhost bypass is enabled
+  if (process.env.BYPASS_AUTH_ON_LOCALHOST === 'true' && isLocalhost(req)) {
+    return next();
+  }
+  
   if (req.isAuthenticated() && req.user.email.endsWith('@irmf.cz')) {
     return next();
   }
