@@ -11,6 +11,7 @@ const editionRoutes = require('./routes/editions');
 const invitationRoutes = require('./routes/invitations');
 const authRoutes = require('./routes/auth');
 const publicRoutes = require('./routes/public');
+const templateRoutes = require('./routes/templates');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -50,6 +51,7 @@ app.use('/api', publicRoutes);
 app.use('/api/guests', requireIrmfDomain, guestRoutes);
 app.use('/api/editions', requireIrmfDomain, editionRoutes);
 app.use('/api/invitations', requireIrmfDomain, invitationRoutes);
+app.use('/api/templates', requireIrmfDomain, templateRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });

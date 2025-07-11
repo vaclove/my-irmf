@@ -47,4 +47,13 @@ export const invitationApi = {
   getStatus: (guestId, editionId) => publicApi.get(`/invitations/status/${guestId}/${editionId}`),
 }
 
+// Templates API
+export const templateApi = {
+  getByEdition: (editionId) => api.get(`/templates/edition/${editionId}`),
+  getByLanguage: (editionId, language) => api.get(`/templates/edition/${editionId}/language/${language}`),
+  createOrUpdate: (editionId, language, data) => api.put(`/templates/edition/${editionId}/language/${language}`, data),
+  getVariables: () => api.get('/templates/variables'),
+  preview: (editionId, language) => api.get(`/templates/preview/edition/${editionId}/language/${language}`),
+}
+
 export default api

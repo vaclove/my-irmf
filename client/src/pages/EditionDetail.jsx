@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
 import { editionApi, guestApi, invitationApi } from '../utils/api'
+import InvitationDialog from '../components/InvitationDialog'
 
 function EditionDetail() {
   const { id } = useParams()
@@ -11,6 +12,8 @@ function EditionDetail() {
   const [showAssignForm, setShowAssignForm] = useState(false)
   const [selectedGuest, setSelectedGuest] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('guest')
+  const [showInvitationDialog, setShowInvitationDialog] = useState(false)
+  const [selectedGuestForInvitation, setSelectedGuestForInvitation] = useState(null)
 
   const categories = ['filmmaker', 'press', 'guest', 'staff']
 
@@ -61,15 +64,17 @@ function EditionDetail() {
     }
   }
 
-  const handleSendInvitation = async (guestId) => {
-    try {
-      await invitationApi.send({ guest_id: guestId, edition_id: id })
-      await fetchEditionData()
-      alert('Invitation sent successfully!')
-    } catch (error) {
-      console.error('Error sending invitation:', error)
-      alert('Failed to send invitation. Please check email configuration.')
-    }
+  const handleSendInvitation = (guest) => {
+    setSelectedGuestForInvitation({
+      ...guest,
+      id: guest.id,
+      category: guest.category
+    })
+    setShowInvitationDialog(true)
+  }
+
+  const handleInvitationSent = () => {
+    fetchEditionData()
   }
 
   const resetAssignForm = () => {
@@ -223,7 +228,7 @@ function EditionDetail() {
                     <div className="flex space-x-2">
                       {!guest.invited_at && (
                         <button
-                          onClick={() => handleSendInvitation(guest.id)}
+                          onClick={() => handleSendInvitation(guest)}
                           className="bg-green-600 text-white px-3 py-1 rounded text-xs hover:bg-green-700"
                         >
                           Send Invite
@@ -260,6 +265,14 @@ function EditionDetail() {
           )}
         </div>
       )}
+
+      <InvitationDialog
+        isOpen={showInvitationDialog}
+        onClose={() => setShowInvitationDialog(false)}
+        guest={selectedGuestForInvitation}
+        edition={edition}
+        onInvitationSent={handleInvitationSent}
+      />
     </div>
   )
 }
