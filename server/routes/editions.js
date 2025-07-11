@@ -5,8 +5,9 @@ const { auditMiddleware, captureOriginalData } = require('../utils/auditLogger')
 const router = express.Router();
 
 // Apply audit middleware to all routes
-router.use(auditMiddleware('editions'));
+// Note: captureOriginalData must come before auditMiddleware
 router.use(captureOriginalData('editions'));
+router.use(auditMiddleware('editions'));
 
 // Get all editions
 router.get('/', async (req, res) => {

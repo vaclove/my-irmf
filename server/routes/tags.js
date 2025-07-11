@@ -5,8 +5,9 @@ const { auditMiddleware, captureOriginalData } = require('../utils/auditLogger')
 const router = express.Router();
 
 // Apply audit middleware to all routes
-router.use(auditMiddleware('tags'));
+// Note: captureOriginalData must come before auditMiddleware
 router.use(captureOriginalData('tags'));
+router.use(auditMiddleware('tags'));
 
 // Special middleware for guest-tag assignments
 router.use('/assign', captureOriginalData('guest_tags', 'guest_id'));

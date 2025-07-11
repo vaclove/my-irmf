@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { auditApi } from '../utils/api'
+import JsonViewer from '../components/JsonViewer'
 
 function AuditLogs() {
   const [logs, setLogs] = useState([])
@@ -7,6 +8,7 @@ function AuditLogs() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [activeTab, setActiveTab] = useState('logs')
+  const [expandedRows, setExpandedRows] = useState(new Set())
   
   // Filters
   const [filters, setFilters] = useState({
@@ -143,6 +145,21 @@ function AuditLogs() {
 
   const formatTimestamp = (timestamp) => {
     return new Date(timestamp).toLocaleString()
+  }
+
+  const toggleRowExpansion = (logId) => {
+    const newExpandedRows = new Set(expandedRows)
+    if (newExpandedRows.has(logId)) {
+      newExpandedRows.delete(logId)
+    } else {
+      newExpandedRows.add(logId)
+    }
+    setExpandedRows(newExpandedRows)
+  }
+
+  const hasDataToShow = (log) => {
+    return (log.old_data && Object.keys(log.old_data).length > 0) || 
+           (log.new_data && Object.keys(log.new_data).length > 0)
   }
 
   const getActionBadge = (action, success) => {
@@ -354,6 +371,7 @@ function AuditLogs() {
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase w-4"></th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Timestamp</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">User</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">IP</th>
@@ -365,35 +383,89 @@ function AuditLogs() {
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
                     {logs.map((log) => (
-                      <tr key={log.id} className="hover:bg-gray-50">
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {formatTimestamp(log.timestamp)}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {log.user_email || 'Anonymous'}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {log.user_ip || 'Unknown'}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          {getActionBadge(log.action, log.success)}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          {getResourceBadge(log.resource)}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 max-w-xs truncate">
-                          {log.resource_id || '-'}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <span className={`px-2 py-1 rounded text-xs font-medium ${
-                            log.success 
-                              ? 'bg-green-100 text-green-800' 
-                              : 'bg-red-100 text-red-800'
-                          }`}>
-                            {log.success ? 'Success' : 'Failure'}
-                          </span>
-                        </td>
-                      </tr>
+                      <>
+                        <tr key={log.id} className="hover:bg-gray-50">
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            {hasDataToShow(log) && (
+                              <button
+                                onClick={() => toggleRowExpansion(log.id)}
+                                className="text-gray-400 hover:text-gray-600 focus:outline-none"
+                              >
+                                <span className={`transform transition-transform ${
+                                  expandedRows.has(log.id) ? 'rotate-90' : ''
+                                }`}>
+                                  ▶
+                                </span>
+                              </button>
+                            )}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {formatTimestamp(log.timestamp)}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {log.user_email || 'Anonymous'}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {log.user_ip || 'Unknown'}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            {getActionBadge(log.action, log.success)}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            {getResourceBadge(log.resource)}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 max-w-xs truncate">
+                            {log.resource_id || '-'}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <span className={`px-2 py-1 rounded text-xs font-medium ${
+                              log.success 
+                                ? 'bg-green-100 text-green-800' 
+                                : 'bg-red-100 text-red-800'
+                            }`}>
+                              {log.success ? 'Success' : 'Failure'}
+                            </span>
+                          </td>
+                        </tr>
+                        {expandedRows.has(log.id) && hasDataToShow(log) && (
+                          <tr key={`${log.id}-expanded`} className="bg-gray-50">
+                            <td></td>
+                            <td colSpan="7" className="px-6 py-4">
+                              <div className="space-y-4">
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                  {log.old_data && Object.keys(log.old_data).length > 0 && (
+                                    <div>
+                                      <JsonViewer 
+                                        data={log.old_data} 
+                                        label="Previous Data"
+                                        className="mb-2"
+                                      />
+                                    </div>
+                                  )}
+                                  {log.new_data && Object.keys(log.new_data).length > 0 && (
+                                    <div>
+                                      <JsonViewer 
+                                        data={log.new_data} 
+                                        label="New Data"
+                                        className="mb-2"
+                                      />
+                                    </div>
+                                  )}
+                                </div>
+                                {log.metadata && Object.keys(log.metadata).length > 0 && (
+                                  <div className="border-t pt-4">
+                                    <JsonViewer 
+                                      data={log.metadata} 
+                                      label="Metadata"
+                                      className="mb-2"
+                                    />
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </>
                     ))}
                   </tbody>
                 </table>

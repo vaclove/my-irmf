@@ -8,8 +8,9 @@ const { auditMiddleware, captureOriginalData } = require('../utils/auditLogger')
 const router = express.Router();
 
 // Apply audit middleware to all routes
-router.use(auditMiddleware('invitations'));
+// Note: captureOriginalData must come before auditMiddleware
 router.use(captureOriginalData('invitations'));
+router.use(auditMiddleware('invitations'));
 
 // Email transporter setup (fallback for SMTP)
 const createTransporter = () => {
