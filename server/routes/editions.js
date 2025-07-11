@@ -55,19 +55,65 @@ router.post('/', async (req, res) => {
   }
 });
 
-// Get all guests assigned to an edition
+// Get all guests assigned to an edition (based on year tags)
 router.get('/:id/guests', async (req, res) => {
   try {
     const { id } = req.params;
     
+    // First get the edition to find its year
+    const editionResult = await pool.query('SELECT year FROM editions WHERE id = $1', [id]);
+    
+    if (editionResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Edition not found' });
+    }
+    
+    const editionYear = editionResult.rows[0].year;
+    
+    // Get all guests who have the year tag for this edition
     const result = await pool.query(`
-      SELECT g.*, g.first_name || ' ' || g.last_name as name, 
-             ge.category, ge.invited_at, ge.confirmed_at, ge.id as assignment_id
+      SELECT DISTINCT ON (g.id) g.*, 
+             g.first_name || ' ' || g.last_name as name,
+             (SELECT COALESCE(
+               JSON_AGG(
+                 JSON_BUILD_OBJECT(
+                   'id', t_sub.id,
+                   'name', t_sub.name,
+                   'color', t_sub.color
+                 ) ORDER BY t_sub.name
+               ),
+               '[]'::json
+             )
+             FROM guest_tags gt_sub 
+             JOIN tags t_sub ON gt_sub.tag_id = t_sub.id 
+             WHERE gt_sub.guest_id = g.id
+             ) as tags,
+             -- Determine category from tags (prefer specific category tags, default to 'guest')
+             COALESCE(
+               (SELECT t2.name
+                FROM guest_tags gt2 
+                JOIN tags t2 ON gt2.tag_id = t2.id 
+                WHERE gt2.guest_id = g.id 
+                AND t2.name IN ('filmmaker', 'press', 'staff', 'guest')
+                ORDER BY CASE t2.name 
+                  WHEN 'filmmaker' THEN 1
+                  WHEN 'press' THEN 2  
+                  WHEN 'staff' THEN 3
+                  WHEN 'guest' THEN 4
+                  ELSE 5
+                END
+                LIMIT 1),
+               'guest'
+             ) as category,
+             gi.invited_at,
+             gi.confirmed_at,
+             gi.id as assignment_id
       FROM guests g
-      JOIN guest_editions ge ON g.id = ge.guest_id
-      WHERE ge.edition_id = $1
-      ORDER BY g.first_name, g.last_name
-    `, [id]);
+      JOIN guest_tags gt ON g.id = gt.guest_id
+      JOIN tags year_tag ON gt.tag_id = year_tag.id
+      LEFT JOIN guest_invitations gi ON g.id = gi.guest_id AND gi.edition_id = $2
+      WHERE year_tag.name = $1
+      ORDER BY g.id, g.first_name, g.last_name
+    `, [editionYear.toString(), id]);
     
     res.json(result.rows);
   } catch (error) {
@@ -76,138 +122,37 @@ router.get('/:id/guests', async (req, res) => {
   }
 });
 
-// Assign guest to edition
+// Assign guest to edition (deprecated - now done via tags)
+// This endpoint is kept for backward compatibility but will return an error
 router.post('/:id/guests', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { guest_id, category } = req.body;
-    
-    if (!guest_id || !category) {
-      return res.status(400).json({ error: 'Guest ID and category are required' });
-    }
-    
-    const validCategories = ['filmmaker', 'press', 'guest', 'staff'];
-    if (!validCategories.includes(category)) {
-      return res.status(400).json({ error: 'Invalid category' });
-    }
-    
-    const result = await pool.query(
-      'INSERT INTO guest_editions (guest_id, edition_id, category) VALUES ($1, $2, $3) RETURNING *',
-      [guest_id, id, category]
-    );
-    
-    // Get full guest info
-    const guestResult = await pool.query(`
-      SELECT g.*, g.first_name || ' ' || g.last_name as name,
-             ge.category, ge.invited_at, ge.confirmed_at, ge.id as assignment_id
-      FROM guests g
-      JOIN guest_editions ge ON g.id = ge.guest_id
-      WHERE ge.id = $1
-    `, [result.rows[0].id]);
-    
-    res.status(201).json(guestResult.rows[0]);
-  } catch (error) {
-    if (error.code === '23505') {
-      return res.status(400).json({ error: 'Guest already assigned to this edition' });
-    }
-    logError(error, req, { operation: 'assign_guest_to_edition', editionId: req.params.id, formData: req.body });
-    res.status(500).json({ error: error.message });
-  }
+  res.status(400).json({ 
+    error: 'Manual guest assignment is deprecated. Please assign guests using year tags instead.',
+    instructions: 'To assign a guest to an edition, add the year tag (e.g., "2025") to the guest.'
+  });
 });
 
-// Update guest assignment
+// Update guest assignment (deprecated - now done via tags)
 router.put('/:id/guests/:assignmentId', async (req, res) => {
-  try {
-    const { id, assignmentId } = req.params;
-    const { category } = req.body;
-    
-    const validCategories = ['filmmaker', 'press', 'guest', 'staff'];
-    if (!validCategories.includes(category)) {
-      return res.status(400).json({ error: 'Invalid category' });
-    }
-    
-    const result = await pool.query(
-      'UPDATE guest_editions SET category = $1 WHERE id = $2 AND edition_id = $3 RETURNING *',
-      [category, assignmentId, id]
-    );
-    
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Assignment not found' });
-    }
-    
-    res.json(result.rows[0]);
-  } catch (error) {
-    logError(error, req, { operation: 'update_guest_assignment', editionId: req.params.id, assignmentId: req.params.assignmentId, formData: req.body });
-    res.status(500).json({ error: error.message });
-  }
+  res.status(400).json({ 
+    error: 'Manual guest assignment updates are deprecated. Please manage guest categories using tags instead.',
+    instructions: 'To change a guest category, add/remove category tags (filmmaker, press, guest, staff) from the guest.'
+  });
 });
 
-// Remove guest from edition
+// Remove guest from edition (deprecated - now done via tags)
 router.delete('/:id/guests/:assignmentId', async (req, res) => {
-  try {
-    const { id, assignmentId } = req.params;
-    
-    const result = await pool.query(
-      'DELETE FROM guest_editions WHERE id = $1 AND edition_id = $2 RETURNING *',
-      [assignmentId, id]
-    );
-    
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Assignment not found' });
-    }
-    
-    res.json({ message: 'Guest removed from edition successfully' });
-  } catch (error) {
-    logError(error, req, { operation: 'remove_guest_from_edition', editionId: req.params.id, assignmentId: req.params.assignmentId });
-    res.status(500).json({ error: error.message });
-  }
+  res.status(400).json({ 
+    error: 'Manual guest removal is deprecated. Please remove year tags instead.',
+    instructions: 'To remove a guest from an edition, remove the year tag (e.g., "2025") from the guest.'
+  });
 });
 
-// Manually confirm guest invitation
+// Manually confirm guest invitation (deprecated)
 router.put('/:id/guests/:assignmentId/confirm', async (req, res) => {
-  try {
-    const { id, assignmentId } = req.params;
-    
-    // First check if the assignment exists and is invited
-    const checkResult = await pool.query(
-      'SELECT * FROM guest_editions WHERE id = $1 AND edition_id = $2',
-      [assignmentId, id]
-    );
-    
-    if (checkResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Assignment not found' });
-    }
-    
-    const assignment = checkResult.rows[0];
-    
-    if (!assignment.invited_at) {
-      return res.status(400).json({ error: 'Guest has not been invited yet' });
-    }
-    
-    if (assignment.confirmed_at) {
-      return res.status(400).json({ error: 'Guest is already confirmed' });
-    }
-    
-    // Update the assignment to mark as confirmed
-    const result = await pool.query(
-      'UPDATE guest_editions SET confirmed_at = CURRENT_TIMESTAMP WHERE id = $1 AND edition_id = $2 RETURNING *',
-      [assignmentId, id]
-    );
-    
-    // Get full guest info for response
-    const guestResult = await pool.query(`
-      SELECT g.*, g.first_name || ' ' || g.last_name as name,
-             ge.category, ge.invited_at, ge.confirmed_at, ge.id as assignment_id
-      FROM guests g
-      JOIN guest_editions ge ON g.id = ge.guest_id
-      WHERE ge.id = $1
-    `, [assignmentId]);
-    
-    res.json(guestResult.rows[0]);
-  } catch (error) {
-    logError(error, req, { operation: 'confirm_guest_invitation', editionId: req.params.id, assignmentId: req.params.assignmentId });
-    res.status(500).json({ error: error.message });
-  }
+  res.status(400).json({ 
+    error: 'Manual invitation confirmation is deprecated with tag-based assignments.',
+    instructions: 'Invitation management will be reimplemented with the new tag-based system.'
+  });
 });
 
 module.exports = router;

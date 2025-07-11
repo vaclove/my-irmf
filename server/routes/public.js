@@ -8,13 +8,32 @@ router.post('/invitations/confirm/:token', async (req, res) => {
   try {
     const { token } = req.params;
     
-    // Find assignment by token
+    // Find invitation by token
     const result = await pool.query(`
-      SELECT ge.*, g.name, g.email, e.name as edition_name
-      FROM guest_editions ge
-      JOIN guests g ON ge.guest_id = g.id
-      JOIN editions e ON ge.edition_id = e.id
-      WHERE ge.confirmation_token = $1 AND ge.confirmed_at IS NULL
+      SELECT gi.*, g.first_name || ' ' || g.last_name as name, g.email, e.name as edition_name,
+             COALESCE(
+               (SELECT tag_name FROM (
+                 SELECT t2.name as tag_name, 
+                        CASE t2.name 
+                          WHEN 'filmmaker' THEN 1
+                          WHEN 'press' THEN 2  
+                          WHEN 'staff' THEN 3
+                          WHEN 'guest' THEN 4
+                          ELSE 5
+                        END as priority
+                 FROM guest_tags gt2 
+                 JOIN tags t2 ON gt2.tag_id = t2.id 
+                 WHERE gt2.guest_id = g.id 
+                 AND t2.name IN ('filmmaker', 'press', 'staff', 'guest')
+                 ORDER BY priority
+                 LIMIT 1
+               ) sub),
+               'guest'
+             ) as category
+      FROM guest_invitations gi
+      JOIN guests g ON gi.guest_id = g.id
+      JOIN editions e ON gi.edition_id = e.id
+      WHERE gi.confirmation_token = $1 AND gi.confirmed_at IS NULL
     `, [token]);
     
     if (result.rows.length === 0) {
@@ -23,7 +42,7 @@ router.post('/invitations/confirm/:token', async (req, res) => {
     
     // Update confirmation
     await pool.query(
-      'UPDATE guest_editions SET confirmed_at = CURRENT_TIMESTAMP WHERE confirmation_token = $1',
+      'UPDATE guest_invitations SET confirmed_at = CURRENT_TIMESTAMP WHERE confirmation_token = $1',
       [token]
     );
     
@@ -49,12 +68,12 @@ router.get('/invitations/status/:guest_id/:edition_id', async (req, res) => {
     const { guest_id, edition_id } = req.params;
     
     const result = await pool.query(`
-      SELECT ge.invited_at, ge.confirmed_at, ge.confirmation_token,
-             g.name, g.email, e.name as edition_name
-      FROM guest_editions ge
-      JOIN guests g ON ge.guest_id = g.id
-      JOIN editions e ON ge.edition_id = e.id
-      WHERE ge.guest_id = $1 AND ge.edition_id = $2
+      SELECT gi.invited_at, gi.confirmed_at, gi.confirmation_token,
+             g.first_name || ' ' || g.last_name as name, g.email, e.name as edition_name
+      FROM guest_invitations gi
+      JOIN guests g ON gi.guest_id = g.id
+      JOIN editions e ON gi.edition_id = e.id
+      WHERE gi.guest_id = $1 AND gi.edition_id = $2
     `, [guest_id, edition_id]);
     
     if (result.rows.length === 0) {

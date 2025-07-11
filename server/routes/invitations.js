@@ -90,22 +90,44 @@ router.post('/send', async (req, res) => {
       return res.status(400).json({ error: 'Guest ID and Edition ID are required' });
     }
     
-    // Check if assignment exists and get guest/edition info
-    const assignmentResult = await pool.query(`
-      SELECT ge.*, g.first_name || ' ' || g.last_name as name, 
+    // Check if guest has the year tag for this edition
+    const guestEditionResult = await pool.query(`
+      SELECT g.first_name || ' ' || g.last_name as name, 
              g.first_name, g.last_name, g.email, g.language as guest_language, g.company, 
-             e.name as edition_name, e.year
-      FROM guest_editions ge
-      JOIN guests g ON ge.guest_id = g.id
-      JOIN editions e ON ge.edition_id = e.id
-      WHERE ge.guest_id = $1 AND ge.edition_id = $2
+             e.name as edition_name, e.year,
+             COALESCE(
+               (SELECT tag_name FROM (
+                 SELECT t2.name as tag_name, 
+                        CASE t2.name 
+                          WHEN 'filmmaker' THEN 1
+                          WHEN 'press' THEN 2  
+                          WHEN 'staff' THEN 3
+                          WHEN 'guest' THEN 4
+                          ELSE 5
+                        END as priority
+                 FROM guest_tags gt2 
+                 JOIN tags t2 ON gt2.tag_id = t2.id 
+                 WHERE gt2.guest_id = g.id 
+                 AND t2.name IN ('filmmaker', 'press', 'staff', 'guest')
+                 ORDER BY priority
+                 LIMIT 1
+               ) sub),
+               'guest'
+             ) as category
+      FROM guests g
+      JOIN guest_tags gt ON g.id = gt.guest_id
+      JOIN tags year_tag ON gt.tag_id = year_tag.id
+      JOIN editions e ON year_tag.name = e.year::text
+      WHERE g.id = $1 AND e.id = $2
     `, [guest_id, edition_id]);
     
-    if (assignmentResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Guest assignment not found' });
+    if (guestEditionResult.rows.length === 0) {
+      return res.status(404).json({ 
+        error: 'Guest is not assigned to this edition. Please assign the year tag to the guest first.' 
+      });
     }
     
-    const assignment = assignmentResult.rows[0];
+    const assignment = guestEditionResult.rows[0];
     
     // Use guest's preferred language if not specified
     const emailLanguage = language || assignment.guest_language || 'english';
@@ -167,15 +189,18 @@ router.post('/send', async (req, res) => {
       
       await sendEmail(emailData);
       
-      // Update database with invitation details including accommodation
+      // Insert or update invitation tracking
       await pool.query(
-        `UPDATE guest_editions SET 
-         invited_at = CURRENT_TIMESTAMP, 
-         confirmation_token = $1,
-         accommodation = $2,
-         covered_nights = $3
-         WHERE guest_id = $4 AND edition_id = $5`,
-        [confirmationToken, accommodation, covered_nights, guest_id, edition_id]
+        `INSERT INTO guest_invitations (guest_id, edition_id, confirmation_token, accommodation, covered_nights)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (guest_id, edition_id) 
+         DO UPDATE SET 
+           invited_at = CURRENT_TIMESTAMP,
+           confirmation_token = $3,
+           accommodation = $4,
+           covered_nights = $5,
+           updated_at = CURRENT_TIMESTAMP`,
+        [guest_id, edition_id, confirmationToken, accommodation, covered_nights]
       );
       
       res.json({ 

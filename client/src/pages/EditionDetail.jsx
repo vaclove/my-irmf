@@ -9,15 +9,14 @@ function EditionDetail() {
   const [assignedGuests, setAssignedGuests] = useState([])
   const [allGuests, setAllGuests] = useState([])
   const [loading, setLoading] = useState(true)
-  const [showAssignForm, setShowAssignForm] = useState(false)
-  const [selectedGuest, setSelectedGuest] = useState('')
-  const [selectedCategory, setSelectedCategory] = useState('guest')
+  // Removed manual assignment form state - now using tag-based assignment
   const [showInvitationDialog, setShowInvitationDialog] = useState(false)
   const [selectedGuestForInvitation, setSelectedGuestForInvitation] = useState(null)
   const [filterCategory, setFilterCategory] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
 
-  const categories = ['filmmaker', 'press', 'guest', 'staff']
+  // Categories are now determined from tags automatically
+  const categories = ['filmmaker', 'press', 'guest', 'staff'] // For filtering only
 
   useEffect(() => {
     fetchEditionData()
@@ -25,15 +24,13 @@ function EditionDetail() {
 
   const fetchEditionData = async () => {
     try {
-      const [editionResponse, assignedResponse, allGuestsResponse] = await Promise.all([
+      const [editionResponse, assignedResponse] = await Promise.all([
         editionApi.getById(id),
-        editionApi.getGuests(id),
-        guestApi.getAll()
+        editionApi.getGuests(id)
       ])
       
       setEdition(editionResponse.data)
       setAssignedGuests(assignedResponse.data)
-      setAllGuests(allGuestsResponse.data)
     } catch (error) {
       console.error('Error fetching edition data:', error)
     } finally {
@@ -41,30 +38,7 @@ function EditionDetail() {
     }
   }
 
-  const handleAssignGuest = async (e) => {
-    e.preventDefault()
-    try {
-      await editionApi.assignGuest(id, {
-        guest_id: selectedGuest,
-        category: selectedCategory
-      })
-      await fetchEditionData()
-      resetAssignForm()
-    } catch (error) {
-      console.error('Error assigning guest:', error)
-    }
-  }
-
-  const handleRemoveGuest = async (assignmentId) => {
-    if (window.confirm('Are you sure you want to remove this guest from the edition?')) {
-      try {
-        await editionApi.removeGuest(id, assignmentId)
-        await fetchEditionData()
-      } catch (error) {
-        console.error('Error removing guest:', error)
-      }
-    }
-  }
+  // Manual assignment functions removed - now using tag-based assignment
 
   const handleSendInvitation = (guest) => {
     setSelectedGuestForInvitation({
@@ -79,24 +53,7 @@ function EditionDetail() {
     fetchEditionData()
   }
 
-  const handleConfirmInvitation = async (guest) => {
-    if (window.confirm(`Are you sure you want to manually confirm ${guest.first_name} ${guest.last_name}'s invitation?`)) {
-      try {
-        // Call API to confirm the invitation
-        await editionApi.confirmGuest(id, guest.assignment_id)
-        await fetchEditionData()
-      } catch (error) {
-        console.error('Error confirming invitation:', error)
-        alert('Failed to confirm invitation: ' + (error.response?.data?.error || error.message))
-      }
-    }
-  }
-
-  const resetAssignForm = () => {
-    setSelectedGuest('')
-    setSelectedCategory('guest')
-    setShowAssignForm(false)
-  }
+  // Invitation confirmation removed - will be reimplemented with new tag-based system
 
   const getStatusBadge = (guest) => {
     if (guest.confirmed_at) {
@@ -122,9 +79,7 @@ function EditionDetail() {
     )
   }
 
-  const availableGuests = allGuests.filter(
-    guest => !assignedGuests.some(assigned => assigned.id === guest.id)
-  )
+  // No longer needed - guests are automatically assigned via tags
 
   const getFilteredAndSortedGuests = () => {
     return assignedGuests
@@ -189,14 +144,12 @@ function EditionDetail() {
       </div>
 
       <div className="flex justify-between items-center mb-6">
-        <h2 className="text-lg font-medium">Assigned Guests ({getFilteredAndSortedGuests().length}/{assignedGuests.length})</h2>
-        <button
-          onClick={() => setShowAssignForm(true)}
-          disabled={availableGuests.length === 0}
-          className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:bg-gray-400"
-        >
-          Assign Guest
-        </button>
+        <div>
+          <h2 className="text-lg font-medium">Edition Guests ({getFilteredAndSortedGuests().length}/{assignedGuests.length})</h2>
+          <p className="text-sm text-gray-600 mt-1">
+            Guests are automatically assigned by adding the year tag "{edition?.year}" to them
+          </p>
+        </div>
       </div>
 
       {/* Filter Controls */}
@@ -245,58 +198,7 @@ function EditionDetail() {
         </div>
       </div>
 
-      {showAssignForm && (
-        <div className="bg-white shadow rounded-lg p-6 mb-6">
-          <h3 className="text-lg font-medium mb-4">Assign Guest to Edition</h3>
-          <form onSubmit={handleAssignGuest} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Guest</label>
-              <select
-                required
-                value={selectedGuest}
-                onChange={(e) => setSelectedGuest(e.target.value)}
-                className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
-              >
-                <option value="">Select a guest</option>
-                {availableGuests.map((guest) => (
-                  <option key={guest.id} value={guest.id}>
-                    {guest.first_name} {guest.last_name} ({guest.email})
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Category</label>
-              <select
-                value={selectedCategory}
-                onChange={(e) => setSelectedCategory(e.target.value)}
-                className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
-              >
-                {categories.map((category) => (
-                  <option key={category} value={category}>
-                    {category.charAt(0).toUpperCase() + category.slice(1)}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="flex space-x-3">
-              <button
-                type="submit"
-                className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700"
-              >
-                Assign Guest
-              </button>
-              <button
-                type="button"
-                onClick={resetAssignForm}
-                className="bg-gray-300 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-400"
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
+      {/* Manual assignment form removed - guests are now automatically assigned via tags */}
 
       <div className="bg-white shadow rounded-lg">
         <div className="overflow-x-auto">
@@ -312,7 +214,7 @@ function EditionDetail() {
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {getFilteredAndSortedGuests().map((guest) => (
-                <tr key={guest.assignment_id}>
+                <tr key={guest.id}>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                     {guest.first_name} {guest.last_name}
                   </td>
@@ -336,19 +238,18 @@ function EditionDetail() {
                         </button>
                       )}
                       {guest.invited_at && !guest.confirmed_at && (
-                        <button
-                          onClick={() => handleConfirmInvitation(guest)}
-                          className="bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700"
-                        >
-                          Confirm
-                        </button>
+                        <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-xs">
+                          Invited
+                        </span>
                       )}
-                      <button
-                        onClick={() => handleRemoveGuest(guest.assignment_id)}
-                        className="bg-red-600 text-white px-3 py-1 rounded text-xs hover:bg-red-700"
-                      >
-                        Remove
-                      </button>
+                      {guest.confirmed_at && (
+                        <span className="bg-green-100 text-green-800 px-2 py-1 rounded text-xs">
+                          Confirmed
+                        </span>
+                      )}
+                      <span className="text-gray-400 text-xs">
+                        Assignment via tags
+                      </span>
                     </div>
                   </td>
                 </tr>
@@ -361,17 +262,12 @@ function EditionDetail() {
       {assignedGuests.length === 0 ? (
         <div className="text-center py-12 bg-white rounded-lg shadow">
           <h3 className="text-lg font-medium text-gray-900 mb-2">No guests assigned yet</h3>
-          <p className="text-gray-600 mb-4">Start by assigning guests to this edition</p>
-          {availableGuests.length > 0 ? (
-            <button
-              onClick={() => setShowAssignForm(true)}
-              className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700"
-            >
-              Assign First Guest
-            </button>
-          ) : (
-            <p className="text-gray-500">No guests available. Please add guests first.</p>
-          )}
+          <p className="text-gray-600 mb-4">
+            Guests are automatically assigned when you add the "{edition?.year}" tag to them.
+          </p>
+          <p className="text-gray-500 text-sm">
+            Go to the Guests page and add tags to assign guests to this edition.
+          </p>
         </div>
       ) : getFilteredAndSortedGuests().length === 0 ? (
         <div className="text-center py-12 bg-white rounded-lg shadow">
