@@ -1,13 +1,23 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { invitationApi } from '../utils/api'
 
 function InvitationDialog({ isOpen, onClose, guest, edition, onInvitationSent }) {
   const [loading, setLoading] = useState(false)
   const [formData, setFormData] = useState({
-    language: guest?.language || 'english',
+    language: 'english',
     accommodation: false,
     covered_nights: 0
   })
+
+  // Update form data when guest changes
+  useEffect(() => {
+    if (guest) {
+      setFormData(prev => ({
+        ...prev,
+        language: guest.language || 'english'
+      }))
+    }
+  }, [guest])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -96,9 +106,6 @@ function InvitationDialog({ isOpen, onClose, guest, edition, onInvitationSent })
                 <option value="english">English</option>
                 <option value="czech">Czech</option>
               </select>
-              <p className="text-xs text-gray-500 mt-1">
-                Default language based on guest preference: {guest?.language || 'english'}
-              </p>
             </div>
 
             {/* Accommodation Section */}
