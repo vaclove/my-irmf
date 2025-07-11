@@ -7,7 +7,7 @@ const router = express.Router();
 router.get('/', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT *, first_name || ' ' || last_name as name 
+      SELECT * 
       FROM guests 
       ORDER BY first_name, last_name
     `);
@@ -23,7 +23,7 @@ router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query(`
-      SELECT *, first_name || ' ' || last_name as name 
+      SELECT * 
       FROM guests WHERE id = $1
     `, [id]);
     
@@ -53,9 +53,9 @@ router.post('/', async (req, res) => {
     }
     
     const result = await pool.query(
-      `INSERT INTO guests (first_name, last_name, name, email, phone, language, company, notes) 
-       VALUES ($1, $2, $1::text || ' ' || $2::text, $3, $4, $5, $6, $7) 
-       RETURNING *, first_name || ' ' || last_name as name`,
+      `INSERT INTO guests (first_name, last_name, email, phone, language, company, notes) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7) 
+       RETURNING *`,
       [first_name, last_name, email, phone, language || 'english', company, notes]
     );
     
@@ -84,7 +84,6 @@ router.put('/:id', async (req, res) => {
       `UPDATE guests SET 
        first_name = $1, 
        last_name = $2, 
-       name = $1::text || ' ' || $2::text,
        email = $3, 
        phone = $4, 
        language = $5, 
@@ -92,7 +91,7 @@ router.put('/:id', async (req, res) => {
        notes = $7, 
        updated_at = CURRENT_TIMESTAMP 
        WHERE id = $8 
-       RETURNING *, first_name || ' ' || last_name as name`,
+       RETURNING *`,
       [first_name, last_name, email, phone, language, company, notes, id]
     );
     

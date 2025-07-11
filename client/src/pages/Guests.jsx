@@ -219,7 +219,7 @@ function Guests() {
               {guests.map((guest) => (
                 <tr key={guest.id}>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                    {guest.name}
+                    {guest.first_name} {guest.last_name}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                     {guest.email}
