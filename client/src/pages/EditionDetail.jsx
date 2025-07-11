@@ -14,6 +14,8 @@ function EditionDetail() {
   const [selectedCategory, setSelectedCategory] = useState('guest')
   const [showInvitationDialog, setShowInvitationDialog] = useState(false)
   const [selectedGuestForInvitation, setSelectedGuestForInvitation] = useState(null)
+  const [filterCategory, setFilterCategory] = useState('')
+  const [filterStatus, setFilterStatus] = useState('')
 
   const categories = ['filmmaker', 'press', 'guest', 'staff']
 
@@ -111,6 +113,46 @@ function EditionDetail() {
     guest => !assignedGuests.some(assigned => assigned.id === guest.id)
   )
 
+  const getFilteredAndSortedGuests = () => {
+    return assignedGuests
+      .filter(guest => {
+        // Filter by category
+        if (filterCategory && guest.category !== filterCategory) {
+          return false
+        }
+        
+        // Filter by status
+        if (filterStatus) {
+          if (filterStatus === 'confirmed' && !guest.confirmed_at) return false
+          if (filterStatus === 'invited' && (!guest.invited_at || guest.confirmed_at)) return false
+          if (filterStatus === 'not_invited' && guest.invited_at) return false
+        }
+        
+        return true
+      })
+      .sort((a, b) => {
+        // First sort by category
+        if (a.category !== b.category) {
+          return a.category.localeCompare(b.category)
+        }
+        
+        // Then sort by status (confirmed > invited > not invited)
+        const getStatusPriority = (guest) => {
+          if (guest.confirmed_at) return 0 // Confirmed first
+          if (guest.invited_at) return 1   // Invited second
+          return 2                          // Not invited last
+        }
+        
+        const statusDiff = getStatusPriority(a) - getStatusPriority(b)
+        if (statusDiff !== 0) return statusDiff
+        
+        // Finally sort by name (first_name + last_name)
+        const nameA = `${a.first_name} ${a.last_name}`.toLowerCase()
+        const nameB = `${b.first_name} ${b.last_name}`.toLowerCase()
+        return nameA.localeCompare(nameB)
+      })
+  }
+
   if (loading) {
     return <div className="text-center py-8">Loading edition details...</div>
   }
@@ -134,7 +176,7 @@ function EditionDetail() {
       </div>
 
       <div className="flex justify-between items-center mb-6">
-        <h2 className="text-lg font-medium">Assigned Guests ({assignedGuests.length})</h2>
+        <h2 className="text-lg font-medium">Assigned Guests ({getFilteredAndSortedGuests().length}/{assignedGuests.length})</h2>
         <button
           onClick={() => setShowAssignForm(true)}
           disabled={availableGuests.length === 0}
@@ -142,6 +184,52 @@ function EditionDetail() {
         >
           Assign Guest
         </button>
+      </div>
+
+      {/* Filter Controls */}
+      <div className="bg-white shadow rounded-lg p-4 mb-6">
+        <h3 className="text-sm font-medium text-gray-700 mb-3">Filters</h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Category</label>
+            <select
+              value={filterCategory}
+              onChange={(e) => setFilterCategory(e.target.value)}
+              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+            >
+              <option value="">All Categories</option>
+              {categories.map((category) => (
+                <option key={category} value={category}>
+                  {category.charAt(0).toUpperCase() + category.slice(1)}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Status</label>
+            <select
+              value={filterStatus}
+              onChange={(e) => setFilterStatus(e.target.value)}
+              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+            >
+              <option value="">All Statuses</option>
+              <option value="confirmed">Confirmed</option>
+              <option value="invited">Invited</option>
+              <option value="not_invited">Not Invited</option>
+            </select>
+          </div>
+          <div className="flex items-end">
+            <button
+              onClick={() => {
+                setFilterCategory('')
+                setFilterStatus('')
+              }}
+              className="bg-gray-200 text-gray-700 px-3 py-2 rounded-md hover:bg-gray-300 text-sm"
+            >
+              Clear Filters
+            </button>
+          </div>
+        </div>
       </div>
 
       {showAssignForm && (
@@ -210,7 +298,7 @@ function EditionDetail() {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {assignedGuests.map((guest) => (
+              {getFilteredAndSortedGuests().map((guest) => (
                 <tr key={guest.assignment_id}>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                     {guest.first_name} {guest.last_name}
@@ -249,7 +337,7 @@ function EditionDetail() {
         </div>
       </div>
 
-      {assignedGuests.length === 0 && (
+      {assignedGuests.length === 0 ? (
         <div className="text-center py-12 bg-white rounded-lg shadow">
           <h3 className="text-lg font-medium text-gray-900 mb-2">No guests assigned yet</h3>
           <p className="text-gray-600 mb-4">Start by assigning guests to this edition</p>
@@ -264,7 +352,21 @@ function EditionDetail() {
             <p className="text-gray-500">No guests available. Please add guests first.</p>
           )}
         </div>
-      )}
+      ) : getFilteredAndSortedGuests().length === 0 ? (
+        <div className="text-center py-12 bg-white rounded-lg shadow">
+          <h3 className="text-lg font-medium text-gray-900 mb-2">No guests match the current filters</h3>
+          <p className="text-gray-600 mb-4">Try adjusting your filters or clear them to see all guests</p>
+          <button
+            onClick={() => {
+              setFilterCategory('')
+              setFilterStatus('')
+            }}
+            className="bg-gray-600 text-white px-4 py-2 rounded-md hover:bg-gray-700"
+          >
+            Clear Filters
+          </button>
+        </div>
+      ) : null}
 
       <InvitationDialog
         isOpen={showInvitationDialog}
