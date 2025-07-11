@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, Link } from 'react-router-dom'
 import { editionApi, guestApi, invitationApi } from '../utils/api'
 
 function EditionDetail() {
@@ -117,14 +117,25 @@ function EditionDetail() {
   return (
     <div>
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900 mb-2">{edition.name}</h1>
-        <div className="flex items-center space-x-4 text-sm text-gray-600">
-          <span>Year: {edition.year}</span>
-          {edition.start_date && edition.end_date && (
-            <span>
-              {new Date(edition.start_date).toLocaleDateString()} - {new Date(edition.end_date).toLocaleDateString()}
-            </span>
-          )}
+        <div className="flex justify-between items-start">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900 mb-2">{edition.name}</h1>
+            <div className="flex items-center space-x-4 text-sm text-gray-600">
+              <span>Year: {edition.year}</span>
+              {edition.start_date && edition.end_date && (
+                <span>
+                  {new Date(edition.start_date).toLocaleDateString()} - {new Date(edition.end_date).toLocaleDateString()}
+                </span>
+              )}
+            </div>
+          </div>
+          <Link
+            to={`/editions/${id}/templates`}
+            className="bg-purple-600 text-white px-4 py-2 rounded-md hover:bg-purple-700 flex items-center space-x-2"
+          >
+            <span>📧</span>
+            <span>Email Templates</span>
+          </Link>
         </div>
       </div>
 
