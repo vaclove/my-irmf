@@ -5,6 +5,7 @@ import Layout from './components/Layout'
 import Guests from './pages/Guests'
 import Editions from './pages/Editions'
 import EditionDetail from './pages/EditionDetail'
+import AuditLogs from './pages/AuditLogs'
 import Confirmation from './pages/Confirmation'
 
 function App() {
@@ -23,6 +24,7 @@ function App() {
                 <Route path="/guests" element={<Guests />} />
                 <Route path="/editions" element={<Editions />} />
                 <Route path="/editions/:id" element={<EditionDetail />} />
+                <Route path="/audit" element={<AuditLogs />} />
               </Routes>
             </Layout>
           </ProtectedRoute>

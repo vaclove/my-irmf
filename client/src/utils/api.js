@@ -69,4 +69,15 @@ export const tagApi = {
   getGuestTags: (guestId) => api.get(`/tags/guest/${guestId}`),
 }
 
+// Audit API
+export const auditApi = {
+  getLogs: (filters) => api.get('/audit', { params: filters }),
+  getStats: (params) => api.get('/audit/stats', { params }),
+  getById: (id) => api.get(`/audit/${id}`),
+  exportCsv: (filters) => api.get('/audit/export/csv', { 
+    params: filters,
+    responseType: 'text'
+  }),
+}
+
 export default api
