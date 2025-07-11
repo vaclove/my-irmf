@@ -1,11 +1,16 @@
 import { useState, useEffect } from 'react'
-import { guestApi } from '../utils/api'
+import { guestApi, tagApi } from '../utils/api'
 
 function Guests() {
   const [guests, setGuests] = useState([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [editingGuest, setEditingGuest] = useState(null)
+  const [allTags, setAllTags] = useState([])
+  const [selectedTags, setSelectedTags] = useState([])
+  const [showTagFilter, setShowTagFilter] = useState(false)
+  const [editingGuestTags, setEditingGuestTags] = useState(null)
+  const [newTagName, setNewTagName] = useState('')
   const [formData, setFormData] = useState({ 
     first_name: '', 
     last_name: '',
@@ -18,6 +23,7 @@ function Guests() {
 
   useEffect(() => {
     fetchGuests()
+    fetchTags()
   }, [])
 
   const fetchGuests = async () => {
@@ -28,6 +34,15 @@ function Guests() {
       console.error('Error fetching guests:', error)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const fetchTags = async () => {
+    try {
+      const response = await tagApi.getAll()
+      setAllTags(response.data)
+    } catch (error) {
+      console.error('Error fetching tags:', error)
     }
   }
 
@@ -71,6 +86,52 @@ function Guests() {
     }
   }
 
+  const handleAddTag = async (guestId, tagId) => {
+    try {
+      await tagApi.assignToGuest(guestId, tagId)
+      await fetchGuests()
+    } catch (error) {
+      console.error('Error adding tag:', error)
+      alert('Failed to add tag: ' + (error.response?.data?.error || error.message))
+    }
+  }
+
+  const handleRemoveTag = async (guestId, tagId) => {
+    try {
+      await tagApi.removeFromGuest(guestId, tagId)
+      await fetchGuests()
+    } catch (error) {
+      console.error('Error removing tag:', error)
+      alert('Failed to remove tag: ' + (error.response?.data?.error || error.message))
+    }
+  }
+
+  const handleCreateTag = async () => {
+    if (!newTagName.trim()) return
+    
+    try {
+      await tagApi.create({ name: newTagName.trim() })
+      await fetchTags()
+      setNewTagName('')
+    } catch (error) {
+      console.error('Error creating tag:', error)
+      alert('Failed to create tag: ' + (error.response?.data?.error || error.message))
+    }
+  }
+
+  const getFilteredGuests = () => {
+    if (selectedTags.length === 0) {
+      return guests
+    }
+    
+    return guests.filter(guest => {
+      // Check if guest has ALL selected tags
+      return selectedTags.every(selectedTagId => 
+        guest.tags.some(guestTag => guestTag.id === selectedTagId)
+      )
+    })
+  }
+
   const resetForm = () => {
     setFormData({ 
       first_name: '', 
@@ -93,13 +154,86 @@ function Guests() {
     <div>
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Guests</h1>
-        <button
-          onClick={() => setShowForm(true)}
-          className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700"
-        >
-          Add Guest
-        </button>
+        <div className="flex space-x-3">
+          <button
+            onClick={() => setShowTagFilter(!showTagFilter)}
+            className="bg-gray-600 text-white px-4 py-2 rounded-md hover:bg-gray-700"
+          >
+            {showTagFilter ? 'Hide Filters' : 'Filter by Tags'}
+          </button>
+          <button
+            onClick={() => setShowForm(true)}
+            className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700"
+          >
+            Add Guest
+          </button>
+        </div>
       </div>
+
+      {/* Tag Filter Panel */}
+      {showTagFilter && (
+        <div className="bg-white shadow rounded-lg p-6 mb-6">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-lg font-medium">Filter by Tags</h3>
+            <div className="flex items-center space-x-2">
+              <input
+                type="text"
+                value={newTagName}
+                onChange={(e) => setNewTagName(e.target.value)}
+                placeholder="New tag name"
+                className="border border-gray-300 rounded-md px-3 py-2 text-sm"
+                onKeyPress={(e) => e.key === 'Enter' && handleCreateTag()}
+              />
+              <button
+                onClick={handleCreateTag}
+                className="bg-green-600 text-white px-3 py-2 rounded-md hover:bg-green-700 text-sm"
+              >
+                Create Tag
+              </button>
+            </div>
+          </div>
+          
+          <div className="mb-4">
+            <p className="text-sm text-gray-600 mb-2">
+              Selected tags: {selectedTags.length} | Showing {getFilteredGuests().length} of {guests.length} guests
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {allTags.map((tag) => (
+                <button
+                  key={tag.id}
+                  onClick={() => {
+                    setSelectedTags(prev => 
+                      prev.includes(tag.id) 
+                        ? prev.filter(id => id !== tag.id)
+                        : [...prev, tag.id]
+                    )
+                  }}
+                  className={`px-3 py-1 rounded-full text-sm font-medium border-2 transition-colors ${
+                    selectedTags.includes(tag.id)
+                      ? 'border-blue-500 text-white'
+                      : 'border-gray-300 text-gray-700 hover:border-gray-400'
+                  }`}
+                  style={{
+                    backgroundColor: selectedTags.includes(tag.id) ? tag.color : 'white',
+                    borderColor: selectedTags.includes(tag.id) ? tag.color : undefined
+                  }}
+                >
+                  {tag.name} ({tag.guest_count || 0})
+                </button>
+              ))}
+            </div>
+          </div>
+          
+          {selectedTags.length > 0 && (
+            <button
+              onClick={() => setSelectedTags([])}
+              className="text-sm text-gray-600 hover:text-gray-800"
+            >
+              Clear all filters
+            </button>
+          )}
+        </div>
+      )}
 
       {showForm && (
         <div className="bg-white shadow rounded-lg p-6 mb-6">
@@ -199,7 +333,9 @@ function Guests() {
 
       <div className="bg-white shadow rounded-lg">
         <div className="px-6 py-4 border-b border-gray-200">
-          <h3 className="text-lg font-medium">All Guests ({guests.length})</h3>
+          <h3 className="text-lg font-medium">
+            {selectedTags.length > 0 ? `Filtered Guests (${getFilteredGuests().length}/${guests.length})` : `All Guests (${guests.length})`}
+          </h3>
         </div>
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
@@ -210,13 +346,14 @@ function Guests() {
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Phone</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Language</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Company</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tags</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Notes</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Created</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {guests.map((guest) => (
+              {getFilteredGuests().map((guest) => (
                 <tr key={guest.id}>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                     {guest.first_name} {guest.last_name}
@@ -238,6 +375,55 @@ function Guests() {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                     {guest.company || '-'}
+                  </td>
+                  <td className="px-6 py-4 text-sm text-gray-500">
+                    <div className="flex flex-wrap gap-1 max-w-xs">
+                      {guest.tags && guest.tags.length > 0 ? (
+                        guest.tags.map((tag) => (
+                          <span
+                            key={tag.id}
+                            className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium text-white cursor-pointer group"
+                            style={{ backgroundColor: tag.color }}
+                            title={`Remove ${tag.name} tag`}
+                            onClick={() => handleRemoveTag(guest.id, tag.id)}
+                          >
+                            {tag.name}
+                            <span className="ml-1 opacity-0 group-hover:opacity-100 transition-opacity">×</span>
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-gray-400 text-xs">No tags</span>
+                      )}
+                      <button
+                        onClick={() => setEditingGuestTags(editingGuestTags === guest.id ? null : guest.id)}
+                        className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-200 text-gray-700 hover:bg-gray-300"
+                        title="Add tag"
+                      >
+                        +
+                      </button>
+                    </div>
+                    {editingGuestTags === guest.id && (
+                      <div className="mt-2 p-2 bg-gray-50 rounded-md">
+                        <p className="text-xs text-gray-600 mb-2">Add tags:</p>
+                        <div className="flex flex-wrap gap-1">
+                          {allTags
+                            .filter(tag => !guest.tags.some(guestTag => guestTag.id === tag.id))
+                            .map((tag) => (
+                              <button
+                                key={tag.id}
+                                onClick={() => {
+                                  handleAddTag(guest.id, tag.id)
+                                  setEditingGuestTags(null)
+                                }}
+                                className="px-2 py-1 rounded-full text-xs font-medium text-white hover:opacity-80"
+                                style={{ backgroundColor: tag.color }}
+                              >
+                                {tag.name}
+                              </button>
+                            ))}
+                        </div>
+                      </div>
+                    )}
                   </td>
                   <td className="px-6 py-4 text-sm text-gray-500 max-w-xs">
                     <div className="truncate" title={guest.notes}>

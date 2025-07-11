@@ -7,9 +7,22 @@ const router = express.Router();
 router.get('/', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT * 
-      FROM guests 
-      ORDER BY first_name, last_name
+      SELECT g.*,
+             COALESCE(
+               JSON_AGG(
+                 JSON_BUILD_OBJECT(
+                   'id', t.id,
+                   'name', t.name,
+                   'color', t.color
+                 ) ORDER BY t.name
+               ) FILTER (WHERE t.id IS NOT NULL),
+               '[]'::json
+             ) as tags
+      FROM guests g
+      LEFT JOIN guest_tags gt ON g.id = gt.guest_id
+      LEFT JOIN tags t ON gt.tag_id = t.id
+      GROUP BY g.id
+      ORDER BY g.first_name, g.last_name
     `);
     res.json(result.rows);
   } catch (error) {
@@ -23,8 +36,22 @@ router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query(`
-      SELECT * 
-      FROM guests WHERE id = $1
+      SELECT g.*,
+             COALESCE(
+               JSON_AGG(
+                 JSON_BUILD_OBJECT(
+                   'id', t.id,
+                   'name', t.name,
+                   'color', t.color
+                 ) ORDER BY t.name
+               ) FILTER (WHERE t.id IS NOT NULL),
+               '[]'::json
+             ) as tags
+      FROM guests g
+      LEFT JOIN guest_tags gt ON g.id = gt.guest_id
+      LEFT JOIN tags t ON gt.tag_id = t.id
+      WHERE g.id = $1
+      GROUP BY g.id
     `, [id]);
     
     if (result.rows.length === 0) {

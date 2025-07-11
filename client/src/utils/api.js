@@ -58,4 +58,15 @@ export const templateApi = {
   preview: (editionId, language) => api.get(`/templates/preview/edition/${editionId}/language/${language}`),
 }
 
+// Tags API
+export const tagApi = {
+  getAll: () => api.get('/tags'),
+  create: (tag) => api.post('/tags', tag),
+  update: (id, tag) => api.put(`/tags/${id}`, tag),
+  delete: (id) => api.delete(`/tags/${id}`),
+  assignToGuest: (guestId, tagId) => api.post('/tags/assign', { guest_id: guestId, tag_id: tagId }),
+  removeFromGuest: (guestId, tagId) => api.delete(`/tags/assign/${guestId}/${tagId}`),
+  getGuestTags: (guestId) => api.get(`/tags/guest/${guestId}`),
+}
+
 export default api
