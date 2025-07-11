@@ -30,6 +30,8 @@ export const editionApi = {
     api.put(`/editions/${editionId}/guests/${assignmentId}`, data),
   removeGuest: (editionId, assignmentId) => 
     api.delete(`/editions/${editionId}/guests/${assignmentId}`),
+  confirmGuest: (editionId, assignmentId) => 
+    api.put(`/editions/${editionId}/guests/${assignmentId}/confirm`),
 }
 
 // Create a separate axios instance for public endpoints (no credentials)

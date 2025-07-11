@@ -163,4 +163,51 @@ router.delete('/:id/guests/:assignmentId', async (req, res) => {
   }
 });
 
+// Manually confirm guest invitation
+router.put('/:id/guests/:assignmentId/confirm', async (req, res) => {
+  try {
+    const { id, assignmentId } = req.params;
+    
+    // First check if the assignment exists and is invited
+    const checkResult = await pool.query(
+      'SELECT * FROM guest_editions WHERE id = $1 AND edition_id = $2',
+      [assignmentId, id]
+    );
+    
+    if (checkResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Assignment not found' });
+    }
+    
+    const assignment = checkResult.rows[0];
+    
+    if (!assignment.invited_at) {
+      return res.status(400).json({ error: 'Guest has not been invited yet' });
+    }
+    
+    if (assignment.confirmed_at) {
+      return res.status(400).json({ error: 'Guest is already confirmed' });
+    }
+    
+    // Update the assignment to mark as confirmed
+    const result = await pool.query(
+      'UPDATE guest_editions SET confirmed_at = CURRENT_TIMESTAMP WHERE id = $1 AND edition_id = $2 RETURNING *',
+      [assignmentId, id]
+    );
+    
+    // Get full guest info for response
+    const guestResult = await pool.query(`
+      SELECT g.*, g.first_name || ' ' || g.last_name as name,
+             ge.category, ge.invited_at, ge.confirmed_at, ge.id as assignment_id
+      FROM guests g
+      JOIN guest_editions ge ON g.id = ge.guest_id
+      WHERE ge.id = $1
+    `, [assignmentId]);
+    
+    res.json(guestResult.rows[0]);
+  } catch (error) {
+    logError(error, req, { operation: 'confirm_guest_invitation', editionId: req.params.id, assignmentId: req.params.assignmentId });
+    res.status(500).json({ error: error.message });
+  }
+});
+
 module.exports = router;

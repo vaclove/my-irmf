@@ -79,6 +79,19 @@ function EditionDetail() {
     fetchEditionData()
   }
 
+  const handleConfirmInvitation = async (guest) => {
+    if (window.confirm(`Are you sure you want to manually confirm ${guest.first_name} ${guest.last_name}'s invitation?`)) {
+      try {
+        // Call API to confirm the invitation
+        await editionApi.confirmGuest(id, guest.assignment_id)
+        await fetchEditionData()
+      } catch (error) {
+        console.error('Error confirming invitation:', error)
+        alert('Failed to confirm invitation: ' + (error.response?.data?.error || error.message))
+      }
+    }
+  }
+
   const resetAssignForm = () => {
     setSelectedGuest('')
     setSelectedCategory('guest')
@@ -320,6 +333,14 @@ function EditionDetail() {
                           className="bg-green-600 text-white px-3 py-1 rounded text-xs hover:bg-green-700"
                         >
                           Send Invite
+                        </button>
+                      )}
+                      {guest.invited_at && !guest.confirmed_at && (
+                        <button
+                          onClick={() => handleConfirmInvitation(guest)}
+                          className="bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700"
+                        >
+                          Confirm
                         </button>
                       )}
                       <button
