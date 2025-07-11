@@ -6,6 +6,7 @@ const passport = require('passport');
 require('dotenv').config();
 
 const { initializeAuth, requireIrmfDomain } = require('./middleware/auth');
+const { requestLogger, errorLogger } = require('./middleware/logging');
 const guestRoutes = require('./routes/guests');
 const editionRoutes = require('./routes/editions');
 const invitationRoutes = require('./routes/invitations');
@@ -25,6 +26,9 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json());
+
+// Request logging middleware
+app.use(requestLogger);
 
 // Session configuration
 app.use(session({
@@ -56,6 +60,9 @@ app.use('/api/templates', requireIrmfDomain, templateRoutes);
 app.get('/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
+
+// Global error handling middleware (must be last)
+app.use(errorLogger);
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);

@@ -1,5 +1,6 @@
 const express = require('express');
 const passport = require('passport');
+const { logError } = require('../utils/logger');
 const router = express.Router();
 
 // Google OAuth routes
@@ -37,6 +38,7 @@ router.get('/user', (req, res) => {
 router.post('/logout', (req, res) => {
   req.logout((err) => {
     if (err) {
+      logError(err, req, { operation: 'logout' });
       return res.status(500).json({ error: 'Logout failed' });
     }
     res.json({ message: 'Logged out successfully' });

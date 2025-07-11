@@ -1,5 +1,6 @@
 const express = require('express');
 const { pool } = require('../models/database');
+const { logError } = require('../utils/logger');
 const router = express.Router();
 
 // Get all editions
@@ -8,6 +9,7 @@ router.get('/', async (req, res) => {
     const result = await pool.query('SELECT * FROM editions ORDER BY year DESC');
     res.json(result.rows);
   } catch (error) {
+    logError(error, req, { operation: 'get_all_editions' });
     res.status(500).json({ error: error.message });
   }
 });
@@ -24,6 +26,7 @@ router.get('/:id', async (req, res) => {
     
     res.json(result.rows[0]);
   } catch (error) {
+    logError(error, req, { operation: 'get_edition_by_id', editionId: req.params.id });
     res.status(500).json({ error: error.message });
   }
 });
@@ -47,6 +50,7 @@ router.post('/', async (req, res) => {
     if (error.code === '23505') {
       return res.status(400).json({ error: 'Year already exists' });
     }
+    logError(error, req, { operation: 'create_edition', formData: req.body });
     res.status(500).json({ error: error.message });
   }
 });
@@ -57,15 +61,17 @@ router.get('/:id/guests', async (req, res) => {
     const { id } = req.params;
     
     const result = await pool.query(`
-      SELECT g.*, ge.category, ge.invited_at, ge.confirmed_at, ge.id as assignment_id
+      SELECT g.*, g.first_name || ' ' || g.last_name as name, 
+             ge.category, ge.invited_at, ge.confirmed_at, ge.id as assignment_id
       FROM guests g
       JOIN guest_editions ge ON g.id = ge.guest_id
       WHERE ge.edition_id = $1
-      ORDER BY g.name
+      ORDER BY g.first_name, g.last_name
     `, [id]);
     
     res.json(result.rows);
   } catch (error) {
+    logError(error, req, { operation: 'get_edition_guests', editionId: req.params.id });
     res.status(500).json({ error: error.message });
   }
 });
@@ -92,7 +98,8 @@ router.post('/:id/guests', async (req, res) => {
     
     // Get full guest info
     const guestResult = await pool.query(`
-      SELECT g.*, ge.category, ge.invited_at, ge.confirmed_at, ge.id as assignment_id
+      SELECT g.*, g.first_name || ' ' || g.last_name as name,
+             ge.category, ge.invited_at, ge.confirmed_at, ge.id as assignment_id
       FROM guests g
       JOIN guest_editions ge ON g.id = ge.guest_id
       WHERE ge.id = $1
@@ -103,6 +110,7 @@ router.post('/:id/guests', async (req, res) => {
     if (error.code === '23505') {
       return res.status(400).json({ error: 'Guest already assigned to this edition' });
     }
+    logError(error, req, { operation: 'assign_guest_to_edition', editionId: req.params.id, formData: req.body });
     res.status(500).json({ error: error.message });
   }
 });
@@ -129,6 +137,7 @@ router.put('/:id/guests/:assignmentId', async (req, res) => {
     
     res.json(result.rows[0]);
   } catch (error) {
+    logError(error, req, { operation: 'update_guest_assignment', editionId: req.params.id, assignmentId: req.params.assignmentId, formData: req.body });
     res.status(500).json({ error: error.message });
   }
 });
@@ -149,6 +158,7 @@ router.delete('/:id/guests/:assignmentId', async (req, res) => {
     
     res.json({ message: 'Guest removed from edition successfully' });
   } catch (error) {
+    logError(error, req, { operation: 'remove_guest_from_edition', editionId: req.params.id, assignmentId: req.params.assignmentId });
     res.status(500).json({ error: error.message });
   }
 });

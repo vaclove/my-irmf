@@ -1,5 +1,6 @@
 const express = require('express');
 const { pool } = require('../models/database');
+const { logError } = require('../utils/logger');
 const router = express.Router();
 
 // Get all templates for an edition
@@ -15,6 +16,7 @@ router.get('/edition/:editionId', async (req, res) => {
     
     res.json(result.rows);
   } catch (error) {
+    logError(error, req, { operation: 'get_templates_by_edition', editionId: req.params.editionId });
     res.status(500).json({ error: error.message });
   }
 });
@@ -35,6 +37,7 @@ router.get('/edition/:editionId/language/:language', async (req, res) => {
     
     res.json(result.rows[0]);
   } catch (error) {
+    logError(error, req, { operation: 'get_template_by_edition_language', editionId: req.params.editionId, language: req.params.language });
     res.status(500).json({ error: error.message });
   }
 });
@@ -62,6 +65,7 @@ router.put('/edition/:editionId/language/:language', async (req, res) => {
     
     res.json(result.rows[0]);
   } catch (error) {
+    logError(error, req, { operation: 'create_update_template', editionId: req.params.editionId, language: req.params.language, formData: req.body });
     res.status(500).json({ error: error.message });
   }
 });
@@ -76,6 +80,7 @@ router.get('/variables', async (req, res) => {
     
     res.json(result.rows);
   } catch (error) {
+    logError(error, req, { operation: 'get_template_variables' });
     res.status(500).json({ error: error.message });
   }
 });
@@ -132,6 +137,7 @@ router.get('/preview/edition/:editionId/language/:language', async (req, res) =>
       html_content: previewContent
     });
   } catch (error) {
+    logError(error, req, { operation: 'preview_template', editionId: req.params.editionId, language: req.params.language });
     res.status(500).json({ error: error.message });
   }
 });

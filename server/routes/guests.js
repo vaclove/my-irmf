@@ -1,13 +1,19 @@
 const express = require('express');
 const { pool } = require('../models/database');
+const { logError } = require('../utils/logger');
 const router = express.Router();
 
 // Get all guests
 router.get('/', async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM guests ORDER BY name');
+    const result = await pool.query(`
+      SELECT *, first_name || ' ' || last_name as name 
+      FROM guests 
+      ORDER BY first_name, last_name
+    `);
     res.json(result.rows);
   } catch (error) {
+    logError(error, req, { operation: 'get_all_guests' });
     res.status(500).json({ error: error.message });
   }
 });
@@ -16,7 +22,10 @@ router.get('/', async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await pool.query('SELECT * FROM guests WHERE id = $1', [id]);
+    const result = await pool.query(`
+      SELECT *, first_name || ' ' || last_name as name 
+      FROM guests WHERE id = $1
+    `, [id]);
     
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Guest not found' });
@@ -24,6 +33,7 @@ router.get('/:id', async (req, res) => {
     
     res.json(result.rows[0]);
   } catch (error) {
+    logError(error, req, { operation: 'get_guest_by_id', guestId: id });
     res.status(500).json({ error: error.message });
   }
 });
@@ -31,10 +41,10 @@ router.get('/:id', async (req, res) => {
 // Create new guest
 router.post('/', async (req, res) => {
   try {
-    const { name, email, phone, language, company, note } = req.body;
+    const { first_name, last_name, email, phone, language, company, notes } = req.body;
     
-    if (!name || !email) {
-      return res.status(400).json({ error: 'Name and email are required' });
+    if (!first_name || !last_name || !email) {
+      return res.status(400).json({ error: 'First name, last name, and email are required' });
     }
     
     // Validate language if provided
@@ -43,8 +53,10 @@ router.post('/', async (req, res) => {
     }
     
     const result = await pool.query(
-      'INSERT INTO guests (name, email, phone, language, company, note) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-      [name, email, phone, language || 'english', company, note]
+      `INSERT INTO guests (first_name, last_name, name, email, phone, language, company, notes) 
+       VALUES ($1, $2, $1::text || ' ' || $2::text, $3, $4, $5, $6, $7) 
+       RETURNING *, first_name || ' ' || last_name as name`,
+      [first_name, last_name, email, phone, language || 'english', company, notes]
     );
     
     res.status(201).json(result.rows[0]);
@@ -52,6 +64,7 @@ router.post('/', async (req, res) => {
     if (error.code === '23505') {
       return res.status(400).json({ error: 'Email already exists' });
     }
+    logError(error, req, { operation: 'create_guest', formData: req.body });
     res.status(500).json({ error: error.message });
   }
 });
@@ -60,7 +73,7 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, email, phone, language, company, note } = req.body;
+    const { first_name, last_name, email, phone, language, company, notes } = req.body;
     
     // Validate language if provided
     if (language && !['czech', 'english'].includes(language)) {
@@ -68,8 +81,19 @@ router.put('/:id', async (req, res) => {
     }
     
     const result = await pool.query(
-      'UPDATE guests SET name = $1, email = $2, phone = $3, language = $4, company = $5, note = $6, updated_at = CURRENT_TIMESTAMP WHERE id = $7 RETURNING *',
-      [name, email, phone, language, company, note, id]
+      `UPDATE guests SET 
+       first_name = $1, 
+       last_name = $2, 
+       name = $1::text || ' ' || $2::text,
+       email = $3, 
+       phone = $4, 
+       language = $5, 
+       company = $6, 
+       notes = $7, 
+       updated_at = CURRENT_TIMESTAMP 
+       WHERE id = $8 
+       RETURNING *, first_name || ' ' || last_name as name`,
+      [first_name, last_name, email, phone, language, company, notes, id]
     );
     
     if (result.rows.length === 0) {
@@ -78,6 +102,7 @@ router.put('/:id', async (req, res) => {
     
     res.json(result.rows[0]);
   } catch (error) {
+    logError(error, req, { operation: 'update_guest', guestId: req.params.id, formData: req.body });
     res.status(500).json({ error: error.message });
   }
 });
@@ -94,6 +119,7 @@ router.delete('/:id', async (req, res) => {
     
     res.json({ message: 'Guest deleted successfully' });
   } catch (error) {
+    logError(error, req, { operation: 'delete_guest', guestId: req.params.id });
     res.status(500).json({ error: error.message });
   }
 });
@@ -116,6 +142,7 @@ router.get('/:id/editions/:editionId', async (req, res) => {
     
     res.json(result.rows[0]);
   } catch (error) {
+    logError(error, req, { operation: 'get_guest_edition_assignment', guestId: req.params.id, editionId: req.params.editionId });
     res.status(500).json({ error: error.message });
   }
 });

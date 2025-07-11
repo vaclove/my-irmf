@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 const mailgunService = require('../utils/mailgun');
 const { pool } = require('../models/database');
+const { logError } = require('../utils/logger');
 const router = express.Router();
 
 // Email transporter setup (fallback for SMTP)
@@ -91,7 +92,8 @@ router.post('/send', async (req, res) => {
     
     // Check if assignment exists and get guest/edition info
     const assignmentResult = await pool.query(`
-      SELECT ge.*, g.name, g.email, g.language as guest_language, g.company, 
+      SELECT ge.*, g.first_name || ' ' || g.last_name as name, 
+             g.first_name, g.last_name, g.email, g.language as guest_language, g.company, 
              e.name as edition_name, e.year
       FROM guest_editions ge
       JOIN guests g ON ge.guest_id = g.id
@@ -185,11 +187,12 @@ router.post('/send', async (req, res) => {
         covered_nights
       });
     } catch (emailError) {
-      console.error('Email error:', emailError);
+      logError(emailError, req, { operation: 'send_invitation_email', guestId: guest_id, editionId: edition_id });
       res.status(500).json({ error: 'Failed to send email: ' + emailError.message });
     }
     
   } catch (error) {
+    logError(error, req, { operation: 'send_invitation', guestId: guest_id, editionId: edition_id, formData: req.body });
     res.status(500).json({ error: error.message });
   }
 });

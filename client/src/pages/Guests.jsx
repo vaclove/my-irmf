@@ -7,12 +7,13 @@ function Guests() {
   const [showForm, setShowForm] = useState(false)
   const [editingGuest, setEditingGuest] = useState(null)
   const [formData, setFormData] = useState({ 
-    name: '', 
+    first_name: '', 
+    last_name: '',
     email: '', 
     phone: '', 
     language: 'english', 
     company: '', 
-    note: '' 
+    notes: '' 
   })
 
   useEffect(() => {
@@ -48,12 +49,13 @@ function Guests() {
   const handleEdit = (guest) => {
     setEditingGuest(guest)
     setFormData({ 
-      name: guest.name, 
+      first_name: guest.first_name || '', 
+      last_name: guest.last_name || '',
       email: guest.email, 
       phone: guest.phone || '',
       language: guest.language || 'english',
       company: guest.company || '',
-      note: guest.note || ''
+      notes: guest.notes || ''
     })
     setShowForm(true)
   }
@@ -71,12 +73,13 @@ function Guests() {
 
   const resetForm = () => {
     setFormData({ 
-      name: '', 
+      first_name: '', 
+      last_name: '',
       email: '', 
       phone: '', 
       language: 'english', 
       company: '', 
-      note: '' 
+      notes: '' 
     })
     setEditingGuest(null)
     setShowForm(false)
@@ -104,15 +107,27 @@ function Guests() {
             {editingGuest ? 'Edit Guest' : 'Add New Guest'}
           </h2>
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Name</label>
-              <input
-                type="text"
-                required
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
-              />
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700">First Name</label>
+                <input
+                  type="text"
+                  required
+                  value={formData.first_name}
+                  onChange={(e) => setFormData({ ...formData, first_name: e.target.value })}
+                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Last Name</label>
+                <input
+                  type="text"
+                  required
+                  value={formData.last_name}
+                  onChange={(e) => setFormData({ ...formData, last_name: e.target.value })}
+                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
+                />
+              </div>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">Email</label>
@@ -154,10 +169,10 @@ function Guests() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700">Note (optional)</label>
+              <label className="block text-sm font-medium text-gray-700">Notes (optional)</label>
               <textarea
-                value={formData.note}
-                onChange={(e) => setFormData({ ...formData, note: e.target.value })}
+                value={formData.notes}
+                onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
                 rows="3"
                 className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
                 placeholder="Additional notes about the guest..."
@@ -195,7 +210,7 @@ function Guests() {
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Phone</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Language</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Company</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Note</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Notes</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Created</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
               </tr>
@@ -225,8 +240,8 @@ function Guests() {
                     {guest.company || '-'}
                   </td>
                   <td className="px-6 py-4 text-sm text-gray-500 max-w-xs">
-                    <div className="truncate" title={guest.note}>
-                      {guest.note || '-'}
+                    <div className="truncate" title={guest.notes}>
+                      {guest.notes || '-'}
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">

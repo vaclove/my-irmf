@@ -1,5 +1,6 @@
 const express = require('express');
 const { pool } = require('../models/database');
+const { logError } = require('../utils/logger');
 const router = express.Router();
 
 // Confirm invitation - public route (no authentication required)
@@ -37,6 +38,7 @@ router.post('/invitations/confirm/:token', async (req, res) => {
     });
     
   } catch (error) {
+    logError(error, req, { operation: 'confirm_invitation', token: req.params.token });
     res.status(500).json({ error: error.message });
   }
 });
@@ -71,6 +73,7 @@ router.get('/invitations/status/:guest_id/:edition_id', async (req, res) => {
     });
     
   } catch (error) {
+    logError(error, req, { operation: 'get_invitation_status', guestId: req.params.guest_id, editionId: req.params.edition_id });
     res.status(500).json({ error: error.message });
   }
 });
