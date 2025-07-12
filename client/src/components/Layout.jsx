@@ -18,7 +18,13 @@ function Layout({ children }) {
           <div className="flex justify-between h-16">
             <div className="flex">
               <div className="flex-shrink-0 flex items-center">
-                <h1 className="text-xl font-bold text-gray-900">🎬 Festival Manager</h1>
+                <Link to="/" className="flex items-center">
+                  <img 
+                    src="https://irmf.cz/wp-content/uploads/2022/07/irmf_web_logo_90px_black.png" 
+                    alt="IRMF Logo" 
+                    className="h-8 w-auto"
+                  />
+                </Link>
               </div>
               <div className="ml-6 flex space-x-8">
                 <Link
