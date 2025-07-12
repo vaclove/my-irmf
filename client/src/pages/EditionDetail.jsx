@@ -14,6 +14,8 @@ function EditionDetail() {
   const [selectedGuestForInvitation, setSelectedGuestForInvitation] = useState(null)
   const [filterCategory, setFilterCategory] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
+  const [resendingGuestId, setResendingGuestId] = useState(null)
+  const [resendSuccess, setResendSuccess] = useState(null)
 
   // Categories are now determined from tags automatically
   const categories = ['filmmaker', 'press', 'guest', 'staff'] // For filtering only
@@ -51,6 +53,31 @@ function EditionDetail() {
 
   const handleInvitationSent = () => {
     fetchEditionData()
+  }
+
+  const handleResendInvitation = async (guest) => {
+    try {
+      setResendingGuestId(guest.id)
+      setResendSuccess(null)
+      
+      await invitationApi.resend({
+        guest_id: guest.id,
+        edition_id: id
+      })
+      
+      setResendSuccess(guest.id)
+      fetchEditionData()
+      
+      // Clear success message after 3 seconds
+      setTimeout(() => {
+        setResendSuccess(null)
+      }, 3000)
+      
+    } catch (error) {
+      console.error('Error resending invitation:', error)
+    } finally {
+      setResendingGuestId(null)
+    }
   }
 
   // Invitation confirmation removed - will be reimplemented with new tag-based system
@@ -254,15 +281,34 @@ function EditionDetail() {
                     {getStatusBadge(guest)}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">
-                    <div className="flex space-x-2">
-                      {!guest.invited_at && (
+                    <div className="flex space-x-2 items-center">
+                      {!guest.invited_at ? (
                         <button
                           onClick={() => handleSendInvitation(guest)}
                           className="bg-green-600 text-white px-3 py-1 rounded text-xs hover:bg-green-700"
                         >
                           Send Invite
                         </button>
-                      )}
+                      ) : guest.invited_at && !guest.confirmed_at ? (
+                        <>
+                          <button
+                            onClick={() => handleResendInvitation(guest)}
+                            disabled={resendingGuestId === guest.id}
+                            className={`px-3 py-1 rounded text-xs ${
+                              resendingGuestId === guest.id
+                                ? 'bg-gray-400 text-white cursor-not-allowed'
+                                : 'bg-blue-600 text-white hover:bg-blue-700'
+                            }`}
+                          >
+                            {resendingGuestId === guest.id ? 'Sending...' : 'Resend Invite'}
+                          </button>
+                          {resendSuccess === guest.id && (
+                            <span className="text-green-600 text-xs font-medium">
+                              ✓ Resent!
+                            </span>
+                          )}
+                        </>
+                      ) : null}
                     </div>
                   </td>
                 </tr>
