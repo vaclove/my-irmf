@@ -4,7 +4,7 @@ const { logError } = require('../utils/logger');
 const router = express.Router();
 
 // Confirm invitation - public route (no authentication required)
-router.post('/invitations/confirm/:token', async (req, res) => {
+router.post('/confirm/:token', async (req, res) => {
   try {
     const { token } = req.params;
     
@@ -63,7 +63,7 @@ router.post('/invitations/confirm/:token', async (req, res) => {
 });
 
 // Get invitation status - public route
-router.get('/invitations/status/:guest_id/:edition_id', async (req, res) => {
+router.get('/status/:guest_id/:edition_id', async (req, res) => {
   try {
     const { guest_id, edition_id } = req.params;
     

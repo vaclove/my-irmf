@@ -50,7 +50,7 @@ app.use(passport.session());
 // Authentication routes (no auth required)
 app.use('/auth', authRoutes);
 
-// Public routes (no auth required)
+// Public routes (no auth required) - must come before protected routes to avoid conflicts
 app.use('/api', publicRoutes);
 
 // Protected API routes (require @irmf.cz domain)

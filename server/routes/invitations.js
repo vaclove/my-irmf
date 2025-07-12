@@ -350,11 +350,12 @@ router.post('/resend', async (req, res) => {
       
       await sendEmail(emailData);
       
-      // Update invitation with new token and timestamp
+      // Update invitation with new token and timestamp, clear previous confirmation
       await pool.query(
         `UPDATE guest_invitations 
          SET invited_at = CURRENT_TIMESTAMP,
              confirmation_token = $3,
+             confirmed_at = NULL,
              updated_at = CURRENT_TIMESTAMP
          WHERE guest_id = $1 AND edition_id = $2`,
         [guest_id, edition_id, confirmationToken]
