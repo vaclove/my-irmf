@@ -122,7 +122,7 @@ az webapp config ssl bind \
 az webapp deployment source config \
   --name my-irmf-festival \
   --resource-group festival-app-rg \
-  --repo-url https://github.com/vaclove/claude-test \
+  --repo-url https://github.com/vaclove/my-irmf \
   --branch main \
   --manual-integration
 ```

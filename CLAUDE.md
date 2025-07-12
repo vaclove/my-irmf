@@ -4,32 +4,41 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository Information
 
-This is a fresh repository connected to GitHub at: https://github.com/vaclove/claude-test
+This is a repository connected to GitHub at: https://github.com/vaclove/my-irmf
 
 ## Current State
 
-The repository is currently empty except for:
-- Git configuration
-- Claude Code settings in `.claude/settings.local.json`
+This repository contains a complete Movie Festival Guest Management System with:
+- Node.js/Express backend with PostgreSQL database
+- React frontend with Tailwind CSS
+- Google OAuth authentication
+- Email invitation system with Mailgun
+- Audit logging system
+- Tag-based guest assignment system
+- Azure deployment configuration
 
 ## Development Setup
 
-Since this is a new repository, the development setup will depend on what type of project is created. Common patterns to consider:
+This is a Node.js/JavaScript project with the following commands:
 
-### For Node.js/JavaScript projects:
-- `npm install` - Install dependencies
-- `npm run dev` - Start development server
-- `npm run build` - Build for production
-- `npm test` - Run tests
-- `npm run lint` - Run linting
+### Development:
+- `npm install` - Install server dependencies
+- `cd client && npm install` - Install client dependencies
+- `npm run dev` - Start both server and client in development mode
+- `npm run server:dev` - Start only the backend server
+- `npm run client:dev` - Start only the frontend client
 
-### For Python projects:
-- `pip install -r requirements.txt` - Install dependencies
-- `python -m pytest` - Run tests
-- `python -m flake8` or `ruff check` - Run linting
+### Production:
+- `npm run build` - Build the React frontend for production
+- `npm run start` - Start the production server (serves both FE and BE)
+- `npm run test:production` - Test the full production build locally
 
-### For other project types:
-Commands will be added as the project structure is established.
+### Azure Deployment:
+- `npm run azure:build` - Build for Azure deployment
+- `npm run azure:start` - Start in Azure production mode
+
+### Database:
+- `npm run db:migrate` - Run database migrations
 
 ## Claude Code Configuration
 
