@@ -237,19 +237,11 @@ function EditionDetail() {
                           Send Invite
                         </button>
                       )}
-                      {guest.invited_at && !guest.confirmed_at && (
-                        <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-xs">
-                          Invited
-                        </span>
-                      )}
                       {guest.confirmed_at && (
                         <span className="bg-green-100 text-green-800 px-2 py-1 rounded text-xs">
                           Confirmed
                         </span>
                       )}
-                      <span className="text-gray-400 text-xs">
-                        Assignment via tags
-                      </span>
                     </div>
                   </td>
                 </tr>
