@@ -29,8 +29,8 @@ Copy `.env.production` and update with your production values:
 APP_URL=https://my.irmf.cz
 CLIENT_URL=https://my.irmf.cz
 
-# Database Configuration (Azure Database for PostgreSQL)
-DATABASE_URL=postgresql://username:password@your-server.postgres.database.azure.com:5432/festival_db?ssl=true
+# Database Configuration (Azure Database for PostgreSQL with Private Access)
+DATABASE_URL=postgresql://festival_admin:your-password@my-irmf.private.postgres.database.azure.com:5432/festival_db?sslmode=require
 
 # Server Configuration
 PORT=3001
@@ -58,21 +58,23 @@ BYPASS_AUTH_ON_LOCALHOST=false
 ### 1. Create Azure Resources
 
 ```bash
-# Create resource group
-az group create --name festival-app-rg --location eastus
+# Resource group already exists: irmf-cz in West Europe
+# Virtual network already exists: my-irmf
+# PostgreSQL already exists: my-irmf.private.postgres.database.azure.com
 
-# Create App Service plan
+# Create App Service plan in existing resource group
 az appservice plan create \
-  --name festival-app-plan \
-  --resource-group festival-app-rg \
+  --name my-irmf-app-plan \
+  --resource-group irmf-cz \
+  --location westeurope \
   --sku B1 \
   --is-linux
 
 # Create web app
 az webapp create \
-  --name my-irmf-festival \
-  --resource-group festival-app-rg \
-  --plan festival-app-plan \
+  --name my-irmf \
+  --resource-group irmf-cz \
+  --plan my-irmf-app-plan \
   --runtime "NODE|18-lts"
 ```
 
@@ -81,13 +83,13 @@ az webapp create \
 ```bash
 # Set application settings
 az webapp config appsettings set \
-  --name my-irmf-festival \
-  --resource-group festival-app-rg \
+  --name my-irmf \
+  --resource-group irmf-cz \
   --settings \
   NODE_ENV=production \
   APP_URL=https://my.irmf.cz \
   CLIENT_URL=https://my.irmf.cz \
-  DATABASE_URL="your-database-connection-string" \
+  DATABASE_URL="postgresql://festival_admin:your-password@my-irmf.private.postgres.database.azure.com:5432/festival_db?sslmode=require" \
   JWT_SECRET="your-jwt-secret" \
   SESSION_SECRET="your-session-secret" \
   MAILGUN_API_KEY="your-mailgun-key" \
@@ -103,25 +105,41 @@ az webapp config appsettings set \
 ```bash
 # Add custom domain
 az webapp config hostname add \
-  --webapp-name my-irmf-festival \
-  --resource-group festival-app-rg \
+  --webapp-name my-irmf \
+  --resource-group irmf-cz \
   --hostname my.irmf.cz
 
-# Enable HTTPS
+# Enable HTTPS (managed certificate recommended)
 az webapp config ssl bind \
-  --name my-irmf-festival \
-  --resource-group festival-app-rg \
+  --name my-irmf \
+  --resource-group irmf-cz \
   --certificate-thumbprint your-cert-thumbprint \
   --ssl-type SNI
 ```
 
-### 4. Deploy from GitHub
+### 4. Configure VNet Integration
+
+```bash
+# Enable VNet integration for private database access
+az webapp vnet-integration add \
+  --name my-irmf \
+  --resource-group irmf-cz \
+  --vnet my-irmf \
+  --subnet app-subnet
+
+# Verify VNet integration
+az webapp vnet-integration list \
+  --name my-irmf \
+  --resource-group irmf-cz
+```
+
+### 5. Deploy from GitHub
 
 ```bash
 # Configure GitHub deployment
 az webapp deployment source config \
-  --name my-irmf-festival \
-  --resource-group festival-app-rg \
+  --name my-irmf \
+  --resource-group irmf-cz \
   --repo-url https://github.com/vaclove/my-irmf \
   --branch main \
   --manual-integration
@@ -158,42 +176,41 @@ The application will be available at `http://localhost:3001` with:
 
 ## Database Setup
 
-### Azure Database for PostgreSQL
+### Azure Database for PostgreSQL (Already Created)
 
-1. Create the database:
-```bash
-az postgres server create \
-  --resource-group festival-app-rg \
-  --name festival-db-server \
-  --location eastus \
-  --admin-user festival_admin \
-  --admin-password "YourSecurePassword" \
-  --sku-name GP_Gen5_2
-```
+Your PostgreSQL database is already configured with:
+- **Server**: `my-irmf.private.postgres.database.azure.com`
+- **Resource Group**: `irmf-cz`
+- **Region**: `West Europe`
+- **Network**: Private access via VNet `my-irmf`
 
-2. Create the database:
-```bash
-az postgres db create \
-  --resource-group festival-app-rg \
-  --server-name festival-db-server \
-  --name festival_db
-```
+### Database Initialization
 
-3. Configure firewall to allow Azure services:
-```bash
-az postgres server firewall-rule create \
-  --resource-group festival-app-rg \
-  --server festival-db-server \
-  --name AllowAzureServices \
-  --start-ip-address 0.0.0.0 \
-  --end-ip-address 0.0.0.0
-```
-
-4. Run database migrations:
+1. Connect to your database and run the initialization script:
 ```bash
 # Connect to your Azure database and run the init.sql script
-psql "postgresql://festival_admin:YourSecurePassword@festival-db-server.postgres.database.azure.com:5432/festival_db?ssl=true" -f server/scripts/init.sql
+psql "postgresql://festival_admin:your-password@my-irmf.private.postgres.database.azure.com:5432/festival_db?sslmode=require" -f server/scripts/init.sql
 ```
+
+2. Run any additional migration scripts:
+```bash
+# Run migration scripts in order
+psql "postgresql://festival_admin:your-password@my-irmf.private.postgres.database.azure.com:5432/festival_db?sslmode=require" -f server/scripts/add_guest_attributes.sql
+psql "postgresql://festival_admin:your-password@my-irmf.private.postgres.database.azure.com:5432/festival_db?sslmode=require" -f server/scripts/split_name_fields.sql
+psql "postgresql://festival_admin:your-password@my-irmf.private.postgres.database.azure.com:5432/festival_db?sslmode=require" -f server/scripts/remove_name_field.sql
+psql "postgresql://festival_admin:your-password@my-irmf.private.postgres.database.azure.com:5432/festival_db?sslmode=require" -f server/scripts/add_guest_tags.sql
+psql "postgresql://festival_admin:your-password@my-irmf.private.postgres.database.azure.com:5432/festival_db?sslmode=require" -f server/scripts/migrate_to_tag_based_assignments.sql
+psql "postgresql://festival_admin:your-password@my-irmf.private.postgres.database.azure.com:5432/festival_db?sslmode=require" -f server/scripts/create_invitation_tracking.sql
+psql "postgresql://festival_admin:your-password@my-irmf.private.postgres.database.azure.com:5432/festival_db?sslmode=require" -f server/scripts/create_audit_logs.sql
+```
+
+### Network Security
+
+Since you're using **Private Access (VNet Integration)**:
+- ✅ Database is not accessible from the public internet
+- ✅ App Service connects via VNet `my-irmf`
+- ✅ No firewall rules needed for public IP addresses
+- ✅ Enhanced security with network isolation
 
 ## Production Considerations
 
@@ -236,11 +253,14 @@ psql "postgresql://festival_admin:YourSecurePassword@festival-db-server.postgres
 
 ```bash
 # Restart the application
-az webapp restart --name my-irmf-festival --resource-group festival-app-rg
+az webapp restart --name my-irmf --resource-group irmf-cz
 
 # View logs
-az webapp log tail --name my-irmf-festival --resource-group festival-app-rg
+az webapp log tail --name my-irmf --resource-group irmf-cz
 
 # SSH into the container (for debugging)
-az webapp ssh --name my-irmf-festival --resource-group festival-app-rg
+az webapp ssh --name my-irmf --resource-group irmf-cz
+
+# Check VNet integration status
+az webapp vnet-integration list --name my-irmf --resource-group irmf-cz
 ```
