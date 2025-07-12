@@ -3,6 +3,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const session = require('express-session');
 const passport = require('passport');
+const path = require('path');
 require('dotenv').config();
 
 const { initializeAuth, requireIrmfDomain } = require('./middleware/auth');
@@ -24,7 +25,9 @@ initializeAuth();
 
 app.use(helmet());
 app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:5173',
+  origin: process.env.NODE_ENV === 'production' 
+    ? process.env.APP_URL || 'https://my.irmf.cz'
+    : (process.env.CLIENT_URL || 'http://localhost:5173'),
   credentials: true
 }));
 app.use(express.json());
@@ -65,9 +68,24 @@ app.get('/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
+// In production, serve static files from React build
+if (process.env.NODE_ENV === 'production') {
+  // Serve static files from React build
+  app.use(express.static(path.join(__dirname, '../client/dist')));
+  
+  // Handle React routing - return all non-API requests to React app
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, '../client/dist', 'index.html'));
+  });
+}
+
 // Global error handling middleware (must be last)
 app.use(errorLogger);
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  if (process.env.NODE_ENV === 'production') {
+    console.log('Serving static files from client/dist');
+  }
 });
