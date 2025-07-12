@@ -55,13 +55,39 @@ function EditionDetail() {
 
   // Invitation confirmation removed - will be reimplemented with new tag-based system
 
+  const formatDate = (dateString) => {
+    if (!dateString) return null
+    const date = new Date(dateString)
+    return date.toLocaleDateString('en-US', { 
+      year: 'numeric', 
+      month: 'short', 
+      day: 'numeric' 
+    })
+  }
+
   const getStatusBadge = (guest) => {
     if (guest.confirmed_at) {
-      return <span className="bg-green-100 text-green-800 px-2 py-1 rounded text-xs">Confirmed</span>
+      const confirmedDate = formatDate(guest.confirmed_at)
+      return (
+        <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-2 space-y-1 sm:space-y-0">
+          <span className="bg-green-100 text-green-800 px-2 py-1 rounded text-xs whitespace-nowrap">Confirmed</span>
+          {confirmedDate && (
+            <span className="text-xs text-gray-600 whitespace-nowrap">• {confirmedDate}</span>
+          )}
+        </div>
+      )
     } else if (guest.invited_at) {
-      return <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-xs">Invited</span>
+      const invitedDate = formatDate(guest.invited_at)
+      return (
+        <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-2 space-y-1 sm:space-y-0">
+          <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-xs whitespace-nowrap">Invited</span>
+          {invitedDate && (
+            <span className="text-xs text-gray-600 whitespace-nowrap">• {invitedDate}</span>
+          )}
+        </div>
+      )
     } else {
-      return <span className="bg-gray-100 text-gray-800 px-2 py-1 rounded text-xs">Not Invited</span>
+      return <span className="bg-gray-100 text-gray-800 px-2 py-1 rounded text-xs whitespace-nowrap">Not Invited</span>
     }
   }
 
@@ -224,7 +250,7 @@ function EditionDetail() {
                   <td className="px-6 py-4 whitespace-nowrap">
                     {getCategoryBadge(guest.category)}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
+                  <td className="px-6 py-4">
                     {getStatusBadge(guest)}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">
@@ -236,11 +262,6 @@ function EditionDetail() {
                         >
                           Send Invite
                         </button>
-                      )}
-                      {guest.confirmed_at && (
-                        <span className="bg-green-100 text-green-800 px-2 py-1 rounded text-xs">
-                          Confirmed
-                        </span>
                       )}
                     </div>
                   </td>
