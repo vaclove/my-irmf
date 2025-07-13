@@ -39,6 +39,7 @@ app.use(requestLogger);
 
 // Session configuration with PostgreSQL store
 app.use(session({
+  name: 'irmf.session', // Custom session cookie name
   store: new pgSession({
     pool: pool,
     tableName: 'session'
@@ -48,10 +49,9 @@ app.use(session({
   saveUninitialized: false,
   cookie: {
     secure: process.env.NODE_ENV === 'production',
-    httpOnly: true,
+    httpOnly: false, // Try with httpOnly false to see if that's blocking it
     maxAge: 24 * 60 * 60 * 1000, // 24 hours
-    sameSite: 'lax', // Use 'lax' for both dev and production to allow OAuth redirects
-    domain: process.env.NODE_ENV === 'production' ? '.irmf.cz' : undefined
+    sameSite: 'lax' // Use 'lax' for both dev and production to allow OAuth redirects
   }
 }));
 
