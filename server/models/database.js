@@ -1,11 +1,8 @@
 const { Pool } = require('pg');
 
 const pool = new Pool({
-  user: 'festival_user',
-  host: 'localhost',
-  database: 'festival_db',
-  password: 'festival_pass',
-  port: 5432,
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 });
 
 const createTables = async () => {
