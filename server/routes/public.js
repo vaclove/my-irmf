@@ -33,7 +33,7 @@ router.post('/confirm/:token', async (req, res) => {
       FROM guest_invitations gi
       JOIN guests g ON gi.guest_id = g.id
       JOIN editions e ON gi.edition_id = e.id
-      WHERE gi.confirmation_token = $1 AND gi.confirmed_at IS NULL
+      WHERE gi.token = $1 AND gi.confirmed_at IS NULL
     `, [token]);
     
     if (result.rows.length === 0) {
@@ -42,7 +42,7 @@ router.post('/confirm/:token', async (req, res) => {
     
     // Update confirmation
     await pool.query(
-      'UPDATE guest_invitations SET confirmed_at = CURRENT_TIMESTAMP WHERE confirmation_token = $1',
+      'UPDATE guest_invitations SET confirmed_at = CURRENT_TIMESTAMP WHERE token = $1',
       [token]
     );
     
@@ -68,7 +68,7 @@ router.get('/status/:guest_id/:edition_id', async (req, res) => {
     const { guest_id, edition_id } = req.params;
     
     const result = await pool.query(`
-      SELECT gi.invited_at, gi.confirmed_at, gi.confirmation_token,
+      SELECT gi.invited_at, gi.confirmed_at, gi.token,
              g.first_name || ' ' || g.last_name as name, g.email, e.name as edition_name
       FROM guest_invitations gi
       JOIN guests g ON gi.guest_id = g.id
