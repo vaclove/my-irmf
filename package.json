@@ -11,6 +11,7 @@
     "start": "NODE_ENV=production node server/index.js",
     "start:dev": "node server/index.js",
     "db:migrate": "node server/scripts/migrate.js",
+    "db:status": "node server/scripts/migrate.js status",
     "azure:build": "npm install && cd client && npm install && npm run build",
     "azure:start": "NODE_ENV=production node server/index.js",
     "test:production": "npm run build && npm run start"

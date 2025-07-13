@@ -9,7 +9,8 @@ require('dotenv').config();
 
 const { initializeAuth, requireIrmfDomain } = require('./middleware/auth');
 const { requestLogger, errorLogger } = require('./middleware/logging');
-const { createTables, pool } = require('./models/database');
+const { pool } = require('./models/database');
+const { runMigrations } = require('./scripts/migrate');
 const guestRoutes = require('./routes/guests');
 const editionRoutes = require('./routes/editions');
 const invitationRoutes = require('./routes/invitations');
@@ -94,9 +95,14 @@ app.use(errorLogger);
 // Initialize database and start server
 const startServer = async () => {
   try {
-    console.log('Initializing database...');
-    await createTables();
-    console.log('Database initialized successfully');
+    console.log('Testing database connection...');
+    await pool.query('SELECT 1');
+    console.log('Database connection successful');
+    
+    // Auto-run migrations on startup
+    console.log('Running database migrations...');
+    await runMigrations();
+    console.log('Database migrations completed');
     
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
@@ -106,7 +112,7 @@ const startServer = async () => {
       }
     });
   } catch (error) {
-    console.error('Failed to initialize database:', error);
+    console.error('Failed to start server:', error);
     process.exit(1);
   }
 };
