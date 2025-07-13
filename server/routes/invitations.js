@@ -142,8 +142,10 @@ router.post('/send', async (req, res) => {
     // Get email template for the specified language
     const templateResult = await pool.query(`
       SELECT * FROM email_templates 
-      WHERE edition_id = $1 AND language = $2
-    `, [edition_id, emailLanguage]);
+      WHERE language = $1
+      ORDER BY created_at DESC
+      LIMIT 1
+    `, [emailLanguage]);
     
     if (templateResult.rows.length === 0) {
       return res.status(404).json({ 
@@ -169,7 +171,7 @@ router.post('/send', async (req, res) => {
     
     // Replace template variables
     let emailSubject = template.subject;
-    let emailHtml = template.html_content;
+    let emailHtml = template.body;
     
     Object.keys(templateData).forEach(key => {
       const placeholder = `{{${key}}}`;
@@ -297,8 +299,10 @@ router.post('/resend', async (req, res) => {
     // Get email template for the specified language
     const templateResult = await pool.query(`
       SELECT * FROM email_templates 
-      WHERE edition_id = $1 AND language = $2
-    `, [edition_id, emailLanguage]);
+      WHERE language = $1
+      ORDER BY created_at DESC
+      LIMIT 1
+    `, [emailLanguage]);
     
     if (templateResult.rows.length === 0) {
       return res.status(404).json({ 
@@ -324,7 +328,7 @@ router.post('/resend', async (req, res) => {
     
     // Replace template variables
     let emailSubject = template.subject;
-    let emailHtml = template.html_content;
+    let emailHtml = template.body;
     
     Object.keys(templateData).forEach(key => {
       const placeholder = `{{${key}}}`;
