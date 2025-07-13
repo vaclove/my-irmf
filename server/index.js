@@ -8,6 +8,7 @@ require('dotenv').config();
 
 const { initializeAuth, requireIrmfDomain } = require('./middleware/auth');
 const { requestLogger, errorLogger } = require('./middleware/logging');
+const { createTables } = require('./models/database');
 const guestRoutes = require('./routes/guests');
 const editionRoutes = require('./routes/editions');
 const invitationRoutes = require('./routes/invitations');
@@ -82,10 +83,24 @@ if (process.env.NODE_ENV === 'production') {
 // Global error handling middleware (must be last)
 app.use(errorLogger);
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-  if (process.env.NODE_ENV === 'production') {
-    console.log('Serving static files from client/dist');
+// Initialize database and start server
+const startServer = async () => {
+  try {
+    console.log('Initializing database...');
+    await createTables();
+    console.log('Database initialized successfully');
+    
+    app.listen(PORT, () => {
+      console.log(`Server running on port ${PORT}`);
+      console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+      if (process.env.NODE_ENV === 'production') {
+        console.log('Serving static files from client/dist');
+      }
+    });
+  } catch (error) {
+    console.error('Failed to initialize database:', error);
+    process.exit(1);
   }
-});
+};
+
+startServer();
