@@ -9,10 +9,8 @@ const createTables = async () => {
   const client = await pool.connect();
   try {
     await client.query(`
-      CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-      
       CREATE TABLE IF NOT EXISTS guests (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         name VARCHAR(255) NOT NULL,
         email VARCHAR(255) UNIQUE NOT NULL,
         phone VARCHAR(50),
@@ -21,7 +19,7 @@ const createTables = async () => {
       );
       
       CREATE TABLE IF NOT EXISTS editions (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         year INTEGER UNIQUE NOT NULL,
         name VARCHAR(255) NOT NULL,
         start_date DATE,
@@ -36,7 +34,7 @@ const createTables = async () => {
       END $$;
       
       CREATE TABLE IF NOT EXISTS guest_editions (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         guest_id UUID REFERENCES guests(id) ON DELETE CASCADE,
         edition_id UUID REFERENCES editions(id) ON DELETE CASCADE,
         category guest_category NOT NULL,
@@ -48,7 +46,7 @@ const createTables = async () => {
 
       -- Create audit logs table
       CREATE TABLE IF NOT EXISTS audit_logs (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         user_email VARCHAR(255),
         user_ip VARCHAR(45),
         action VARCHAR(50) NOT NULL,
