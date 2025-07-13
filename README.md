@@ -22,7 +22,7 @@ A complete guest management system for movie festivals with invitation workflows
 ## Quick Start
 
 ### Prerequisites
-- Node.js 18+
+- Node.js 22+
 - Docker & Docker Compose
 - Mailgun account (for email sending)
 

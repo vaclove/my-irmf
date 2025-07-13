@@ -15,7 +15,7 @@ https://my.irmf.cz/
 
 1. Azure subscription
 2. Azure CLI installed
-3. Node.js 18+ installed locally
+3. Node.js 22+ installed locally
 4. PostgreSQL database (Azure Database for PostgreSQL recommended)
 
 ## Environment Variables
@@ -75,7 +75,7 @@ az webapp create \
   --name my-irmf \
   --resource-group irmf-cz \
   --plan my-irmf-app-plan \
-  --runtime "NODE|18-lts"
+  --runtime "NODE|22-lts"
 ```
 
 ### 2. Configure Environment Variables
