@@ -127,6 +127,19 @@ const createTables = async () => {
       $func$ LANGUAGE plpgsql;
     `);
     console.log('✅ Audit logging function created');
+
+    // Step 8: Create session table for PostgreSQL session store
+    console.log('🗂️ Creating session table...');
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS "session" (
+        "sid" varchar PRIMARY KEY NOT NULL COLLATE "default",
+        "sess" json NOT NULL,
+        "expire" timestamp(6) NOT NULL
+      );
+      
+      CREATE INDEX IF NOT EXISTS "IDX_session_expire" ON "session" ("expire");
+    `);
+    console.log('✅ Session table created');
     
     console.log('🎉 Database migration completed successfully!');
   } finally {

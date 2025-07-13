@@ -2,13 +2,14 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const session = require('express-session');
+const pgSession = require('connect-pg-simple')(session);
 const passport = require('passport');
 const path = require('path');
 require('dotenv').config();
 
 const { initializeAuth, requireIrmfDomain } = require('./middleware/auth');
 const { requestLogger, errorLogger } = require('./middleware/logging');
-const { createTables } = require('./models/database');
+const { createTables, pool } = require('./models/database');
 const guestRoutes = require('./routes/guests');
 const editionRoutes = require('./routes/editions');
 const invitationRoutes = require('./routes/invitations');
@@ -36,8 +37,12 @@ app.use(express.json());
 // Request logging middleware
 app.use(requestLogger);
 
-// Session configuration
+// Session configuration with PostgreSQL store
 app.use(session({
+  store: new pgSession({
+    pool: pool,
+    tableName: 'session'
+  }),
   secret: process.env.SESSION_SECRET || 'your-secret-key-change-in-production',
   resave: false,
   saveUninitialized: false,
