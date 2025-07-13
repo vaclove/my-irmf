@@ -26,7 +26,14 @@ const PORT = process.env.PORT || 3001;
 // Initialize authentication
 initializeAuth();
 
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+      "img-src": ["'self'", "data:", "https://irmf.cz", "https://lh3.googleusercontent.com"],
+    },
+  },
+}));
 app.use(cors({
   origin: process.env.NODE_ENV === 'production' 
     ? process.env.APP_URL || 'https://my.irmf.cz'
