@@ -50,7 +50,8 @@ app.use(session({
     secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
     maxAge: 24 * 60 * 60 * 1000, // 24 hours
-    sameSite: 'lax' // Use 'lax' for both dev and production to allow OAuth redirects
+    sameSite: 'lax', // Use 'lax' for both dev and production to allow OAuth redirects
+    domain: process.env.NODE_ENV === 'production' ? '.irmf.cz' : undefined
   }
 }));
 

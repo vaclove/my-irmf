@@ -20,7 +20,10 @@ router.get('/google/callback',
         user: req.user,
         sessionID: req.sessionID,
         isAuthenticated: req.isAuthenticated(),
-        session: req.session
+        session: req.session,
+        cookieHeader: req.headers.cookie,
+        host: req.headers.host,
+        userAgent: req.headers['user-agent']
       });
       
       // Log successful authentication
@@ -31,6 +34,12 @@ router.get('/google/callback',
       
       const redirectUrl = process.env.CLIENT_URL || 'http://localhost:5173';
       console.log('🔀 Redirecting to:', redirectUrl);
+      
+      // Log response headers to see if cookie is being set
+      console.log('📤 Response headers will include:', {
+        setCookie: res.getHeaders()['set-cookie'],
+        location: redirectUrl
+      });
       
       // Successful authentication, redirect to frontend
       res.redirect(redirectUrl);
