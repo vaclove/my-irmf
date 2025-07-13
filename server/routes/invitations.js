@@ -200,22 +200,21 @@ router.post('/send', async (req, res) => {
       
       // Insert or update invitation tracking
       await pool.query(
-        `INSERT INTO guest_invitations (guest_id, edition_id, confirmation_token, accommodation, covered_nights)
-         VALUES ($1, $2, $3, $4, $5)
+        `INSERT INTO guest_invitations (guest_id, edition_id, token, invited_at, accommodation, covered_nights)
+         VALUES ($1, $2, $3, CURRENT_TIMESTAMP, $4, $5)
          ON CONFLICT (guest_id, edition_id) 
          DO UPDATE SET 
            invited_at = CURRENT_TIMESTAMP,
-           confirmation_token = $3,
+           token = $3,
            accommodation = $4,
-           covered_nights = $5,
-           updated_at = CURRENT_TIMESTAMP`,
+           covered_nights = $5`,
         [guest_id, edition_id, confirmationToken, accommodation, covered_nights]
       );
       
       res.json({ 
         message: 'Invitation sent successfully',
         invited_at: new Date().toISOString(),
-        confirmation_token: confirmationToken,
+        token: confirmationToken,
         language: emailLanguage,
         accommodation,
         covered_nights
@@ -359,9 +358,8 @@ router.post('/resend', async (req, res) => {
       await pool.query(
         `UPDATE guest_invitations 
          SET invited_at = CURRENT_TIMESTAMP,
-             confirmation_token = $3,
-             confirmed_at = NULL,
-             updated_at = CURRENT_TIMESTAMP
+             token = $3,
+             confirmed_at = NULL
          WHERE guest_id = $1 AND edition_id = $2`,
         [guest_id, edition_id, confirmationToken]
       );
@@ -369,7 +367,7 @@ router.post('/resend', async (req, res) => {
       res.json({ 
         message: 'Invitation resent successfully',
         invited_at: new Date().toISOString(),
-        confirmation_token: confirmationToken,
+        token: confirmationToken,
         language: emailLanguage,
         accommodation: invitation.accommodation,
         covered_nights: invitation.covered_nights
