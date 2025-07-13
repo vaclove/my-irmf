@@ -35,14 +35,24 @@ router.get('/google/callback',
       const redirectUrl = process.env.CLIENT_URL || 'http://localhost:5173';
       console.log('🔀 Redirecting to:', redirectUrl);
       
-      // Log response headers to see if cookie is being set
-      console.log('📤 Response headers will include:', {
-        setCookie: res.getHeaders()['set-cookie'],
-        location: redirectUrl
+      // Force session save before redirect
+      req.session.save((err) => {
+        if (err) {
+          console.error('❌ Session save error:', err);
+        } else {
+          console.log('✅ Session saved successfully');
+        }
+        
+        // Log response headers to see if cookie is being set
+        console.log('📤 Response headers will include:', {
+          setCookie: res.getHeaders()['set-cookie'],
+          location: redirectUrl,
+          sessionName: req.sessionID
+        });
+        
+        // Successful authentication, redirect to frontend
+        res.redirect(redirectUrl);
       });
-      
-      // Successful authentication, redirect to frontend
-      res.redirect(redirectUrl);
     } catch (error) {
       console.error('❌ Error in OAuth callback:', error);
       logError(error, req, { operation: 'auth_callback_audit' });
