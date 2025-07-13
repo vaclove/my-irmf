@@ -6,8 +6,13 @@ const pool = new Pool({
 });
 
 const createTables = async () => {
+  console.log('🔧 Starting database migration process...');
   const client = await pool.connect();
   try {
+    console.log('✅ Database connection established');
+    
+    // Step 1: Create guests table
+    console.log('📋 Creating guests table...');
     await client.query(`
       CREATE TABLE IF NOT EXISTS guests (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -17,7 +22,12 @@ const createTables = async () => {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
-      
+    `);
+    console.log('✅ Guests table created');
+
+    // Step 2: Create editions table
+    console.log('📅 Creating editions table...');
+    await client.query(`
       CREATE TABLE IF NOT EXISTS editions (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         year INTEGER UNIQUE NOT NULL,
@@ -26,13 +36,23 @@ const createTables = async () => {
         end_date DATE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
-      
+    `);
+    console.log('✅ Editions table created');
+
+    // Step 3: Create guest_category enum type
+    console.log('🏷️ Creating guest_category enum type...');
+    await client.query(`
       DO $$ BEGIN
         CREATE TYPE guest_category AS ENUM ('filmmaker', 'press', 'guest', 'staff');
       EXCEPTION
         WHEN duplicate_object THEN null;
       END $$;
-      
+    `);
+    console.log('✅ Guest category enum type created');
+
+    // Step 4: Create guest_editions table
+    console.log('🔗 Creating guest_editions table...');
+    await client.query(`
       CREATE TABLE IF NOT EXISTS guest_editions (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         guest_id UUID REFERENCES guests(id) ON DELETE CASCADE,
@@ -43,8 +63,12 @@ const createTables = async () => {
         confirmation_token VARCHAR(255),
         UNIQUE(guest_id, edition_id)
       );
+    `);
+    console.log('✅ Guest editions table created');
 
-      -- Create audit logs table
+    // Step 5: Create audit logs table
+    console.log('📊 Creating audit_logs table...');
+    await client.query(`
       CREATE TABLE IF NOT EXISTS audit_logs (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         user_email VARCHAR(255),
@@ -58,16 +82,24 @@ const createTables = async () => {
         timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         success BOOLEAN DEFAULT TRUE
       );
+    `);
+    console.log('✅ Audit logs table created');
 
-      -- Create indexes for performance
+    // Step 6: Create indexes for performance
+    console.log('⚡ Creating database indexes...');
+    await client.query(`
       CREATE INDEX IF NOT EXISTS idx_audit_logs_user_email ON audit_logs(user_email);
       CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp DESC);
       CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
       CREATE INDEX IF NOT EXISTS idx_audit_logs_resource ON audit_logs(resource);
       CREATE INDEX IF NOT EXISTS idx_audit_logs_resource_id ON audit_logs(resource_id);
       CREATE INDEX IF NOT EXISTS idx_audit_logs_user_ip ON audit_logs(user_ip);
+    `);
+    console.log('✅ Database indexes created');
 
-      -- Create audit logging function
+    // Step 7: Create audit logging function
+    console.log('⚙️ Creating log_audit_event function...');
+    await client.query(`
       CREATE OR REPLACE FUNCTION log_audit_event(
         p_user_email VARCHAR(255),
         p_user_ip VARCHAR(45),
@@ -94,7 +126,9 @@ const createTables = async () => {
       END;
       $func$ LANGUAGE plpgsql;
     `);
-    console.log('Database tables created successfully');
+    console.log('✅ Audit logging function created');
+    
+    console.log('🎉 Database migration completed successfully!');
   } finally {
     client.release();
   }
