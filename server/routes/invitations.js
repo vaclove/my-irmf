@@ -89,8 +89,9 @@ function getAccommodationInfo(language, hasAccommodation, nights) {
 
 // Send invitation to guest for specific edition
 router.post('/send', async (req, res) => {
+  const { guest_id, edition_id, language = 'english', accommodation = false, covered_nights = 0 } = req.body;
+  
   try {
-    const { guest_id, edition_id, language = 'english', accommodation = false, covered_nights = 0 } = req.body;
     
     if (!guest_id || !edition_id) {
       return res.status(400).json({ error: 'Guest ID and Edition ID are required' });
