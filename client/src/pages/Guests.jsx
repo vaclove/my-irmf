@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { guestApi, tagApi } from '../utils/api'
+import TagCard from '../components/TagCard'
 
 function Guests() {
   const [guests, setGuests] = useState([])
@@ -119,6 +120,15 @@ function Guests() {
     }
   }
 
+  const handleTagDeleted = async (deletedTagId) => {
+    // Remove from selected tags if it was selected
+    setSelectedTags(prev => prev.filter(id => id !== deletedTagId))
+    // Refresh the tags list
+    await fetchTags()
+    // Refresh guests to update tag counts
+    await fetchGuests()
+  }
+
   const getFilteredGuests = () => {
     if (selectedTags.length === 0) {
       return guests
@@ -199,27 +209,19 @@ function Guests() {
             </p>
             <div className="flex flex-wrap gap-2">
               {allTags.map((tag) => (
-                <button
+                <TagCard
                   key={tag.id}
-                  onClick={() => {
+                  tag={tag}
+                  isSelected={selectedTags.includes(tag.id)}
+                  onToggleSelect={() => {
                     setSelectedTags(prev => 
                       prev.includes(tag.id) 
                         ? prev.filter(id => id !== tag.id)
                         : [...prev, tag.id]
                     )
                   }}
-                  className={`px-3 py-1 rounded-full text-sm font-medium border-2 transition-colors ${
-                    selectedTags.includes(tag.id)
-                      ? 'border-blue-500 text-white'
-                      : 'border-gray-300 text-gray-700 hover:border-gray-400'
-                  }`}
-                  style={{
-                    backgroundColor: selectedTags.includes(tag.id) ? tag.color : 'white',
-                    borderColor: selectedTags.includes(tag.id) ? tag.color : undefined
-                  }}
-                >
-                  {tag.name} ({tag.guest_count || 0})
-                </button>
+                  onDeleteSuccess={handleTagDeleted}
+                />
               ))}
             </div>
           </div>

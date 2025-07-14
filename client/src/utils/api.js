@@ -68,6 +68,7 @@ export const tagApi = {
   create: (tag) => api.post('/tags', tag),
   update: (id, tag) => api.put(`/tags/${id}`, tag),
   delete: (id) => api.delete(`/tags/${id}`),
+  checkDeletionStatus: (id) => api.get(`/tags/${id}/deletion-status`),
   assignToGuest: (guestId, tagId) => api.post('/tags/assign', { guest_id: guestId, tag_id: tagId }),
   removeFromGuest: (guestId, tagId) => api.delete(`/tags/assign/${guestId}/${tagId}`),
   getGuestTags: (guestId) => api.get(`/tags/guest/${guestId}`),
