@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react'
 import { templateApi, editionApi } from '../utils/api'
+import MDEditor from '@uiw/react-md-editor'
+import '@uiw/react-md-editor/markdown-editor.css'
+import '@uiw/react-markdown-preview/markdown.css'
 
 function EmailTemplates() {
   const [editions, setEditions] = useState([])
@@ -11,6 +14,7 @@ function EmailTemplates() {
   const [showPreview, setShowPreview] = useState(false)
   const [previewData, setPreviewData] = useState(null)
   const [compareMode, setCompareMode] = useState(false)
+  const [editorMode, setEditorMode] = useState('edit') // 'edit', 'live', 'preview'
 
   // Form data for current language
   const [formData, setFormData] = useState({
@@ -252,7 +256,7 @@ function EmailTemplates() {
           <div className="p-6">
             {compareMode ? (
               /* Compare Mode - Side by Side */
-              <div className="grid grid-cols-2 gap-6">
+              <div className="grid grid-cols-2 gap-6 compare-mode">
                 <div>
                   <h3 className="text-lg font-medium mb-4">English Version</h3>
                   <div className="space-y-4">
@@ -267,12 +271,16 @@ function EmailTemplates() {
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">Content</label>
-                      <textarea
-                        value={unsavedChanges.english?.content || templates.english?.markdown_content || templates.english?.body || ''}
-                        readOnly
-                        rows={20}
-                        className="w-full border border-gray-300 rounded-md px-3 py-2 bg-gray-50 text-gray-600 font-mono text-sm"
-                      />
+                      <div className="border border-gray-300 rounded-md bg-gray-50">
+                        <MDEditor
+                          value={unsavedChanges.english?.content || templates.english?.markdown_content || templates.english?.body || ''}
+                          preview="preview"
+                          hideToolbar={true}
+                          visibleDragBar={false}
+                          data-color-mode="light"
+                          height={400}
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -291,12 +299,16 @@ function EmailTemplates() {
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">Content</label>
-                      <textarea
-                        value={unsavedChanges.czech?.content || templates.czech?.markdown_content || templates.czech?.body || ''}
-                        readOnly
-                        rows={20}
-                        className="w-full border border-gray-300 rounded-md px-3 py-2 bg-gray-50 text-gray-600 font-mono text-sm"
-                      />
+                      <div className="border border-gray-300 rounded-md bg-gray-50">
+                        <MDEditor
+                          value={unsavedChanges.czech?.content || templates.czech?.markdown_content || templates.czech?.body || ''}
+                          preview="preview"
+                          hideToolbar={true}
+                          visibleDragBar={false}
+                          data-color-mode="light"
+                          height={400}
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -339,34 +351,75 @@ function EmailTemplates() {
 
                   {/* Content Field */}
                   <div>
-                    <div className="flex justify-between items-center mb-2">
+                    <div className="flex justify-between items-center mb-4">
                       <label className="block text-sm font-medium text-gray-700">
                         Email Content (Markdown)
                       </label>
-                      <button
-                        type="button"
-                        className="text-sm text-blue-600 hover:text-blue-800"
-                        onClick={() => {
-                          // Show help tooltip or modal for Markdown syntax
-                          alert('Markdown Help:\n**bold** *italic* \n- list item\n[link](url)\n\nVariables:\n{{greeting}} {{guest_name}} {{edition_name}} {{accommodation_info}}')
-                        }}
-                      >
-                        Markdown Help
-                      </button>
+                      <div className="flex items-center space-x-3">
+                        {/* Editor Mode Toggle */}
+                        <div className="flex items-center space-x-1 bg-gray-100 rounded-md p-1">
+                          <button
+                            type="button"
+                            onClick={() => setEditorMode('edit')}
+                            className={`px-3 py-1 text-xs font-medium rounded ${
+                              editorMode === 'edit' 
+                                ? 'bg-white text-gray-900 shadow-sm' 
+                                : 'text-gray-600 hover:text-gray-900'
+                            }`}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditorMode('live')}
+                            className={`px-3 py-1 text-xs font-medium rounded ${
+                              editorMode === 'live' 
+                                ? 'bg-white text-gray-900 shadow-sm' 
+                                : 'text-gray-600 hover:text-gray-900'
+                            }`}
+                          >
+                            Split
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditorMode('preview')}
+                            className={`px-3 py-1 text-xs font-medium rounded ${
+                              editorMode === 'preview' 
+                                ? 'bg-white text-gray-900 shadow-sm' 
+                                : 'text-gray-600 hover:text-gray-900'
+                            }`}
+                          >
+                            Preview
+                          </button>
+                        </div>
+                        <button
+                          type="button"
+                          className="text-sm text-blue-600 hover:text-blue-800"
+                          onClick={() => {
+                            // Show help tooltip or modal for Markdown syntax
+                            alert('Markdown Help:\n**bold** *italic* \n- list item\n[link](url)\n\nVariables:\n{{greeting}} {{guest_name}} {{edition_name}} {{accommodation_info}}')
+                          }}
+                        >
+                          Help
+                        </button>
+                      </div>
                     </div>
-                    <textarea
-                      value={formData.content}
-                      onChange={(e) => {
-                        const newFormData = { ...formData, content: e.target.value }
-                        setFormData(newFormData)
-                        setUnsavedChanges(prev => ({
-                          ...prev,
-                          [currentLanguage]: newFormData
-                        }))
-                      }}
-                      rows={25}
-                      className="w-full border border-gray-300 rounded-md px-3 py-2 font-mono text-sm"
-                      placeholder={`Enter your email template content in Markdown...
+                    <div className="border border-gray-300 rounded-md overflow-hidden">
+                      <MDEditor
+                        value={formData.content}
+                        onChange={(val) => {
+                          const newFormData = { ...formData, content: val || '' }
+                          setFormData(newFormData)
+                          setUnsavedChanges(prev => ({
+                            ...prev,
+                            [currentLanguage]: newFormData
+                          }))
+                        }}
+                        preview={editorMode}
+                        hideToolbar={false}
+                        visibleDragBar={false}
+                        textareaProps={{
+                          placeholder: `Enter your email template content in Markdown...
 
 Example:
 {{greeting}},
@@ -378,8 +431,18 @@ We are delighted to invite you to **{{edition_name}}** as our honored {{category
 Please [confirm your participation]({{confirmation_url}}).
 
 Best regards,
-Festival Team`}
-                    />
+Festival Team`,
+                          style: {
+                            fontSize: '14px',
+                            fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace',
+                            lineHeight: '1.5',
+                            minHeight: '400px'
+                          }
+                        }}
+                        data-color-mode="light"
+                        height={500}
+                      />
+                    </div>
                   </div>
                 </div>
 
