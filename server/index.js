@@ -23,6 +23,11 @@ const auditRoutes = require('./routes/audit');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Trust proxy when deployed (Azure Web Apps run behind a proxy)
+if (process.env.NODE_ENV === 'production') {
+  app.set('trust proxy', 1);
+}
+
 // Initialize authentication
 initializeAuth();
 
@@ -55,8 +60,7 @@ app.use(session({
   resave: false,
   saveUninitialized: false,
   cookie: {
-    // secure: process.env.NODE_ENV === 'production' && !process.env.APP_URL?.includes('localhost'),
-    secure: false,
+    secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
     maxAge: 24 * 60 * 60 * 1000, // 24 hours
     sameSite: 'lax'
