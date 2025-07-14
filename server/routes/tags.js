@@ -54,6 +54,76 @@ router.post('/', async (req, res) => {
   }
 });
 
+// Check if tag can be deleted (for frontend validation)
+router.get('/:id/deletion-status', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Get tag details
+    const tagResult = await pool.query('SELECT * FROM tags WHERE id = $1', [id]);
+    
+    if (tagResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Tag not found' });
+    }
+    
+    const tag = tagResult.rows[0];
+    
+    // Check if tag is a year tag
+    const yearTagCheck = await pool.query(
+      'SELECT e.id, e.year, e.name FROM editions e WHERE e.year::text = $1',
+      [tag.name]
+    );
+    
+    let canDelete = true;
+    let restrictions = [];
+    
+    // If this is a year tag, check invitations
+    if (yearTagCheck.rows.length > 0) {
+      const invitationCheck = await pool.query(`
+        SELECT COUNT(DISTINCT gi.guest_id) as invited_guests
+        FROM guest_invitations gi
+        JOIN guest_tags gt ON gi.guest_id = gt.guest_id
+        WHERE gt.tag_id = $1 AND gi.invited_at IS NOT NULL
+      `, [id]);
+      
+      if (parseInt(invitationCheck.rows[0].invited_guests) > 0) {
+        canDelete = false;
+        restrictions.push({
+          type: 'YEAR_TAG_WITH_INVITATIONS',
+          message: `This year tag is linked to edition "${yearTagCheck.rows[0].name}" and ${invitationCheck.rows[0].invited_guests} guest(s) have already been invited.`,
+          invited_guests: parseInt(invitationCheck.rows[0].invited_guests),
+          edition: yearTagCheck.rows[0]
+        });
+      }
+    }
+    
+    // Check guest assignments
+    const usageCheck = await pool.query(
+      'SELECT COUNT(*) FROM guest_tags WHERE tag_id = $1',
+      [id]
+    );
+    
+    if (parseInt(usageCheck.rows[0].count) > 0) {
+      canDelete = false;
+      restrictions.push({
+        type: 'TAG_ASSIGNED_TO_GUESTS',
+        message: `Tag is assigned to ${usageCheck.rows[0].count} guest(s).`,
+        assigned_guests: parseInt(usageCheck.rows[0].count)
+      });
+    }
+    
+    res.json({
+      tag: tag,
+      can_delete: canDelete,
+      restrictions: restrictions,
+      is_year_tag: yearTagCheck.rows.length > 0
+    });
+  } catch (error) {
+    logError(error, req, { operation: 'check_tag_deletion_status', tagId: req.params.id });
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Update tag
 router.put('/:id', async (req, res) => {
   try {
@@ -88,7 +158,42 @@ router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     
-    // Check if tag is in use
+    // Get tag details first
+    const tagResult = await pool.query('SELECT * FROM tags WHERE id = $1', [id]);
+    
+    if (tagResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Tag not found' });
+    }
+    
+    const tag = tagResult.rows[0];
+    
+    // Check if tag is a year tag (matches an edition year)
+    const yearTagCheck = await pool.query(
+      'SELECT e.id, e.year, e.name FROM editions e WHERE e.year::text = $1',
+      [tag.name]
+    );
+    
+    // If this is a year tag, check if any guests with this tag have been invited
+    if (yearTagCheck.rows.length > 0) {
+      const invitationCheck = await pool.query(`
+        SELECT COUNT(DISTINCT gi.guest_id) as invited_guests
+        FROM guest_invitations gi
+        JOIN guest_tags gt ON gi.guest_id = gt.guest_id
+        WHERE gt.tag_id = $1 AND gi.invited_at IS NOT NULL
+      `, [id]);
+      
+      if (parseInt(invitationCheck.rows[0].invited_guests) > 0) {
+        const edition = yearTagCheck.rows[0];
+        return res.status(400).json({ 
+          error: `Cannot delete year tag "${tag.name}" for edition "${edition.name}". ${invitationCheck.rows[0].invited_guests} guest(s) with this tag have already been invited. You must remove invitations before deleting this tag.`,
+          type: 'YEAR_TAG_WITH_INVITATIONS',
+          edition: edition,
+          invited_guests: parseInt(invitationCheck.rows[0].invited_guests)
+        });
+      }
+    }
+    
+    // Check if tag is assigned to any guests
     const usageCheck = await pool.query(
       'SELECT COUNT(*) FROM guest_tags WHERE tag_id = $1',
       [id]
@@ -96,17 +201,18 @@ router.delete('/:id', async (req, res) => {
     
     if (parseInt(usageCheck.rows[0].count) > 0) {
       return res.status(400).json({ 
-        error: 'Cannot delete tag that is assigned to guests. Remove from all guests first.' 
+        error: `Cannot delete tag "${tag.name}" that is assigned to ${usageCheck.rows[0].count} guest(s). Remove from all guests first.`,
+        type: 'TAG_ASSIGNED_TO_GUESTS',
+        assigned_guests: parseInt(usageCheck.rows[0].count)
       });
     }
     
     const result = await pool.query('DELETE FROM tags WHERE id = $1 RETURNING *', [id]);
     
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Tag not found' });
-    }
-    
-    res.json({ message: 'Tag deleted successfully' });
+    res.json({ 
+      message: `Tag "${tag.name}" deleted successfully`,
+      deleted_tag: result.rows[0]
+    });
   } catch (error) {
     logError(error, req, { operation: 'delete_tag', tagId: req.params.id });
     res.status(500).json({ error: error.message });
