@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { guestApi, tagApi } from '../utils/api'
 import TagCard from '../components/TagCard'
 
@@ -19,8 +19,11 @@ function Guests() {
     phone: '', 
     language: 'english', 
     company: '', 
-    notes: '' 
+    notes: '',
+    greeting: '',
+    greeting_auto_generated: true
   })
+  const [generatingGreeting, setGeneratingGreeting] = useState(false)
 
   useEffect(() => {
     fetchGuests()
@@ -47,6 +50,44 @@ function Guests() {
     }
   }
 
+  // Debounced greeting generation
+  const generateGreeting = useCallback(async (firstName, lastName, language) => {
+    if (!firstName || !lastName) return
+    
+    setGeneratingGreeting(true)
+    try {
+      const response = await guestApi.generateGreeting({ firstName, lastName, language })
+      if (response.data.primary) {
+        setFormData(prev => {
+          // Only update if still set to auto-generate
+          if (prev.greeting_auto_generated) {
+            return {
+              ...prev,
+              greeting: response.data.primary.greeting,
+              greeting_auto_generated: true
+            }
+          }
+          return prev
+        })
+      }
+    } catch (error) {
+      console.error('Error generating greeting:', error)
+    } finally {
+      setGeneratingGreeting(false)
+    }
+  }, [])
+
+  // Debounced greeting generation trigger
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      if (formData.first_name && formData.last_name && formData.greeting_auto_generated) {
+        generateGreeting(formData.first_name, formData.last_name, formData.language)
+      }
+    }, 300) // 300ms debounce
+
+    return () => clearTimeout(timeoutId)
+  }, [formData.first_name, formData.last_name, formData.language, formData.greeting_auto_generated, generateGreeting])
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     try {
@@ -64,6 +105,11 @@ function Guests() {
 
   const handleEdit = (guest) => {
     setEditingGuest(guest)
+    
+    // Determine if we should auto-generate greeting
+    const hasExistingGreeting = guest.greeting && guest.greeting.trim() !== ''
+    const shouldAutoGenerate = !hasExistingGreeting || guest.greeting_auto_generated !== false
+    
     setFormData({ 
       first_name: guest.first_name || '', 
       last_name: guest.last_name || '',
@@ -71,7 +117,9 @@ function Guests() {
       phone: guest.phone || '',
       language: guest.language || 'english',
       company: guest.company || '',
-      notes: guest.notes || ''
+      notes: guest.notes || '',
+      greeting: guest.greeting || '',
+      greeting_auto_generated: shouldAutoGenerate
     })
     setShowForm(true)
   }
@@ -150,7 +198,9 @@ function Guests() {
       phone: '', 
       language: 'english', 
       company: '', 
-      notes: '' 
+      notes: '',
+      greeting: '',
+      greeting_auto_generated: true
     })
     setEditingGuest(null)
     setShowForm(false)
@@ -192,7 +242,7 @@ function Guests() {
                 onChange={(e) => setNewTagName(e.target.value)}
                 placeholder="New tag name"
                 className="border border-gray-300 rounded-md px-3 py-2 text-sm"
-                onKeyPress={(e) => e.key === 'Enter' && handleCreateTag()}
+                onKeyDown={(e) => e.key === 'Enter' && handleCreateTag()}
               />
               <button
                 onClick={handleCreateTag}
@@ -294,6 +344,45 @@ function Guests() {
                 <option value="english">English</option>
                 <option value="czech">Czech</option>
               </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700">
+                Greeting
+                {generatingGreeting && (
+                  <span className="ml-2 text-xs text-blue-600">Generating...</span>
+                )}
+                {formData.greeting_auto_generated && (
+                  <span className="ml-2 text-xs text-green-600">Auto-generated</span>
+                )}
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={formData.greeting}
+                  onChange={(e) => setFormData({ 
+                    ...formData, 
+                    greeting: e.target.value,
+                    greeting_auto_generated: false 
+                  })}
+                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
+                  placeholder="e.g., Dear Mr. Smith"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (formData.first_name && formData.last_name) {
+                      // First set auto-generated to true, then generate
+                      setFormData(prev => ({ ...prev, greeting_auto_generated: true }))
+                      generateGreeting(formData.first_name, formData.last_name, formData.language)
+                    }
+                  }}
+                  disabled={!formData.first_name || !formData.last_name || generatingGreeting}
+                  className="mt-1 px-3 py-2 text-sm bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 disabled:opacity-50"
+                  title="Regenerate greeting"
+                >
+                  ↻
+                </button>
+              </div>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">Company (optional)</label>

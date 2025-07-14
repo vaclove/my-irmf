@@ -20,6 +20,7 @@ export const guestApi = {
   create: (guest) => api.post('/guests', guest),
   update: (id, guest) => api.put(`/guests/${id}`, guest),
   delete: (id) => api.delete(`/guests/${id}`),
+  generateGreeting: (data) => api.post('/guests/generate-greeting', data),
 }
 
 // Editions API
