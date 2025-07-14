@@ -61,6 +61,7 @@ export const templateApi = {
   createOrUpdate: (editionId, language, data) => api.put(`/templates/edition/${editionId}/language/${language}`, data),
   getVariables: () => api.get('/templates/variables'),
   preview: (editionId, language) => api.get(`/templates/preview/edition/${editionId}/language/${language}`),
+  previewWithContent: (editionId, language, templateData) => api.post(`/templates/preview/edition/${editionId}/language/${language}`, templateData),
 }
 
 // Tags API
