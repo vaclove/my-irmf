@@ -317,15 +317,10 @@ function EmailTemplates() {
               /* Edit Mode - Single Language */
               <div className="space-y-6">
                 <div>
-                  <div className="flex justify-between items-center mb-4">
+                  <div className="mb-4">
                     <h3 className="text-lg font-medium">
                       Editing: {getLanguageLabel(currentLanguage)} Template
                     </h3>
-                    {templates[getOtherLanguage()] && (
-                      <span className="text-sm text-gray-500">
-                        {getLanguageLabel(getOtherLanguage())} version: {templates[getOtherLanguage()] ? 'Available' : 'Not created'}
-                      </span>
-                    )}
                   </div>
                   
                   {/* Subject Field */}
@@ -351,58 +346,10 @@ function EmailTemplates() {
 
                   {/* Content Field */}
                   <div>
-                    <div className="flex justify-between items-center mb-4">
+                    <div className="mb-4">
                       <label className="block text-sm font-medium text-gray-700">
                         Email Content (Markdown)
                       </label>
-                      <div className="flex items-center space-x-3">
-                        {/* Editor Mode Toggle */}
-                        <div className="flex items-center space-x-1 bg-gray-100 rounded-md p-1">
-                          <button
-                            type="button"
-                            onClick={() => setEditorMode('edit')}
-                            className={`px-3 py-1 text-xs font-medium rounded ${
-                              editorMode === 'edit' 
-                                ? 'bg-white text-gray-900 shadow-sm' 
-                                : 'text-gray-600 hover:text-gray-900'
-                            }`}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setEditorMode('live')}
-                            className={`px-3 py-1 text-xs font-medium rounded ${
-                              editorMode === 'live' 
-                                ? 'bg-white text-gray-900 shadow-sm' 
-                                : 'text-gray-600 hover:text-gray-900'
-                            }`}
-                          >
-                            Split
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setEditorMode('preview')}
-                            className={`px-3 py-1 text-xs font-medium rounded ${
-                              editorMode === 'preview' 
-                                ? 'bg-white text-gray-900 shadow-sm' 
-                                : 'text-gray-600 hover:text-gray-900'
-                            }`}
-                          >
-                            Preview
-                          </button>
-                        </div>
-                        <button
-                          type="button"
-                          className="text-sm text-blue-600 hover:text-blue-800"
-                          onClick={() => {
-                            // Show help tooltip or modal for Markdown syntax
-                            alert('Markdown Help:\n**bold** *italic* \n- list item\n[link](url)\n\nVariables:\n{{greeting}} {{guest_name}} {{edition_name}} {{accommodation_info}}')
-                          }}
-                        >
-                          Help
-                        </button>
-                      </div>
                     </div>
                     <div className="border border-gray-300 rounded-md overflow-hidden">
                       <MDEditor
