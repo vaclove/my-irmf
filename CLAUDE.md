@@ -63,3 +63,5 @@ When committing changes, bump the package.json version:
 Use `npm version patch|minor|major` before committing to update the version. The pre-commit hook will prompt you to decide on version bumping.
 
 **Rule**: Default to PATCH if unsure. Only skip if the change is truly non-functional (like fixing a typo in a comment).
+
+**Commit Message Format**: When package.json is committed (version bump), the version number will be automatically appended to the commit message in the format "v1.1.2" before the Co-Authored-By line. Never use just the version number as the entire commit message.
