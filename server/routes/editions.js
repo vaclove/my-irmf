@@ -112,6 +112,7 @@ router.get('/:id/guests', async (req, res) => {
              ) as category,
              gi.invited_at,
              gi.confirmed_at,
+             gi.covered_nights,
              gi.id as assignment_id
       FROM guests g
       JOIN guest_tags gt ON g.id = gt.guest_id
