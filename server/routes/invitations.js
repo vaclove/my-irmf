@@ -132,6 +132,40 @@ router.post('/send', async (req, res) => {
       accommodation_nights: covered_nights
     };
     
+    // If template has custom accommodation content, process it and use instead of auto-generated
+    if (template.accommodation_content && template.accommodation_content.trim()) {
+      let processedAccommodationContent = template.accommodation_content.trim();
+      
+      // Add special night text variable with language-aware grammar
+      const nights = parseInt(templateData.accommodation_nights) || 0;
+      const language = templateData.language || 'english';
+      
+      let accommodationNightsText = '';
+      if (language === 'czech') {
+        const nightText = nights === 1 ? 'noc' : (nights >= 2 && nights <= 4 ? 'noci' : 'nocí');
+        accommodationNightsText = `${nights} ${nightText}`;
+      } else {
+        const nightText = nights === 1 ? 'night' : 'nights';
+        accommodationNightsText = `${nights} ${nightText}`;
+      }
+      
+      const extendedVariables = {
+        ...templateData,
+        accommodation_nights_text: accommodationNightsText
+      };
+      
+      // Process template variables within custom accommodation content
+      Object.keys(extendedVariables).forEach(key => {
+        if (key !== 'accommodation_info') { // Avoid infinite recursion
+          const placeholder = `{{${key}}}`;
+          const value = extendedVariables[key] || '';
+          processedAccommodationContent = processedAccommodationContent.replace(new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), value);
+        }
+      });
+      
+      templateData.accommodation_info = processedAccommodationContent;
+    }
+    
     // Process template content using template engine (same as preview)
     const templateContent = template.markdown_content || template.body || '';
     const processed = processTemplate(templateContent, templateData, { isPreview: false });
@@ -283,6 +317,40 @@ router.post('/resend', async (req, res) => {
       has_accommodation: invitation.accommodation,
       accommodation_nights: invitation.covered_nights
     };
+    
+    // If template has custom accommodation content, process it and use instead of auto-generated
+    if (template.accommodation_content && template.accommodation_content.trim()) {
+      let processedAccommodationContent = template.accommodation_content.trim();
+      
+      // Add special night text variable with language-aware grammar
+      const nights = parseInt(templateData.accommodation_nights) || 0;
+      const language = templateData.language || 'english';
+      
+      let accommodationNightsText = '';
+      if (language === 'czech') {
+        const nightText = nights === 1 ? 'noc' : (nights >= 2 && nights <= 4 ? 'noci' : 'nocí');
+        accommodationNightsText = `${nights} ${nightText}`;
+      } else {
+        const nightText = nights === 1 ? 'night' : 'nights';
+        accommodationNightsText = `${nights} ${nightText}`;
+      }
+      
+      const extendedVariables = {
+        ...templateData,
+        accommodation_nights_text: accommodationNightsText
+      };
+      
+      // Process template variables within custom accommodation content
+      Object.keys(extendedVariables).forEach(key => {
+        if (key !== 'accommodation_info') { // Avoid infinite recursion
+          const placeholder = `{{${key}}}`;
+          const value = extendedVariables[key] || '';
+          processedAccommodationContent = processedAccommodationContent.replace(new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), value);
+        }
+      });
+      
+      templateData.accommodation_info = processedAccommodationContent;
+    }
     
     // Process template content using template engine (same as preview)
     const templateContent = template.markdown_content || template.body || '';

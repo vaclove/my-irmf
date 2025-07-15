@@ -19,13 +19,14 @@ function EmailTemplates() {
   // Form data for current language
   const [formData, setFormData] = useState({
     subject: '',
-    content: ''
+    content: '',
+    accommodationContent: ''
   })
   
   // Track unsaved changes for both languages
   const [unsavedChanges, setUnsavedChanges] = useState({
-    english: { subject: '', content: '' },
-    czech: { subject: '', content: '' }
+    english: { subject: '', content: '', accommodationContent: '' },
+    czech: { subject: '', content: '', accommodationContent: '' }
   })
 
   useEffect(() => {
@@ -46,12 +47,14 @@ function EmailTemplates() {
     if (hasUnsavedChanges) {
       setFormData({
         subject: unsavedChanges[currentLanguage].subject,
-        content: unsavedChanges[currentLanguage].content
+        content: unsavedChanges[currentLanguage].content,
+        accommodationContent: unsavedChanges[currentLanguage].accommodationContent
       })
     } else if (templates[currentLanguage]) {
       const templateData = {
         subject: templates[currentLanguage].subject || '',
-        content: templates[currentLanguage].markdown_content || templates[currentLanguage].body || ''
+        content: templates[currentLanguage].markdown_content || templates[currentLanguage].body || '',
+        accommodationContent: templates[currentLanguage].accommodation_content || ''
       }
       setFormData(templateData)
       // Initialize unsaved changes with template data
@@ -60,10 +63,10 @@ function EmailTemplates() {
         [currentLanguage]: templateData
       }))
     } else {
-      setFormData({ subject: '', content: '' })
+      setFormData({ subject: '', content: '', accommodationContent: '' })
       setUnsavedChanges(prev => ({
         ...prev,
-        [currentLanguage]: { subject: '', content: '' }
+        [currentLanguage]: { subject: '', content: '', accommodationContent: '' }
       }))
     }
   }, [currentLanguage, templates])
@@ -112,7 +115,8 @@ function EmailTemplates() {
     try {
       await templateApi.createOrUpdate(selectedEdition.id, currentLanguage, {
         subject: formData.subject,
-        markdown_content: formData.content
+        markdown_content: formData.content,
+        accommodation_content: formData.accommodationContent
       })
       
       // Refresh templates
@@ -121,7 +125,7 @@ function EmailTemplates() {
       // Clear unsaved changes for current language
       setUnsavedChanges(prev => ({
         ...prev,
-        [currentLanguage]: { subject: '', content: '' }
+        [currentLanguage]: { subject: '', content: '', accommodationContent: '' }
       }))
       
       // Show success message (you might want to add a toast notification here)
@@ -141,7 +145,8 @@ function EmailTemplates() {
       // Generate preview using current form data instead of saved template
       const response = await templateApi.previewWithContent(selectedEdition.id, currentLanguage, {
         subject: formData.subject,
-        markdown_content: formData.content
+        markdown_content: formData.content,
+        accommodation_content: formData.accommodationContent
       })
       setPreviewData(response.data)
       setShowPreview(true)
@@ -282,6 +287,16 @@ function EmailTemplates() {
                         />
                       </div>
                     </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Accommodation Info</label>
+                      <textarea
+                        value={unsavedChanges.english?.accommodationContent || templates.english?.accommodation_content || ''}
+                        readOnly
+                        className="w-full border border-gray-300 rounded-md px-3 py-2 bg-gray-50 text-gray-600"
+                        rows={3}
+                        placeholder="Auto-generated content"
+                      />
+                    </div>
                   </div>
                 </div>
                 
@@ -309,6 +324,16 @@ function EmailTemplates() {
                           height={400}
                         />
                       </div>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Accommodation Info</label>
+                      <textarea
+                        value={unsavedChanges.czech?.accommodationContent || templates.czech?.accommodation_content || ''}
+                        readOnly
+                        className="w-full border border-gray-300 rounded-md px-3 py-2 bg-gray-50 text-gray-600"
+                        rows={3}
+                        placeholder="Auto-generated content"
+                      />
                     </div>
                   </div>
                 </div>
@@ -391,6 +416,32 @@ Festival Team`,
                       />
                     </div>
                   </div>
+
+                  {/* Accommodation Content Field */}
+                  <div>
+                    <div className="mb-4 mt-6">
+                      <label className="block text-sm font-medium text-gray-700">
+                        Accommodation Information
+                      </label>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Custom text that will replace the {'{{accommodation_info}}'} variable. Leave empty to use auto-generated content.
+                      </p>
+                    </div>
+                    <textarea
+                      value={formData.accommodationContent}
+                      onChange={(e) => {
+                        const newFormData = { ...formData, accommodationContent: e.target.value }
+                        setFormData(newFormData)
+                        setUnsavedChanges(prev => ({
+                          ...prev,
+                          [currentLanguage]: newFormData
+                        }))
+                      }}
+                      className="w-full border border-gray-300 rounded-md px-3 py-2"
+                      placeholder="🏨 Accommodation Included&#10;&#10;We have arranged accommodation for you for {{accommodation_nights_text}} during the festival.&#10;&#10;Details will be provided upon confirmation."
+                      rows={4}
+                    />
+                  </div>
                 </div>
 
                 {/* Template Variables Help */}
@@ -403,6 +454,12 @@ Festival Team`,
                     <code>{'{{category}}'}</code> <span className="text-blue-600">- Guest category</span>
                     <code>{'{{confirmation_url}}'}</code> <span className="text-blue-600">- Confirmation link</span>
                     <code>{'{{accommodation_info}}'}</code> <span className="text-blue-600">- Accommodation details (conditional)</span>
+                  </div>
+                  <div className="mt-3 pt-3 border-t border-blue-200">
+                    <h5 className="text-sm font-medium text-blue-900 mb-2">For Accommodation Content:</h5>
+                    <div className="grid grid-cols-2 gap-2 text-sm text-blue-800">
+                      <code>{'{{accommodation_nights_text}}'}</code> <span className="text-blue-600">- Language-aware: "2 nights" or "2 noci"</span>
+                    </div>
                   </div>
                 </div>
               </div>

@@ -56,7 +56,7 @@ router.get('/edition/:editionId/language/:language', async (req, res) => {
 router.put('/edition/:editionId/language/:language', async (req, res) => {
   try {
     const { editionId, language } = req.params;
-    const { subject, markdown_content, html_content } = req.body;
+    const { subject, markdown_content, html_content, accommodation_content } = req.body;
     
     if (!subject || (!markdown_content && !html_content)) {
       return res.status(400).json({ error: 'Subject and either markdown_content or html_content are required' });
@@ -65,21 +65,23 @@ router.put('/edition/:editionId/language/:language', async (req, res) => {
     // If markdown_content is provided, use it; otherwise fall back to html_content for backward compatibility
     const finalMarkdownContent = markdown_content || null;
     const finalHtmlContent = html_content || markdown_content || '';
+    const finalAccommodationContent = accommodation_content || null;
     
     // Generate a template name based on language
     const templateName = `invitation_${language}`;
     
     const result = await pool.query(`
-      INSERT INTO email_templates (name, edition_id, language, subject, body, markdown_content, updated_at)
-      VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
+      INSERT INTO email_templates (name, edition_id, language, subject, body, markdown_content, accommodation_content, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
       ON CONFLICT (edition_id, language) 
       DO UPDATE SET 
         subject = EXCLUDED.subject,
         body = EXCLUDED.body,
         markdown_content = EXCLUDED.markdown_content,
+        accommodation_content = EXCLUDED.accommodation_content,
         updated_at = CURRENT_TIMESTAMP
       RETURNING *
-    `, [templateName, editionId, language, subject, finalHtmlContent, finalMarkdownContent]);
+    `, [templateName, editionId, language, subject, finalHtmlContent, finalMarkdownContent, finalAccommodationContent]);
     
     res.json(result.rows[0]);
   } catch (error) {
@@ -107,7 +109,7 @@ router.get('/variables', async (req, res) => {
 router.post('/preview/edition/:editionId/language/:language', async (req, res) => {
   try {
     const { editionId, language } = req.params;
-    const { subject, markdown_content } = req.body;
+    const { subject, markdown_content, accommodation_content } = req.body;
     const { withAccommodation = 'true', accommodationNights = '2' } = req.query;
     
     if (!markdown_content) {
@@ -134,6 +136,40 @@ router.post('/preview/edition/:editionId/language/:language', async (req, res) =
     // Override with actual edition data
     sampleData.edition_name = edition.name;
     sampleData.subject = subject || 'Preview Subject';
+    
+    // If custom accommodation content is provided, process it and use instead of generated content
+    if (accommodation_content && accommodation_content.trim()) {
+      let processedAccommodationContent = accommodation_content.trim();
+      
+      // Add special night text variable with language-aware grammar
+      const nights = parseInt(sampleData.accommodation_nights) || 0;
+      const language = sampleData.language || 'english';
+      
+      let accommodationNightsText = '';
+      if (language === 'czech') {
+        const nightText = nights === 1 ? 'noc' : (nights >= 2 && nights <= 4 ? 'noci' : 'nocí');
+        accommodationNightsText = `${nights} ${nightText}`;
+      } else {
+        const nightText = nights === 1 ? 'night' : 'nights';
+        accommodationNightsText = `${nights} ${nightText}`;
+      }
+      
+      const extendedVariables = {
+        ...sampleData,
+        accommodation_nights_text: accommodationNightsText
+      };
+      
+      // Process template variables within custom accommodation content
+      Object.keys(extendedVariables).forEach(key => {
+        if (key !== 'accommodation_info') { // Avoid infinite recursion
+          const placeholder = `{{${key}}}`;
+          const value = extendedVariables[key] || '';
+          processedAccommodationContent = processedAccommodationContent.replace(new RegExp(placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), value);
+        }
+      });
+      
+      sampleData.accommodation_info = processedAccommodationContent;
+    }
     
     // Process template content
     const processed = processTemplate(markdown_content, sampleData, { isPreview: true });

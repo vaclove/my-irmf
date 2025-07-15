@@ -17,6 +17,8 @@ This repository contains a complete Movie Festival Guest Management System with:
 - Tag-based guest assignment system
 - Azure deployment configuration
 
+**Important**: IRMF stands for "International Road Movie Festival" (not Roma Music Festival). Contact email: irmf@irmf.cz
+
 ## Development Setup
 
 This is a Node.js/JavaScript project with the following commands:
@@ -43,3 +45,7 @@ This is a Node.js/JavaScript project with the following commands:
 ## Claude Code Configuration
 
 The repository has Claude Code permissions configured in `.claude/settings.local.json` with selective permissions for bash commands.
+
+## Git Workflow Instructions
+
+**IMPORTANT**: NEVER commit or push changes automatically. Always ask the user for explicit permission before creating commits or pushing to the repository. The user wants to review all changes before they are committed to git history.
