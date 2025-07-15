@@ -52,10 +52,14 @@ The repository has Claude Code permissions configured in `.claude/settings.local
 
 ### Version Bump Guidelines
 
-When committing changes, consider bumping the package.json version:
+**IMPORTANT**: ALWAYS bump the version for any functional changes. Never skip version bumping unless the commit only contains non-functional changes like typos in comments.
+
+When committing changes, bump the package.json version:
 
 - **PATCH (x.x.X)**: Bug fixes, small improvements, refactoring, documentation updates
 - **MINOR (x.X.x)**: New features, new API endpoints, significant UI changes  
 - **MAJOR (X.x.x)**: Breaking changes, major refactoring, API changes that affect compatibility
 
 Use `npm version patch|minor|major` before committing to update the version. The pre-commit hook will prompt you to decide on version bumping.
+
+**Rule**: Default to PATCH if unsure. Only skip if the change is truly non-functional (like fixing a typo in a comment).

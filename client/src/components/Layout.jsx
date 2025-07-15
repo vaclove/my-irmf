@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 
@@ -6,6 +6,15 @@ function Layout({ children }) {
   const location = useLocation()
   const { user, logout } = useAuth()
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+  const [version, setVersion] = useState('')
+
+  useEffect(() => {
+    // Fetch version from backend
+    fetch('/api/version')
+      .then(res => res.json())
+      .then(data => setVersion(data.version))
+      .catch(() => setVersion('unknown'))
+  }, [])
 
   const isActive = (path) => {
     if (path === '/' && location.pathname === '/') return true
@@ -35,6 +44,7 @@ function Layout({ children }) {
                   src="https://irmf.cz/wp-content/uploads/2022/07/irmf_web_logo_90px_black.png" 
                   alt="IRMF Logo" 
                   className="h-8 w-auto"
+                  title={`IRMF Guest Manager v${version}`}
                 />
                 {isDevelopment && (
                   <span className="ml-2 px-2 py-1 text-xs font-medium text-blue-600 bg-blue-100 rounded-md">

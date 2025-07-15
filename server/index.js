@@ -5,6 +5,7 @@ const session = require('express-session');
 const pgSession = require('connect-pg-simple')(session);
 const passport = require('passport');
 const path = require('path');
+const fs = require('fs');
 require('dotenv').config();
 
 const { initializeAuth, requireIrmfDomain } = require('./middleware/auth');
@@ -87,6 +88,15 @@ app.use('/api/audit', requireIrmfDomain, auditRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
+});
+
+app.get('/api/version', (req, res) => {
+  try {
+    const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf8'));
+    res.json({ version: packageJson.version });
+  } catch (error) {
+    res.json({ version: 'unknown' });
+  }
 });
 
 // In production, serve static files from React build
