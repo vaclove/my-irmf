@@ -88,13 +88,11 @@ function replaceTemplateVariables(content, variables) {
   });
 
   // Handle special accommodation info with proper formatting
-  if (variables.accommodation_info) {
-    const accommodationHtml = generateAccommodationInfo(
-      variables.accommodation_nights, 
-      variables.language || 'english'
-    );
-    processedContent = processedContent.replace(/\{\{accommodation_info\}\}/g, accommodationHtml);
-  }
+  const accommodationHtml = generateAccommodationInfo(
+    variables.accommodation_nights, 
+    variables.language || 'english'
+  );
+  processedContent = processedContent.replace(/\{\{accommodation_info\}\}/g, accommodationHtml);
 
   return processedContent;
 }
