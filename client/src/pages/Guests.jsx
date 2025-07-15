@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
 import { guestApi, tagApi } from '../utils/api'
+import { useToast } from '../contexts/ToastContext'
 import TagCard from '../components/TagCard'
 
 function Guests() {
+  const { success, error: showError } = useToast()
   const [guests, setGuests] = useState([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
@@ -93,13 +95,16 @@ function Guests() {
     try {
       if (editingGuest) {
         await guestApi.update(editingGuest.id, formData)
+        success(`Guest ${formData.first_name} ${formData.last_name} updated successfully!`)
       } else {
         await guestApi.create(formData)
+        success(`Guest ${formData.first_name} ${formData.last_name} created successfully!`)
       }
       await fetchGuests()
       resetForm()
     } catch (error) {
       console.error('Error saving guest:', error)
+      showError('Failed to save guest: ' + (error.response?.data?.error || error.message))
     }
   }
 
@@ -125,33 +130,42 @@ function Guests() {
   }
 
   const handleDelete = async (id) => {
-    if (window.confirm('Are you sure you want to delete this guest?')) {
+    const guest = guests.find(g => g.id === id)
+    if (window.confirm(`Are you sure you want to delete ${guest?.first_name} ${guest?.last_name}?`)) {
       try {
         await guestApi.delete(id)
+        success(`Guest ${guest?.first_name} ${guest?.last_name} deleted successfully!`)
         await fetchGuests()
       } catch (error) {
         console.error('Error deleting guest:', error)
+        showError('Failed to delete guest: ' + (error.response?.data?.error || error.message))
       }
     }
   }
 
   const handleAddTag = async (guestId, tagId) => {
     try {
+      const guest = guests.find(g => g.id === guestId)
+      const tag = allTags.find(t => t.id === tagId)
       await tagApi.assignToGuest(guestId, tagId)
+      success(`Tag "${tag?.name}" added to ${guest?.first_name} ${guest?.last_name}`)
       await fetchGuests()
     } catch (error) {
       console.error('Error adding tag:', error)
-      alert('Failed to add tag: ' + (error.response?.data?.error || error.message))
+      showError('Failed to add tag: ' + (error.response?.data?.error || error.message))
     }
   }
 
   const handleRemoveTag = async (guestId, tagId) => {
     try {
+      const guest = guests.find(g => g.id === guestId)
+      const tag = allTags.find(t => t.id === tagId)
       await tagApi.removeFromGuest(guestId, tagId)
+      success(`Tag "${tag?.name}" removed from ${guest?.first_name} ${guest?.last_name}`)
       await fetchGuests()
     } catch (error) {
       console.error('Error removing tag:', error)
-      alert('Failed to remove tag: ' + (error.response?.data?.error || error.message))
+      showError('Failed to remove tag: ' + (error.response?.data?.error || error.message))
     }
   }
 
@@ -160,11 +174,12 @@ function Guests() {
     
     try {
       await tagApi.create({ name: newTagName.trim() })
+      success(`Tag "${newTagName.trim()}" created successfully!`)
       await fetchTags()
       setNewTagName('')
     } catch (error) {
       console.error('Error creating tag:', error)
-      alert('Failed to create tag: ' + (error.response?.data?.error || error.message))
+      showError('Failed to create tag: ' + (error.response?.data?.error || error.message))
     }
   }
 

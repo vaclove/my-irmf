@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react'
 import { templateApi, editionApi } from '../utils/api'
+import { useToast } from '../contexts/ToastContext'
 import MDEditor from '@uiw/react-md-editor'
 import '@uiw/react-md-editor/markdown-editor.css'
 import '@uiw/react-markdown-preview/markdown.css'
 
 function EmailTemplates() {
+  const { success, error: showError } = useToast()
   const [editions, setEditions] = useState([])
   const [selectedEdition, setSelectedEdition] = useState(null)
   const [currentLanguage, setCurrentLanguage] = useState('english')
@@ -128,11 +130,10 @@ function EmailTemplates() {
         [currentLanguage]: { subject: '', content: '', accommodationContent: '' }
       }))
       
-      // Show success message (you might want to add a toast notification here)
-      console.log('Template saved successfully')
+      success('Template saved successfully!')
     } catch (error) {
       console.error('Error saving template:', error)
-      alert('Failed to save template: ' + (error.response?.data?.error || error.message))
+      showError('Failed to save template: ' + (error.response?.data?.error || error.message))
     } finally {
       setSaving(false)
     }
@@ -152,7 +153,7 @@ function EmailTemplates() {
       setShowPreview(true)
     } catch (error) {
       console.error('Error generating preview:', error)
-      alert('Failed to generate preview: ' + (error.response?.data?.error || error.message))
+      showError('Failed to generate preview: ' + (error.response?.data?.error || error.message))
     }
   }
 

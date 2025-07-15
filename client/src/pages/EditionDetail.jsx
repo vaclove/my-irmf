@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
 import { editionApi, guestApi, invitationApi } from '../utils/api'
+import { useToast } from '../contexts/ToastContext'
 import InvitationDialog from '../components/InvitationDialog'
 
 function EditionDetail() {
   const { id } = useParams()
+  const { success, error: showError } = useToast()
   const [edition, setEdition] = useState(null)
   const [assignedGuests, setAssignedGuests] = useState([])
   const [allGuests, setAllGuests] = useState([])
@@ -15,7 +17,6 @@ function EditionDetail() {
   const [filterCategory, setFilterCategory] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
   const [resendingGuestId, setResendingGuestId] = useState(null)
-  const [resendSuccess, setResendSuccess] = useState(null)
 
   // Categories are now determined from tags automatically
   const categories = ['filmmaker', 'press', 'guest', 'staff'] // For filtering only
@@ -58,23 +59,18 @@ function EditionDetail() {
   const handleResendInvitation = async (guest) => {
     try {
       setResendingGuestId(guest.id)
-      setResendSuccess(null)
       
       await invitationApi.resend({
         guest_id: guest.id,
         edition_id: id
       })
       
-      setResendSuccess(guest.id)
+      success(`Invitation resent to ${guest.first_name} ${guest.last_name}`)
       fetchEditionData()
-      
-      // Clear success message after 3 seconds
-      setTimeout(() => {
-        setResendSuccess(null)
-      }, 3000)
       
     } catch (error) {
       console.error('Error resending invitation:', error)
+      showError('Failed to resend invitation: ' + (error.response?.data?.error || error.message))
     } finally {
       setResendingGuestId(null)
     }
@@ -310,11 +306,6 @@ function EditionDetail() {
                           >
                             {resendingGuestId === guest.id ? 'Sending...' : 'Resend Invite'}
                           </button>
-                          {resendSuccess === guest.id && (
-                            <span className="text-green-600 text-xs font-medium">
-                              ✓ Resent!
-                            </span>
-                          )}
                         </>
                       ) : null}
                     </div>

@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react'
 import { invitationApi } from '../utils/api'
+import { useToast } from '../contexts/ToastContext'
 
 function InvitationDialog({ isOpen, onClose, guest, edition, onInvitationSent }) {
+  const { success, error: showError } = useToast()
   const [loading, setLoading] = useState(false)
   const [formData, setFormData] = useState({
     language: 'english',
@@ -23,7 +25,7 @@ function InvitationDialog({ isOpen, onClose, guest, edition, onInvitationSent })
     e.preventDefault()
     
     if (formData.accommodation && formData.covered_nights <= 0) {
-      alert('Please specify number of covered nights when accommodation is included')
+      showError('Please specify number of covered nights when accommodation is included')
       return
     }
 
@@ -45,10 +47,10 @@ function InvitationDialog({ isOpen, onClose, guest, edition, onInvitationSent })
       }
       
       onClose()
-      alert('Invitation sent successfully!')
+      success(`Invitation sent to ${guest.first_name} ${guest.last_name}!`)
     } catch (error) {
       console.error('Error sending invitation:', error)
-      alert('Failed to send invitation: ' + (error.response?.data?.error || error.message))
+      showError('Failed to send invitation: ' + (error.response?.data?.error || error.message))
     } finally {
       setLoading(false)
     }
