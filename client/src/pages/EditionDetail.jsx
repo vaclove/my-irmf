@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import { editionApi, guestApi, invitationApi } from '../utils/api'
 import { useToast } from '../contexts/ToastContext'
 import InvitationDialog from '../components/InvitationDialog'
 
 function EditionDetail() {
   const { id } = useParams()
+  const navigate = useNavigate()
   const { success, error: showError } = useToast()
   const [edition, setEdition] = useState(null)
   const [assignedGuests, setAssignedGuests] = useState([])
@@ -266,8 +267,14 @@ function EditionDetail() {
             <tbody className="bg-white divide-y divide-gray-200">
               {getFilteredAndSortedGuests().map((guest) => (
                 <tr key={guest.id}>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                    {guest.first_name} {guest.last_name}
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                    <button
+                      onClick={() => navigate(`/guests?edit=${guest.id}`)}
+                      className="text-blue-600 hover:text-blue-900 hover:underline font-medium"
+                      title="Click to edit guest"
+                    >
+                      {guest.first_name} {guest.last_name}
+                    </button>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                     {guest.company || '-'}

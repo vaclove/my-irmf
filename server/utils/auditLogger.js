@@ -5,18 +5,50 @@ const { pool } = require('../models/database');
  * Provides functions to log all CRUD operations and authentication events
  */
 
+// Strip port number from IP address
+const stripPortFromIp = (ipWithPort) => {
+  if (!ipWithPort || ipWithPort === 'unknown') return ipWithPort;
+  
+  // Handle IPv6 addresses in brackets like [::1]:8080 or [2001:db8::1]:8080
+  if (ipWithPort.startsWith('[')) {
+    const closeBracket = ipWithPort.indexOf(']');
+    if (closeBracket !== -1) {
+      return ipWithPort.substring(1, closeBracket);
+    }
+  }
+  
+  // Check if this is an IPv4 address with port (contains dots and ends with :number)
+  if (ipWithPort.includes('.')) {
+    const lastColonIndex = ipWithPort.lastIndexOf(':');
+    if (lastColonIndex !== -1) {
+      const afterColon = ipWithPort.substring(lastColonIndex + 1);
+      // Only strip if it's clearly a port number (all digits)
+      if (/^\d+$/.test(afterColon)) {
+        return ipWithPort.substring(0, lastColonIndex);
+      }
+    }
+  }
+  
+  // For IPv6 addresses without brackets (like ::1, ::ffff:192.168.1.1), return as-is
+  // They shouldn't have ports without brackets
+  return ipWithPort;
+};
+
 // Get user information from request
 const getUserInfo = (req) => {
   // Extract user email from session/auth
   const userEmail = req.user?.email || req.session?.user?.email || null;
   
   // Get IP address, handling various proxy scenarios
-  const userIp = req.ip || 
+  const rawIp = req.ip || 
                 req.connection?.remoteAddress || 
                 req.socket?.remoteAddress ||
                 req.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
                 req.headers['x-real-ip'] ||
                 'unknown';
+  
+  // Strip port number from IP address
+  const userIp = stripPortFromIp(rawIp);
 
   return { userEmail, userIp };
 };

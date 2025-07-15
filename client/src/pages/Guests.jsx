@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { guestApi, tagApi } from '../utils/api'
 import { useToast } from '../contexts/ToastContext'
 import TagCard from '../components/TagCard'
 
 function Guests() {
   const { success, error: showError } = useToast()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [guests, setGuests] = useState([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
@@ -31,6 +33,19 @@ function Guests() {
     fetchGuests()
     fetchTags()
   }, [])
+
+  // Handle edit query parameter
+  useEffect(() => {
+    const editGuestId = searchParams.get('edit')
+    if (editGuestId && guests.length > 0) {
+      const guestToEdit = guests.find(g => g.id === editGuestId)
+      if (guestToEdit) {
+        handleEdit(guestToEdit)
+        // Clear the query parameter
+        setSearchParams({})
+      }
+    }
+  }, [searchParams, guests])
 
   const fetchGuests = async () => {
     try {
