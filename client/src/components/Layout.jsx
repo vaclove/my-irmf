@@ -21,9 +21,11 @@ function Layout({ children }) {
     setIsMobileMenuOpen(false)
   }
 
+  const isDevelopment = process.env.NODE_ENV === 'development'
+
   return (
     <div className="min-h-screen bg-gray-50">
-      <nav className="bg-white shadow-lg">
+      <nav className={`shadow-lg ${isDevelopment ? 'bg-blue-50 border-b border-blue-100' : 'bg-white'}`}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16">
             {/* Logo */}
@@ -34,6 +36,11 @@ function Layout({ children }) {
                   alt="IRMF Logo" 
                   className="h-8 w-auto"
                 />
+                {isDevelopment && (
+                  <span className="ml-2 px-2 py-1 text-xs font-medium text-blue-600 bg-blue-100 rounded-md">
+                    DEV
+                  </span>
+                )}
               </Link>
             </div>
 

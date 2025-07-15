@@ -237,7 +237,21 @@ function Guests() {
             {showTagFilter ? 'Hide Filters' : 'Filter by Tags'}
           </button>
           <button
-            onClick={() => setShowForm(true)}
+            onClick={() => {
+              setEditingGuest(null)
+              setFormData({ 
+                first_name: '', 
+                last_name: '',
+                email: '', 
+                phone: '', 
+                language: 'english', 
+                company: '', 
+                notes: '',
+                greeting: '',
+                greeting_auto_generated: true
+              })
+              setShowForm(true)
+            }}
             className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700"
           >
             Add Guest

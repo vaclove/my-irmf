@@ -49,3 +49,13 @@ The repository has Claude Code permissions configured in `.claude/settings.local
 ## Git Workflow Instructions
 
 **IMPORTANT**: NEVER commit or push changes automatically. Always ask the user for explicit permission before creating commits or pushing to the repository. The user wants to review all changes before they are committed to git history.
+
+### Version Bump Guidelines
+
+When committing changes, consider bumping the package.json version:
+
+- **PATCH (x.x.X)**: Bug fixes, small improvements, refactoring, documentation updates
+- **MINOR (x.X.x)**: New features, new API endpoints, significant UI changes  
+- **MAJOR (X.x.x)**: Breaking changes, major refactoring, API changes that affect compatibility
+
+Use `npm version patch|minor|major` before committing to update the version. The pre-commit hook will prompt you to decide on version bumping.
