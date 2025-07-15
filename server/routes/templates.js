@@ -136,7 +136,7 @@ router.post('/preview/edition/:editionId/language/:language', async (req, res) =
     sampleData.subject = subject || 'Preview Subject';
     
     // Process template content
-    const processed = processTemplate(markdown_content, sampleData);
+    const processed = processTemplate(markdown_content, sampleData, { isPreview: true });
     
     // Replace variables in subject
     let previewSubject = subject || 'Preview Subject';
@@ -197,7 +197,7 @@ router.get('/preview/edition/:editionId/language/:language', async (req, res) =>
     
     // Process template content
     const templateContent = template.markdown_content || template.body || '';
-    const processed = processTemplate(templateContent, sampleData);
+    const processed = processTemplate(templateContent, sampleData, { isPreview: true });
     
     // Replace variables in subject
     let previewSubject = template.subject;

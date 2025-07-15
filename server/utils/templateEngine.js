@@ -11,7 +11,8 @@ const { marked } = require('marked');
 function processTemplate(markdownContent, variables = {}, options = {}) {
   const {
     includeStyles = true,
-    accommodationAware = true
+    accommodationAware = true,
+    isPreview = false
   } = options;
 
   if (!markdownContent) {
@@ -31,7 +32,7 @@ function processTemplate(markdownContent, variables = {}, options = {}) {
 
   // Wrap in email template with styles
   const styledHtml = includeStyles 
-    ? wrapInEmailTemplate(htmlContent, variables)
+    ? wrapInEmailTemplate(htmlContent, variables, isPreview)
     : htmlContent;
 
   return {
@@ -127,11 +128,169 @@ function generateAccommodationInfo(nights, language = 'english') {
  * Wrap HTML content in professional email template
  * @param {string} htmlContent - The main email content
  * @param {object} variables - Template variables for personalization
+ * @param {boolean} isPreview - Whether this is for preview (affects styling scope)
  * @returns {string} Complete HTML email
  */
-function wrapInEmailTemplate(htmlContent, variables = {}) {
+function wrapInEmailTemplate(htmlContent, variables = {}, isPreview = false) {
   const logoUrl = 'https://irmf.cz/wp-content/uploads/2022/07/irmf_web_logo_90px_black.png';
   const festivalName = variables.edition_name || 'International Roma Music Festival';
+  
+  // For preview, return just the styled content without full HTML document
+  if (isPreview) {
+    return `
+    <style>
+        .email-preview-container {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 0;
+            background-color: #f8f9fa;
+        }
+        .email-preview-container .email-container {
+            background-color: #ffffff;
+            margin: 20px auto;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+        .email-preview-container .header {
+            background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
+            color: white;
+            padding: 30px 20px;
+            text-align: center;
+        }
+        .email-preview-container .header img {
+            max-height: 60px;
+            margin-bottom: 15px;
+            filter: brightness(0) invert(1);
+        }
+        .email-preview-container .header h1 {
+            margin: 0;
+            font-size: 24px;
+            font-weight: 600;
+        }
+        .email-preview-container .header p {
+            margin: 5px 0 0 0;
+            font-size: 14px;
+            opacity: 0.9;
+        }
+        .email-preview-container .content {
+            padding: 40px 30px;
+            background-color: #ffffff;
+        }
+        .email-preview-container .content h1, .email-preview-container .content h2, .email-preview-container .content h3 {
+            color: #1e3a8a;
+            margin-top: 0;
+        }
+        .email-preview-container .content h1 {
+            font-size: 28px;
+            margin-bottom: 20px;
+        }
+        .email-preview-container .content h2 {
+            font-size: 22px;
+            margin-bottom: 15px;
+        }
+        .email-preview-container .content h3 {
+            font-size: 18px;
+            margin-bottom: 10px;
+        }
+        .email-preview-container .content p {
+            margin-bottom: 15px;
+            font-size: 16px;
+        }
+        .email-preview-container .content strong {
+            color: #1e3a8a;
+        }
+        .email-preview-container .content a {
+            color: #3b82f6;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        .email-preview-container .content a:hover {
+            text-decoration: underline;
+        }
+        .email-preview-container .button {
+            display: inline-block;
+            background-color: #3b82f6;
+            color: white !important;
+            padding: 12px 30px;
+            text-decoration: none;
+            border-radius: 6px;
+            font-weight: 600;
+            margin: 20px 0;
+            text-align: center;
+        }
+        .email-preview-container .button:hover {
+            background-color: #2563eb;
+            text-decoration: none !important;
+        }
+        .email-preview-container .accommodation-info {
+            background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+            border: 1px solid #93c5fd;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 25px 0;
+            text-align: center;
+        }
+        .email-preview-container .accommodation-info strong {
+            color: #1e40af;
+            font-size: 18px;
+        }
+        .email-preview-container .footer {
+            background-color: #f1f5f9;
+            padding: 25px 30px;
+            text-align: center;
+            border-top: 1px solid #e2e8f0;
+        }
+        .email-preview-container .footer p {
+            margin: 0;
+            font-size: 14px;
+            color: #64748b;
+        }
+        .email-preview-container .footer a {
+            color: #3b82f6;
+            text-decoration: none;
+        }
+        @media only screen and (max-width: 600px) {
+            .email-preview-container .email-container {
+                margin: 0;
+                border-radius: 0;
+            }
+            .email-preview-container .content {
+                padding: 25px 20px;
+            }
+            .email-preview-container .header {
+                padding: 20px 15px;
+            }
+            .email-preview-container .footer {
+                padding: 20px 15px;
+            }
+        }
+    </style>
+    <div class="email-preview-container">
+        <div class="email-container">
+            <div class="header">
+                <img src="${logoUrl}" alt="IRMF Logo" />
+                <h1>${festivalName}</h1>
+                <p>International Roma Music Festival</p>
+            </div>
+            
+            <div class="content">
+                ${htmlContent}
+            </div>
+            
+            <div class="footer">
+                <p>
+                    <strong>International Roma Music Festival</strong><br>
+                    <a href="https://irmf.cz">www.irmf.cz</a> | 
+                    <a href="mailto:info@irmf.cz">info@irmf.cz</a>
+                </p>
+            </div>
+        </div>
+    </div>`;
+  }
   
   return `
 <!DOCTYPE html>
@@ -141,7 +300,7 @@ function wrapInEmailTemplate(htmlContent, variables = {}) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>${variables.subject || 'Festival Invitation'}</title>
     <style>
-        body {
+        .email-preview-body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
             line-height: 1.6;
             color: #333333;
@@ -272,7 +431,7 @@ function wrapInEmailTemplate(htmlContent, variables = {}) {
         }
     </style>
 </head>
-<body>
+<body class="email-preview-body">
     <div class="email-container">
         <div class="header">
             <img src="${logoUrl}" alt="IRMF Logo" />
