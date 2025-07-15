@@ -5,6 +5,7 @@ const mailgunService = require('../utils/mailgun');
 const { pool } = require('../models/database');
 const { logError } = require('../utils/logger');
 const { auditMiddleware, captureOriginalData } = require('../utils/auditLogger');
+const { processTemplate } = require('../utils/templateEngine');
 const router = express.Router();
 
 // Apply audit middleware to all routes
@@ -45,47 +46,6 @@ const sendEmail = async (emailData) => {
   }
 };
 
-// Helper function to generate accommodation info
-function getAccommodationInfo(language, hasAccommodation, nights) {
-  if (!hasAccommodation || nights <= 0) {
-    return '';
-  }
-  
-  const accommodationText = {
-    english: {
-      single: `<div style="background: #e6f7ff; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #1890ff;">
-        <p style="margin: 0; font-size: 16px; color: #1890ff;">
-          <strong>🏨 Accommodation Included</strong><br>
-          We have arranged accommodation for you for <strong>1 night</strong> during the festival.
-        </p>
-      </div>`,
-      multiple: `<div style="background: #e6f7ff; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #1890ff;">
-        <p style="margin: 0; font-size: 16px; color: #1890ff;">
-          <strong>🏨 Accommodation Included</strong><br>
-          We have arranged accommodation for you for <strong>${nights} nights</strong> during the festival.
-        </p>
-      </div>`
-    },
-    czech: {
-      single: `<div style="background: #e6f7ff; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #1890ff;">
-        <p style="margin: 0; font-size: 16px; color: #1890ff;">
-          <strong>🏨 Ubytování zahrnuto</strong><br>
-          Zajistili jsme pro Vás ubytování na <strong>1 noc</strong> během festivalu.
-        </p>
-      </div>`,
-      multiple: `<div style="background: #e6f7ff; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #1890ff;">
-        <p style="margin: 0; font-size: 16px; color: #1890ff;">
-          <strong>🏨 Ubytování zahrnuto</strong><br>
-          Zajistili jsme pro Vás ubytování na <strong>${nights} nocí</strong> během festivalu.
-        </p>
-      </div>`
-    }
-  };
-  
-  return nights === 1 
-    ? accommodationText[language].single 
-    : accommodationText[language].multiple;
-}
 
 // Send invitation to guest for specific edition
 router.post('/send', async (req, res) => {
@@ -100,7 +60,7 @@ router.post('/send', async (req, res) => {
     // Check if guest has the year tag for this edition
     const guestEditionResult = await pool.query(`
       SELECT g.first_name || ' ' || g.last_name as name, 
-             g.first_name, g.last_name, g.email, g.language as guest_language, g.company, 
+             g.first_name, g.last_name, g.email, g.language as guest_language, g.company, g.greeting,
              e.name as edition_name, e.year,
              COALESCE(
                (SELECT tag_name FROM (
@@ -161,33 +121,29 @@ router.post('/send', async (req, res) => {
     
     // Prepare template variables
     const templateData = {
+      greeting: assignment.greeting || '',
       guest_name: assignment.name,
       edition_name: assignment.edition_name,
       category: assignment.category,
       confirmation_url: confirmationUrl,
-      accommodation_info: getAccommodationInfo(emailLanguage, accommodation, covered_nights),
-      company: assignment.company || ''
+      company: assignment.company || '',
+      language: emailLanguage,
+      has_accommodation: accommodation,
+      accommodation_nights: covered_nights
     };
     
-    // Replace template variables
-    let emailSubject = template.subject;
-    let emailHtml = template.body;
+    // Process template content using template engine (same as preview)
+    const templateContent = template.markdown_content || template.body || '';
+    const processed = processTemplate(templateContent, templateData, { isPreview: false });
     
+    // Replace variables in subject
+    let emailSubject = template.subject;
     Object.keys(templateData).forEach(key => {
       const placeholder = `{{${key}}}`;
-      const value = templateData[key];
-      
-      // For accommodation_info, if empty, remove the entire line/section
-      if (key === 'accommodation_info' && (!value || value.trim() === '')) {
-        // Remove the placeholder and any surrounding whitespace/newlines
-        emailSubject = emailSubject.replace(new RegExp(`\\s*${placeholder}\\s*`, 'g'), '');
-        emailHtml = emailHtml.replace(new RegExp(`\\s*${placeholder}\\s*`, 'g'), '');
-      } else {
-        // Normal replacement for other variables
-        emailSubject = emailSubject.replace(new RegExp(placeholder, 'g'), value);
-        emailHtml = emailHtml.replace(new RegExp(placeholder, 'g'), value);
-      }
+      emailSubject = emailSubject.replace(new RegExp(placeholder, 'g'), templateData[key] || '');
     });
+    
+    const emailHtml = processed.html;
     
     try {
       const emailData = {
@@ -256,7 +212,7 @@ router.post('/resend', async (req, res) => {
     // Check if guest has the year tag for this edition
     const guestEditionResult = await pool.query(`
       SELECT g.first_name || ' ' || g.last_name as name, 
-             g.first_name, g.last_name, g.email, g.language as guest_language, g.company, 
+             g.first_name, g.last_name, g.email, g.language as guest_language, g.company, g.greeting,
              e.name as edition_name, e.year,
              COALESCE(
                (SELECT tag_name FROM (
@@ -317,33 +273,29 @@ router.post('/resend', async (req, res) => {
     
     // Prepare template variables
     const templateData = {
+      greeting: assignment.greeting || '',
       guest_name: assignment.name,
       edition_name: assignment.edition_name,
       category: assignment.category,
       confirmation_url: confirmationUrl,
-      accommodation_info: getAccommodationInfo(emailLanguage, invitation.accommodation, invitation.covered_nights),
-      company: assignment.company || ''
+      company: assignment.company || '',
+      language: emailLanguage,
+      has_accommodation: invitation.accommodation,
+      accommodation_nights: invitation.covered_nights
     };
     
-    // Replace template variables
-    let emailSubject = template.subject;
-    let emailHtml = template.body;
+    // Process template content using template engine (same as preview)
+    const templateContent = template.markdown_content || template.body || '';
+    const processed = processTemplate(templateContent, templateData, { isPreview: false });
     
+    // Replace variables in subject
+    let emailSubject = template.subject;
     Object.keys(templateData).forEach(key => {
       const placeholder = `{{${key}}}`;
-      const value = templateData[key];
-      
-      // For accommodation_info, if empty, remove the entire line/section
-      if (key === 'accommodation_info' && (!value || value.trim() === '')) {
-        // Remove the placeholder and any surrounding whitespace/newlines
-        emailSubject = emailSubject.replace(new RegExp(`\\s*${placeholder}\\s*`, 'g'), '');
-        emailHtml = emailHtml.replace(new RegExp(`\\s*${placeholder}\\s*`, 'g'), '');
-      } else {
-        // Normal replacement for other variables
-        emailSubject = emailSubject.replace(new RegExp(placeholder, 'g'), value);
-        emailHtml = emailHtml.replace(new RegExp(placeholder, 'g'), value);
-      }
+      emailSubject = emailSubject.replace(new RegExp(placeholder, 'g'), templateData[key] || '');
     });
+    
+    const emailHtml = processed.html;
     
     try {
       const emailData = {
