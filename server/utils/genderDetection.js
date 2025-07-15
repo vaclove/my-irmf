@@ -26,7 +26,9 @@ const femaleNames = new Set([
   'marie', 'jana', 'eva', 'anna', 'věra', 'alena', 'lenka', 'kateřina', 'lucie', 'helena',
   'jitka', 'martina', 'zuzana', 'jaroslava', 'petra', 'božena', 'hana', 'jiřina', 'růžena', 'vlasta',
   'tereza', 'veronika', 'barbora', 'klára', 'adéla', 'natálie', 'nikola', 'kristýna', 'simona', 'michaela',
-  'daniela', 'andrea', 'monika', 'ivana', 'šárka', 'marcela', 'renata', 'dagmar', 'zdenka', 'milada'
+  'daniela', 'andrea', 'monika', 'ivana', 'šárka', 'marcela', 'renata', 'dagmar', 'zdenka', 'milada',
+  'vladimíra', 'kamila', 'božena', 'ludmila', 'anežka', 'františka', 'olga', 'irena', 'libuše', 'emilie',
+  'julie', 'radka', 'pavla', 'věra', 'gabriela', 'jarmila', 'silva', 'naděžda', 'stanislava', 'blanka'
 ]);
 
 // Czech surname patterns for gender detection
@@ -81,10 +83,18 @@ function detectGender(firstName, lastName = '', language = 'english') {
   // Check common name endings for additional hints
   if (language === 'czech') {
     // Czech name ending patterns
-    if (normalizedFirstName.endsWith('a') && !normalizedFirstName.endsWith('cha')) {
+    // Most Czech female names end with 'a', with few exceptions
+    if (normalizedFirstName.endsWith('a')) {
+      // Exceptions: some male names also end with 'a' (e.g., 'tomáša' in genitive, but 'tomáš' in nominative)
+      // Common male exceptions: none in nominative case for first names
       return 'female';
     }
+    // Names ending with 'e' are often female (e.g., Marie, but check length)
     if (normalizedFirstName.endsWith('e') && normalizedFirstName.length > 3) {
+      return 'female';
+    }
+    // Names ending with 'ie' are typically female
+    if (normalizedFirstName.endsWith('ie')) {
       return 'female';
     }
   } else {

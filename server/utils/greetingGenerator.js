@@ -117,7 +117,8 @@ function generateCzechGreeting(firstName, lastName, gender, formal, fallbackToFi
     // Formal Czech greeting with declined surname
     const honorific = getCzechHonorific(gender);
     const declinedSurname = declineSurnameToVocative(lastName, gender);
-    return `Vážený ${honorific} ${declinedSurname}`;
+    const vazeny = gender === 'female' ? 'Vážená' : 'Vážený';
+    return `${vazeny} ${honorific} ${declinedSurname}`;
   } else if (formal && lastName) {
     // Formal but unknown gender - use neutral form
     const honorific = getCzechHonorific('male'); // Default to male form
