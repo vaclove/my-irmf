@@ -283,7 +283,7 @@ function EditionDetail() {
                     {getCategoryBadge(guest.category)}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {guest.covered_nights ? `${guest.covered_nights} nights` : '-'}
+                    {guest.covered_nights ? `${guest.covered_nights} ${guest.covered_nights === 1 ? 'night' : 'nights'}` : '-'}
                   </td>
                   <td className="px-6 py-4">
                     {getStatusBadge(guest)}
