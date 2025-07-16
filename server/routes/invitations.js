@@ -86,7 +86,7 @@ router.post('/send', async (req, res) => {
       JOIN tags year_tag ON gt.tag_id = year_tag.id
       JOIN editions e ON year_tag.name = e.year::text
       WHERE g.id = $1 AND e.id = $2
-    `, [guest_id, edition_id]);
+    `, [guestId, editionId]);
     
     if (guestEditionResult.rows.length === 0) {
       return res.status(404).json({ 
@@ -210,12 +210,12 @@ router.post('/send', async (req, res) => {
         covered_nights
       });
     } catch (emailError) {
-      logError(emailError, req, { operation: 'send_invitation_email', guestId: guest_id, editionId: edition_id });
+      logError(emailError, req, { operation: 'send_invitation_email', guestId: guestId, editionId: editionId });
       res.status(500).json({ error: 'Failed to send email: ' + emailError.message });
     }
     
   } catch (error) {
-    logError(error, req, { operation: 'send_invitation', guestId: guest_id, editionId: edition_id, formData: req.body });
+    logError(error, req, { operation: 'send_invitation', guestId: guestId, editionId: editionId, formData: req.body });
     res.status(500).json({ error: error.message });
   }
 });
@@ -223,9 +223,27 @@ router.post('/send', async (req, res) => {
 // Resend invitation to guest for specific edition
 router.post('/resend', async (req, res) => {
   try {
-    const { guest_id, edition_id } = req.body;
+    const { guest_id, edition_id, invitation_id } = req.body;
     
-    if (!guest_id || !edition_id) {
+    // Support both invitation_id and guest_id/edition_id formats
+    let guestId = guest_id;
+    let editionId = edition_id;
+    
+    if (invitation_id && !guestId && !editionId) {
+      // Get guest_id and edition_id from invitation_id
+      const invitationResult = await pool.query(`
+        SELECT guest_id, edition_id FROM guest_invitations WHERE id = $1
+      `, [invitation_id]);
+      
+      if (invitationResult.rows.length === 0) {
+        return res.status(404).json({ error: 'Invitation not found' });
+      }
+      
+      guestId = invitationResult.rows[0].guest_id;
+      editionId = invitationResult.rows[0].edition_id;
+    }
+    
+    if (!guestId || !editionId) {
       return res.status(400).json({ error: 'Guest ID and Edition ID are required' });
     }
     
@@ -233,7 +251,7 @@ router.post('/resend', async (req, res) => {
     const invitationResult = await pool.query(`
       SELECT * FROM guest_invitations 
       WHERE guest_id = $1 AND edition_id = $2
-    `, [guest_id, edition_id]);
+    `, [guestId, editionId]);
     
     if (invitationResult.rows.length === 0) {
       return res.status(404).json({ 
@@ -272,7 +290,7 @@ router.post('/resend', async (req, res) => {
       JOIN tags year_tag ON gt.tag_id = year_tag.id
       JOIN editions e ON year_tag.name = e.year::text
       WHERE g.id = $1 AND e.id = $2
-    `, [guest_id, edition_id]);
+    `, [guestId, editionId]);
     
     if (guestEditionResult.rows.length === 0) {
       return res.status(404).json({ 
@@ -393,15 +411,120 @@ router.post('/resend', async (req, res) => {
         covered_nights: invitation.covered_nights
       });
     } catch (emailError) {
-      logError(emailError, req, { operation: 'resend_invitation_email', guestId: guest_id, editionId: edition_id });
+      logError(emailError, req, { operation: 'resend_invitation_email', guestId: guestId, editionId: editionId });
       res.status(500).json({ error: 'Failed to resend email: ' + emailError.message });
     }
     
   } catch (error) {
-    logError(error, req, { operation: 'resend_invitation', guestId: guest_id, editionId: edition_id, formData: req.body });
+    logError(error, req, { operation: 'resend_invitation', guestId: guestId, editionId: editionId, formData: req.body });
     res.status(500).json({ error: error.message });
   }
 });
 
+// Get invitations by edition
+router.get('/edition/:editionId', async (req, res) => {
+  try {
+    const { editionId } = req.params;
+    
+    const result = await pool.query(`
+      SELECT 
+        gi.id,
+        gi.guest_id,
+        gi.edition_id,
+        gi.token,
+        gi.invited_at as sent_at,
+        gi.confirmed_at as responded_at,
+        gi.accommodation,
+        gi.covered_nights,
+        CASE 
+          WHEN gi.confirmed_at IS NOT NULL THEN 'confirmed'
+          ELSE 'sent'
+        END as status,
+        NULL as opened_at,
+        g.first_name,
+        g.last_name,
+        g.email,
+        g.company,
+        g.photo,
+        e.name as edition_name,
+        e.year as edition_year,
+        COALESCE(
+          (SELECT tag_name FROM (
+            SELECT t2.name as tag_name, 
+                   CASE t2.name 
+                     WHEN 'filmmaker' THEN 1
+                     WHEN 'press' THEN 2  
+                     WHEN 'staff' THEN 3
+                     WHEN 'guest' THEN 4
+                     ELSE 5
+                   END as priority
+            FROM guest_tags gt2 
+            JOIN tags t2 ON gt2.tag_id = t2.id 
+            WHERE gt2.guest_id = g.id 
+            AND t2.name IN ('filmmaker', 'press', 'staff', 'guest')
+            ORDER BY priority
+            LIMIT 1
+          ) sub),
+          'guest'
+        ) as category
+      FROM guest_invitations gi
+      JOIN guests g ON gi.guest_id = g.id
+      JOIN editions e ON gi.edition_id = e.id
+      WHERE gi.edition_id = $1
+      ORDER BY gi.invited_at DESC
+    `, [editionId]);
+    
+    // Transform data to match frontend expectations
+    const invitations = result.rows.map(row => ({
+      id: row.id,
+      guest_id: row.guest_id,
+      edition_id: row.edition_id,
+      token: row.token,
+      sent_at: row.sent_at,
+      opened_at: row.opened_at,
+      responded_at: row.responded_at,
+      status: row.status,
+      accommodation: row.accommodation,
+      covered_nights: row.covered_nights,
+      guest: {
+        first_name: row.first_name,
+        last_name: row.last_name,
+        email: row.email,
+        company: row.company,
+        photo: row.photo,
+        category: row.category
+      },
+      edition: {
+        name: row.edition_name,
+        year: row.edition_year
+      }
+    }));
+    
+    res.json({ data: invitations });
+  } catch (error) {
+    console.error('Error fetching invitations:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete invitation
+router.delete('/:invitationId', async (req, res) => {
+  try {
+    const { invitationId } = req.params;
+    
+    const result = await pool.query(`
+      DELETE FROM guest_invitations WHERE id = $1 RETURNING *
+    `, [invitationId]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Invitation not found' });
+    }
+    
+    res.json({ message: 'Invitation deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting invitation:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 module.exports = router;

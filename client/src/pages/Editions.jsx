@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { editionApi } from '../utils/api'
+import { useEdition } from '../contexts/EditionContext'
 
 function Editions() {
+  const { selectedEdition, selectEdition } = useEdition()
   const [editions, setEditions] = useState([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
@@ -131,10 +133,11 @@ function Editions() {
 
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         {editions.map((edition) => (
-          <Link
+          <div
             key={edition.id}
-            to={`/editions/${edition.id}`}
-            className="bg-white rounded-lg shadow hover:shadow-lg transition-shadow p-6 border border-gray-200"
+            className={`bg-white rounded-lg shadow hover:shadow-lg transition-shadow p-6 border ${
+              selectedEdition?.id === edition.id ? 'border-blue-500 bg-blue-50' : 'border-gray-200'
+            }`}
           >
             <div className="flex justify-between items-start mb-4">
               <h3 className="text-lg font-semibold text-gray-900">{edition.name}</h3>
@@ -144,15 +147,33 @@ function Editions() {
             </div>
             
             {edition.start_date && edition.end_date && (
-              <p className="text-gray-600 text-sm mb-3">
+              <p className="text-gray-600 text-sm mb-4">
                 {new Date(edition.start_date).toLocaleDateString()} - {new Date(edition.end_date).toLocaleDateString()}
               </p>
             )}
             
-            <div className="text-blue-600 text-sm font-medium">
-              Manage Guests →
+            <div className="space-y-2">
+              {selectedEdition?.id === edition.id ? (
+                <div className="text-blue-600 text-sm font-medium mb-2">
+                  ✓ Currently Selected
+                </div>
+              ) : (
+                <button
+                  onClick={() => selectEdition(edition)}
+                  className="w-full bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 text-sm font-medium mb-2"
+                >
+                  Select Edition
+                </button>
+              )}
+              
+              <Link
+                to={`/editions/${edition.id}`}
+                className="block text-center bg-gray-100 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-200 text-sm font-medium"
+              >
+                Manage Guests →
+              </Link>
             </div>
-          </Link>
+          </div>
         ))}
       </div>
 

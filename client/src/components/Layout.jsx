@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
+import { useEdition } from '../contexts/EditionContext'
 
 function Layout({ children }) {
   const location = useLocation()
   const { user, logout } = useAuth()
+  const { selectedEdition } = useEdition()
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [version, setVersion] = useState('')
 
@@ -46,9 +48,9 @@ function Layout({ children }) {
                   className="h-8 w-auto"
                   title={`IRMF Guest Manager v${version}`}
                 />
-                {isDevelopment && (
-                  <span className="ml-2 px-2 py-1 text-xs font-medium text-blue-600 bg-blue-100 rounded-md">
-                    DEV
+                {selectedEdition && (
+                  <span className="ml-2 px-2 py-1 text-xs font-medium text-white bg-gradient-to-r from-blue-600 to-blue-700 rounded-md">
+                    {selectedEdition.year}
                   </span>
                 )}
               </Link>
@@ -57,14 +59,14 @@ function Layout({ children }) {
             {/* Desktop Navigation */}
             <div className="hidden md:flex md:items-center md:space-x-8">
               <Link
-                to="/editions"
+                to="/invitations"
                 className={`inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium ${
-                  isActive('/editions') || isActive('/')
+                  isActive('/invitations')
                     ? 'border-blue-500 text-gray-900'
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                 }`}
               >
-                Editions
+                Invitations
               </Link>
               <Link
                 to="/guests"
@@ -168,15 +170,15 @@ function Layout({ children }) {
           <div className={`${isMobileMenuOpen ? 'block' : 'hidden'} md:hidden`}>
             <div className="px-2 pt-2 pb-3 space-y-1 sm:px-3 border-t border-gray-200">
               <Link
-                to="/editions"
+                to="/invitations"
                 onClick={closeMobileMenu}
                 className={`block px-3 py-2 rounded-md text-base font-medium ${
-                  isActive('/editions') || isActive('/')
+                  isActive('/invitations')
                     ? 'text-blue-700 bg-blue-50'
                     : 'text-gray-700 hover:text-gray-900 hover:bg-gray-50'
                 }`}
               >
-                Editions
+                Invitations
               </Link>
               <Link
                 to="/guests"

@@ -49,7 +49,9 @@ const publicApi = axios.create({
 // Invitations API
 export const invitationApi = {
   send: (data) => api.post('/invitations/send', data),
-  resend: (data) => api.post('/invitations/resend', data),
+  resend: (invitationId) => api.post('/invitations/resend', { invitation_id: invitationId }),
+  delete: (invitationId) => api.delete(`/invitations/${invitationId}`),
+  getByEdition: (editionId) => api.get(`/invitations/edition/${editionId}`),
   confirm: (token) => publicApi.post(`/confirm/${token}`),
   getStatus: (guestId, editionId) => publicApi.get(`/status/${guestId}/${editionId}`),
 }
