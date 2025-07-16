@@ -68,6 +68,12 @@ function Layout({ children }) {
               </Link>
               <Link
                 to="/guests"
+                onClick={() => {
+                  // Force navigation to clean guests page
+                  if (window.location.pathname === '/guests') {
+                    window.location.href = '/guests'
+                  }
+                }}
                 className={`inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium ${
                   isActive('/guests')
                     ? 'border-blue-500 text-gray-900'
@@ -174,7 +180,13 @@ function Layout({ children }) {
               </Link>
               <Link
                 to="/guests"
-                onClick={closeMobileMenu}
+                onClick={() => {
+                  closeMobileMenu()
+                  // Force navigation to clean guests page
+                  if (window.location.pathname === '/guests') {
+                    window.location.href = '/guests'
+                  }
+                }}
                 className={`block px-3 py-2 rounded-md text-base font-medium ${
                   isActive('/guests')
                     ? 'text-blue-700 bg-blue-50'

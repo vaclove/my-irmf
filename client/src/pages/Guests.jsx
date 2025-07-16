@@ -3,6 +3,8 @@ import { useSearchParams } from 'react-router-dom'
 import { guestApi, tagApi } from '../utils/api'
 import { useToast } from '../contexts/ToastContext'
 import TagCard from '../components/TagCard'
+import PhotoUpload from '../components/PhotoUpload'
+import Avatar from '../components/Avatar'
 
 function Guests() {
   const { success, error: showError } = useToast()
@@ -25,7 +27,8 @@ function Guests() {
     company: '', 
     notes: '',
     greeting: '',
-    greeting_auto_generated: true
+    greeting_auto_generated: true,
+    photo: null
   })
   const [generatingGreeting, setGeneratingGreeting] = useState(false)
 
@@ -33,6 +36,7 @@ function Guests() {
     fetchGuests()
     fetchTags()
   }, [])
+
 
   // Handle edit query parameter
   useEffect(() => {
@@ -139,7 +143,8 @@ function Guests() {
       company: guest.company || '',
       notes: guest.notes || '',
       greeting: guest.greeting || '',
-      greeting_auto_generated: shouldAutoGenerate
+      greeting_auto_generated: shouldAutoGenerate,
+      photo: guest.photo || null
     })
     setShowForm(true)
   }
@@ -230,7 +235,8 @@ function Guests() {
       company: '', 
       notes: '',
       greeting: '',
-      greeting_auto_generated: true
+      greeting_auto_generated: true,
+      photo: null
     })
     setEditingGuest(null)
     setShowForm(false)
@@ -263,7 +269,8 @@ function Guests() {
                 company: '', 
                 notes: '',
                 greeting: '',
-                greeting_auto_generated: true
+                greeting_auto_generated: true,
+                photo: null
               })
               setShowForm(true)
             }}
@@ -333,10 +340,28 @@ function Guests() {
 
       {showForm && (
         <div className="bg-white shadow rounded-lg p-6 mb-6">
-          <h2 className="text-lg font-medium mb-4">
-            {editingGuest ? 'Edit Guest' : 'Add New Guest'}
-          </h2>
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-lg font-medium">
+              {editingGuest ? 'Edit Guest' : 'Add New Guest'}
+            </h2>
+            <button
+              type="button"
+              onClick={resetForm}
+              className="text-gray-400 hover:text-gray-600 transition-colors"
+              title="Close form"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
           <form onSubmit={handleSubmit} className="space-y-4">
+            <PhotoUpload
+              currentPhoto={formData.photo}
+              onPhotoChange={(photo) => setFormData({ ...formData, photo })}
+              guestId={editingGuest?.id}
+              guestData={editingGuest}
+            />
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700">First Name</label>
@@ -447,20 +472,31 @@ function Guests() {
                 placeholder="Additional notes about the guest..."
               />
             </div>
-            <div className="flex space-x-3">
-              <button
-                type="submit"
-                className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700"
-              >
-                {editingGuest ? 'Update' : 'Create'}
-              </button>
-              <button
-                type="button"
-                onClick={resetForm}
-                className="bg-gray-300 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-400"
-              >
-                Cancel
-              </button>
+            <div className="flex justify-between items-center">
+              <div className="flex space-x-3">
+                <button
+                  type="submit"
+                  className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700"
+                >
+                  {editingGuest ? 'Update' : 'Create'}
+                </button>
+                <button
+                  type="button"
+                  onClick={resetForm}
+                  className="bg-gray-300 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-400"
+                >
+                  Cancel
+                </button>
+              </div>
+              {editingGuest && (
+                <button
+                  type="button"
+                  onClick={() => handleDelete(editingGuest.id)}
+                  className="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700"
+                >
+                  Delete Guest
+                </button>
+              )}
             </div>
           </form>
         </div>
@@ -479,25 +515,43 @@ function Guests() {
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Phone</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Language</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Company</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tags</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Notes</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Created</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Language</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tags</th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {getFilteredGuests().map((guest) => (
                 <tr key={guest.id}>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                    {guest.first_name} {guest.last_name}
+                    <button
+                      onClick={() => handleEdit(guest)}
+                      className="flex items-center space-x-3 text-left hover:text-blue-600 transition-colors"
+                      title="Click to edit guest"
+                    >
+                      <Avatar
+                        photo={guest.photo}
+                        firstName={guest.first_name}
+                        lastName={guest.last_name}
+                        size="sm"
+                      />
+                      <span>{guest.first_name} {guest.last_name}</span>
+                    </button>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                     {guest.email}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                     {guest.phone || '-'}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    {guest.company || '-'}
+                  </td>
+                  <td className="px-6 py-4 text-sm text-gray-500 max-w-xs">
+                    <div className="truncate" title={guest.notes}>
+                      {guest.notes || '-'}
+                    </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                     <span className={`inline-flex px-2 py-1 text-xs rounded-full ${
@@ -507,9 +561,6 @@ function Guests() {
                     }`}>
                       {guest.language === 'czech' ? 'Czech' : 'English'}
                     </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {guest.company || '-'}
                   </td>
                   <td className="px-6 py-4 text-sm text-gray-500">
                     <div className="flex flex-wrap gap-1 max-w-xs">
@@ -559,28 +610,6 @@ function Guests() {
                         </div>
                       </div>
                     )}
-                  </td>
-                  <td className="px-6 py-4 text-sm text-gray-500 max-w-xs">
-                    <div className="truncate" title={guest.notes}>
-                      {guest.notes || '-'}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {new Date(guest.created_at).toLocaleDateString()}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    <button
-                      onClick={() => handleEdit(guest)}
-                      className="text-blue-600 hover:text-blue-900 mr-3"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => handleDelete(guest.id)}
-                      className="text-red-600 hover:text-red-900"
-                    >
-                      Delete
-                    </button>
                   </td>
                 </tr>
               ))}
