@@ -108,6 +108,9 @@ export const badgeApi = {
   
   // Preview
   getPreview: (layoutId, guestId) => api.get(`/badges/preview/${layoutId}/${guestId}`),
+  
+  // Print data
+  getPrintData: (guestId, editionId) => api.get(`/badges/print-data/${guestId}/${editionId}`),
 }
 
 export default api

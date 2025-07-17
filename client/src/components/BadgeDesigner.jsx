@@ -477,7 +477,6 @@ const BadgeDesigner = ({
 
   const handleElementAdd = (elementType, position) => {
     const newElementId = getNextElementId();
-    console.log('Adding element:', { elementType, newElementId, currentElements: elements.length });
     
     const newElement = {
       id: newElementId,
@@ -502,12 +501,7 @@ const BadgeDesigner = ({
       newElement.height = 40;
     }
 
-    setElements(prev => {
-      console.log('Previous elements:', prev.map(e => ({ id: e.id, type: e.type })));
-      const newArray = [...prev, newElement];
-      console.log('New elements array:', newArray.map(e => ({ id: e.id, type: e.type })));
-      return newArray;
-    });
+    setElements(prev => [...prev, newElement]);
     setSelectedElement(newElementId);
   };
 

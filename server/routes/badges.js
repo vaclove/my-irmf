@@ -307,4 +307,65 @@ router.get('/preview/:layoutId/:guestId', async (req, res) => {
   }
 });
 
+// Generate badge data for printing
+router.get('/print-data/:guestId/:editionId', async (req, res) => {
+  try {
+    const { guestId, editionId } = req.params;
+    
+    // Get guest data with badge number
+    const guestResult = await pool.query(`
+      SELECT 
+        g.*,
+        gbn.badge_number,
+        e.year
+      FROM guests g
+      LEFT JOIN guest_badge_numbers gbn ON g.id = gbn.guest_id AND gbn.edition_id = $2
+      JOIN editions e ON e.id = $2
+      WHERE g.id = $1
+    `, [guestId, editionId]);
+    
+    if (guestResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Guest not found' });
+    }
+    
+    const guest = guestResult.rows[0];
+    
+    // Get category assignment for layout
+    const assignmentResult = await pool.query(`
+      SELECT 
+        cba.layout_id,
+        bl.name as layout_name,
+        bl.canvas_width_mm,
+        bl.canvas_height_mm,
+        bl.background_color,
+        bl.layout_data
+      FROM category_badge_assignments cba
+      JOIN badge_layouts bl ON cba.layout_id = bl.id
+      WHERE cba.edition_id = $1 AND cba.category = $2
+    `, [editionId, guest.category]);
+    
+    if (assignmentResult.rows.length === 0) {
+      return res.status(404).json({ error: 'No badge layout assigned to this guest category' });
+    }
+    
+    const layout = assignmentResult.rows[0];
+    
+    // Format badge number
+    const formattedBadgeNumber = guest.badge_number 
+      ? `${guest.year}${guest.badge_number.toString().padStart(3, '0')}`
+      : null;
+    
+    res.json({
+      layout,
+      guest: {
+        ...guest,
+        formatted_badge_number: formattedBadgeNumber
+      }
+    });
+  } catch (error) {
+    console.error('Error getting badge print data:', error);
+    res.status(500).json({ error: 'Failed to get badge print data' });
+  }
+});
+
 module.exports = router;
