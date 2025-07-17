@@ -1,3 +1,6 @@
+import '../assets/fonts/roboto-normal.js';
+import '../assets/fonts/roboto-bold.js';
+
 import jsPDF from 'jspdf';
 import JsBarcode from 'jsbarcode';
 
@@ -59,7 +62,10 @@ const renderTextElement = (pdf, element, guestData, editionYear) => {
   const x = mmToPt(pxToMm(element.x));
   const y = mmToPt(pxToMm(element.y));
   const fontSize = element.fontSize || 14;
-  
+
+  // Set custom Roboto font with UTF-8 support
+  const fontStyle = element.fontWeight === 'bold' ? 'bold' : 'normal';
+  pdf.setFont('Roboto', fontStyle);
   pdf.setFontSize(fontSize);
   pdf.setTextColor(element.color || '#000000');
   
@@ -145,6 +151,7 @@ export const generateBadgePDF = async (layout, guestData, editionYear) => {
     unit: 'pt',
     format: [mmToPt(layout.canvas_width_mm), mmToPt(layout.canvas_height_mm)]
   });
+  
   
   // Set background color if specified
   if (layout.background_color && layout.background_color !== '#ffffff') {

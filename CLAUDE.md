@@ -48,7 +48,21 @@ The repository has Claude Code permissions configured in `.claude/settings.local
 
 ## Git Workflow Instructions
 
-**IMPORTANT**: NEVER commit or push changes automatically. Always ask the user for explicit permission before creating commits or pushing to the repository. The user wants to review all changes before they are committed to git history.
+**CRITICAL**: NEVER commit or push changes automatically. ALWAYS ask the user for explicit permission before creating commits or pushing to the repository. The user wants to review all changes before they are committed to git history.
+
+**STOP AND ASK**: Before running any `git commit` or `git push` commands, you MUST:
+1. STOP what you are doing
+2. ASK the user: "Should I commit and push these changes?"
+3. WAIT for explicit user permission
+4. Only proceed if the user explicitly says yes
+
+**NO EXCEPTIONS**: This rule applies to ALL changes, including:
+- Bug fixes
+- Version bumps
+- Documentation updates
+- Any code changes, no matter how small
+
+The user will decide when and what to commit to git history.
 
 ### Version Bump Guidelines
 
