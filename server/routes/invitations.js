@@ -132,8 +132,8 @@ router.post('/send', async (req, res) => {
       accommodation_nights: covered_nights
     };
     
-    // If template has custom accommodation content, process it and use instead of auto-generated
-    if (template.accommodation_content && template.accommodation_content.trim()) {
+    // If template has custom accommodation content, process it only if accommodation is provided
+    if (template.accommodation_content && template.accommodation_content.trim() && accommodation && covered_nights > 0) {
       let processedAccommodationContent = template.accommodation_content.trim();
       
       // Add special night text variable with language-aware grammar
@@ -349,8 +349,8 @@ router.post('/resend', async (req, res) => {
       accommodation_nights: invitation.covered_nights
     };
     
-    // If template has custom accommodation content, process it and use instead of auto-generated
-    if (template.accommodation_content && template.accommodation_content.trim()) {
+    // If template has custom accommodation content, process it only if accommodation is provided
+    if (template.accommodation_content && template.accommodation_content.trim() && invitation.accommodation && invitation.covered_nights > 0) {
       let processedAccommodationContent = template.accommodation_content.trim();
       
       // Add special night text variable with language-aware grammar
