@@ -311,6 +311,7 @@ router.get('/preview/:layoutId/:guestId', async (req, res) => {
 router.get('/print-data/:guestId/:editionId', async (req, res) => {
   try {
     const { guestId, editionId } = req.params;
+    console.log('Badge print request:', { guestId, editionId });
     
     // Get guest data with badge number
     const guestResult = await pool.query(`
@@ -324,11 +325,15 @@ router.get('/print-data/:guestId/:editionId', async (req, res) => {
       WHERE g.id = $1
     `, [guestId, editionId]);
     
+    console.log('Guest query result:', guestResult.rows.length);
+    
     if (guestResult.rows.length === 0) {
+      console.log('Guest not found');
       return res.status(404).json({ error: 'Guest not found' });
     }
     
     const guest = guestResult.rows[0];
+    console.log('Guest found:', { id: guest.id, category: guest.category, badge_number: guest.badge_number });
     
     // Get category assignment for layout
     const assignmentResult = await pool.query(`
@@ -344,7 +349,20 @@ router.get('/print-data/:guestId/:editionId', async (req, res) => {
       WHERE cba.edition_id = $1 AND cba.category = $2
     `, [editionId, guest.category]);
     
+    console.log('Assignment query result:', assignmentResult.rows.length);
+    console.log('Looking for:', { editionId, category: guest.category });
+    
     if (assignmentResult.rows.length === 0) {
+      // Let's also check what assignments exist
+      const allAssignments = await pool.query(`
+        SELECT cba.category, cba.layout_id, bl.name as layout_name 
+        FROM category_badge_assignments cba
+        LEFT JOIN badge_layouts bl ON cba.layout_id = bl.id
+        WHERE cba.edition_id = $1
+      `, [editionId]);
+      
+      console.log('All assignments for edition:', allAssignments.rows);
+      console.log('No badge layout assigned to category:', guest.category);
       return res.status(404).json({ error: 'No badge layout assigned to this guest category' });
     }
     
