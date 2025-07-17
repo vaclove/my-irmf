@@ -68,11 +68,18 @@ const CanvasElement = ({ element, isSelected, onSelect, onMove, onResize }) => {
   const elementRef = useRef(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
+  const [resizeHandle, setResizeHandle] = useState(null);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [initialSize, setInitialSize] = useState({ width: 0, height: 0 });
+  const [initialPosition, setInitialPosition] = useState({ x: 0, y: 0 });
 
   const handleMouseDown = (e) => {
     if (e.target.classList.contains('resize-handle')) {
       setIsResizing(true);
+      setResizeHandle(e.target.dataset.handle);
+      setDragStart({ x: e.clientX, y: e.clientY });
+      setInitialSize({ width: element.width, height: element.height });
+      setInitialPosition({ x: element.x, y: element.y });
     } else {
       setIsDragging(true);
       setDragStart({
@@ -89,12 +96,50 @@ const CanvasElement = ({ element, isSelected, onSelect, onMove, onResize }) => {
       const newX = e.clientX - dragStart.x;
       const newY = e.clientY - dragStart.y;
       onMove(element.id, { x: newX, y: newY });
+    } else if (isResizing && resizeHandle) {
+      const deltaX = e.clientX - dragStart.x;
+      const deltaY = e.clientY - dragStart.y;
+      
+      let newWidth = initialSize.width;
+      let newHeight = initialSize.height;
+      let newX = initialPosition.x;
+      let newY = initialPosition.y;
+      
+      switch (resizeHandle) {
+        case 'nw': // Top-left
+          newWidth = Math.max(20, initialSize.width - deltaX);
+          newHeight = Math.max(20, initialSize.height - deltaY);
+          newX = initialPosition.x + (initialSize.width - newWidth);
+          newY = initialPosition.y + (initialSize.height - newHeight);
+          break;
+        case 'ne': // Top-right
+          newWidth = Math.max(20, initialSize.width + deltaX);
+          newHeight = Math.max(20, initialSize.height - deltaY);
+          newY = initialPosition.y + (initialSize.height - newHeight);
+          break;
+        case 'sw': // Bottom-left
+          newWidth = Math.max(20, initialSize.width - deltaX);
+          newHeight = Math.max(20, initialSize.height + deltaY);
+          newX = initialPosition.x + (initialSize.width - newWidth);
+          break;
+        case 'se': // Bottom-right
+          newWidth = Math.max(20, initialSize.width + deltaX);
+          newHeight = Math.max(20, initialSize.height + deltaY);
+          break;
+      }
+      
+      // Update both size and position
+      onResize(element.id, { width: newWidth, height: newHeight });
+      if (newX !== initialPosition.x || newY !== initialPosition.y) {
+        onMove(element.id, { x: newX, y: newY });
+      }
     }
   };
 
   const handleMouseUp = () => {
     setIsDragging(false);
     setIsResizing(false);
+    setResizeHandle(null);
   };
 
   useEffect(() => {
@@ -106,7 +151,7 @@ const CanvasElement = ({ element, isSelected, onSelect, onMove, onResize }) => {
         document.removeEventListener('mouseup', handleMouseUp);
       };
     }
-  }, [isDragging, isResizing, dragStart]);
+  }, [isDragging, isResizing, dragStart, resizeHandle, initialSize, initialPosition]);
 
   const renderElementContent = () => {
     switch (element.type) {
@@ -205,10 +250,10 @@ const CanvasElement = ({ element, isSelected, onSelect, onMove, onResize }) => {
       
       {isSelected && (
         <>
-          <div className="absolute -top-1 -left-1 w-2 h-2 bg-blue-500 cursor-nw-resize resize-handle"></div>
-          <div className="absolute -top-1 -right-1 w-2 h-2 bg-blue-500 cursor-ne-resize resize-handle"></div>
-          <div className="absolute -bottom-1 -left-1 w-2 h-2 bg-blue-500 cursor-sw-resize resize-handle"></div>
-          <div className="absolute -bottom-1 -right-1 w-2 h-2 bg-blue-500 cursor-se-resize resize-handle"></div>
+          <div className="absolute -top-1 -left-1 w-2 h-2 bg-blue-500 cursor-nw-resize resize-handle" data-handle="nw"></div>
+          <div className="absolute -top-1 -right-1 w-2 h-2 bg-blue-500 cursor-ne-resize resize-handle" data-handle="ne"></div>
+          <div className="absolute -bottom-1 -left-1 w-2 h-2 bg-blue-500 cursor-sw-resize resize-handle" data-handle="sw"></div>
+          <div className="absolute -bottom-1 -right-1 w-2 h-2 bg-blue-500 cursor-se-resize resize-handle" data-handle="se"></div>
         </>
       )}
     </div>

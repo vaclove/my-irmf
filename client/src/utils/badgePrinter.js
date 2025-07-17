@@ -14,6 +14,9 @@ const ELEMENT_TYPES = {
 // Convert mm to PDF points (1 mm = 2.834645669 points)
 const mmToPt = (mm) => mm * 2.834645669;
 
+// Convert pixels to mm (BadgeDesigner uses 2 pixels per mm)
+const pxToMm = (px) => px / 2;
+
 // Generate barcode as data URL
 const generateBarcode = (text, width = 100, height = 40) => {
   const canvas = document.createElement('canvas');
@@ -23,9 +26,10 @@ const generateBarcode = (text, width = 100, height = 40) => {
       width: 2,
       height: height,
       displayValue: false,
-      margin: 0
+      margin: 0,
+      background: 'transparent'  // Make barcode background transparent
     });
-    return canvas.toDataURL();
+    return canvas.toDataURL('image/png');
   } catch (error) {
     console.error('Error generating barcode:', error);
     return null;
@@ -52,8 +56,8 @@ const getGuestPhoto = async (photoUrl) => {
 
 // Render text element on PDF
 const renderTextElement = (pdf, element, guestData, editionYear) => {
-  const x = mmToPt(element.x);
-  const y = mmToPt(element.y);
+  const x = mmToPt(pxToMm(element.x));
+  const y = mmToPt(pxToMm(element.y));
   const fontSize = element.fontSize || 14;
   
   pdf.setFontSize(fontSize);
@@ -80,7 +84,7 @@ const renderTextElement = (pdf, element, guestData, editionYear) => {
   
   // Handle text alignment
   const align = element.textAlign || 'left';
-  const elementWidth = mmToPt(element.width);
+  const elementWidth = mmToPt(pxToMm(element.width));
   
   if (align === 'center') {
     pdf.text(text, x + elementWidth / 2, y + fontSize * 0.7, { align: 'center' });
@@ -93,13 +97,13 @@ const renderTextElement = (pdf, element, guestData, editionYear) => {
 
 // Render barcode element on PDF
 const renderBarcodeElement = (pdf, element, guestData) => {
-  const x = mmToPt(element.x);
-  const y = mmToPt(element.y);
-  const width = mmToPt(element.width);
-  const height = mmToPt(element.height);
+  const x = mmToPt(pxToMm(element.x));
+  const y = mmToPt(pxToMm(element.y));
+  const width = mmToPt(pxToMm(element.width));
+  const height = mmToPt(pxToMm(element.height));
   
   const barcodeText = guestData.formatted_badge_number || '2024001';
-  const barcodeDataUrl = generateBarcode(barcodeText, element.width, element.height);
+  const barcodeDataUrl = generateBarcode(barcodeText, pxToMm(element.width), pxToMm(element.height));
   
   if (barcodeDataUrl) {
     pdf.addImage(barcodeDataUrl, 'PNG', x, y, width, height);
@@ -112,10 +116,10 @@ const renderBarcodeElement = (pdf, element, guestData) => {
 
 // Render photo element on PDF
 const renderPhotoElement = async (pdf, element, guestData) => {
-  const x = mmToPt(element.x);
-  const y = mmToPt(element.y);
-  const width = mmToPt(element.width);
-  const height = mmToPt(element.height);
+  const x = mmToPt(pxToMm(element.x));
+  const y = mmToPt(pxToMm(element.y));
+  const width = mmToPt(pxToMm(element.width));
+  const height = mmToPt(pxToMm(element.height));
   
   const photoDataUrl = await getGuestPhoto(guestData.photo);
   
@@ -137,7 +141,7 @@ const renderPhotoElement = async (pdf, element, guestData) => {
 // Generate PDF badge
 export const generateBadgePDF = async (layout, guestData, editionYear) => {
   const pdf = new jsPDF({
-    orientation: 'portrait',
+    orientation: layout.canvas_width_mm > layout.canvas_height_mm ? 'landscape' : 'portrait',
     unit: 'pt',
     format: [mmToPt(layout.canvas_width_mm), mmToPt(layout.canvas_height_mm)]
   });

@@ -335,6 +335,10 @@ router.get('/print-data/:guestId/:editionId', async (req, res) => {
     const guest = guestResult.rows[0];
     console.log('Guest found:', { id: guest.id, category: guest.category, badge_number: guest.badge_number });
     
+    // Default to 'guest' category if none assigned
+    const guestCategory = guest.category || 'guest';
+    console.log('Using category:', guestCategory);
+    
     // Get category assignment for layout
     const assignmentResult = await pool.query(`
       SELECT 
@@ -347,10 +351,10 @@ router.get('/print-data/:guestId/:editionId', async (req, res) => {
       FROM category_badge_assignments cba
       JOIN badge_layouts bl ON cba.layout_id = bl.id
       WHERE cba.edition_id = $1 AND cba.category = $2
-    `, [editionId, guest.category]);
+    `, [editionId, guestCategory]);
     
     console.log('Assignment query result:', assignmentResult.rows.length);
-    console.log('Looking for:', { editionId, category: guest.category });
+    console.log('Looking for:', { editionId, category: guestCategory });
     
     if (assignmentResult.rows.length === 0) {
       // Let's also check what assignments exist
@@ -362,7 +366,7 @@ router.get('/print-data/:guestId/:editionId', async (req, res) => {
       `, [editionId]);
       
       console.log('All assignments for edition:', allAssignments.rows);
-      console.log('No badge layout assigned to category:', guest.category);
+      console.log('No badge layout assigned to category:', guestCategory);
       return res.status(404).json({ error: 'No badge layout assigned to this guest category' });
     }
     
