@@ -90,4 +90,27 @@ export const auditApi = {
   }),
 }
 
+// Badge API
+export const badgeApi = {
+  // Layouts
+  getLayouts: (editionId) => api.get(`/badges/layouts/edition/${editionId}`),
+  createLayout: (layout) => api.post('/badges/layouts', layout),
+  updateLayout: (id, layout) => api.put(`/badges/layouts/${id}`, layout),
+  deleteLayout: (id) => api.delete(`/badges/layouts/${id}`),
+  
+  // Assignments
+  getAssignments: (editionId) => api.get(`/badges/assignments/edition/${editionId}`),
+  updateAssignments: (editionId, assignments) => api.put(`/badges/assignments/edition/${editionId}`, { assignments }),
+  
+  // Badge numbers
+  getBadgeNumbers: (editionId) => api.get(`/badges/numbers/edition/${editionId}`),
+  assignBadgeNumber: (guestId, editionId) => api.post(`/badges/numbers/assign/${guestId}/${editionId}`),
+  
+  // Preview
+  getPreview: (layoutId, guestId) => api.get(`/badges/preview/${layoutId}/${guestId}`),
+  
+  // Print data
+  getPrintData: (guestId, editionId) => api.get(`/badges/print-data/${guestId}/${editionId}`),
+}
+
 export default api

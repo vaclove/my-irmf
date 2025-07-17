@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useEdition } from '../contexts/EditionContext'
-import { invitationApi } from '../utils/api'
+import { invitationApi, badgeApi } from '../utils/api'
 import { useToast } from '../contexts/ToastContext'
+import { printBadge } from '../utils/badgePrinter'
 import Avatar from '../components/Avatar'
 import InvitationDialog from '../components/InvitationDialog'
 
@@ -74,6 +75,33 @@ function Invitations() {
   const handleInvitationSent = () => {
     fetchInvitations()
     fetchAssignedNotInvited()
+  }
+
+  const handlePrintBadge = async (guestId) => {
+    try {
+      // Get badge print data from API
+      const response = await badgeApi.getPrintData(guestId, selectedEdition.id);
+      const { layout, guest } = response.data;
+
+      // Generate and download PDF
+      await printBadge(layout, guest, selectedEdition.year);
+      success('Badge PDF generated successfully!');
+      
+    } catch (error) {
+      console.error('Error printing badge:', error);
+      if (error.response?.status === 404) {
+        const errorMsg = error.response.data?.error || 'Badge data not found';
+        if (errorMsg.includes('badge layout assigned')) {
+          showError('No badge layout assigned to this guest category. Please configure badge settings first.');
+        } else if (errorMsg.includes('Guest not found')) {
+          showError('Guest not found or badge number not assigned. Please send invitation first.');
+        } else {
+          showError(errorMsg);
+        }
+      } else {
+        showError('Failed to print badge. Please try again.');
+      }
+    }
   }
 
   const handleDeleteInvitation = async (invitationId) => {
@@ -378,6 +406,12 @@ function Invitations() {
                           className="text-green-600 hover:text-green-900"
                         >
                           Resend
+                        </button>
+                        <button
+                          onClick={() => handlePrintBadge(invitation.guest_id)}
+                          className="text-purple-600 hover:text-purple-900"
+                        >
+                          Print Badge
                         </button>
                       </div>
                     </td>
