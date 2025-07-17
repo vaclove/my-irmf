@@ -20,6 +20,13 @@ function Layout({ children }) {
 
   const isActive = (path) => {
     if (path === '/' && location.pathname === '/') return true
+    if (path === '/settings') {
+      // Keep settings active for all settings-related pages
+      return location.pathname === '/settings' || 
+             location.pathname.startsWith('/badges/') || 
+             location.pathname === '/templates' || 
+             location.pathname === '/audit'
+    }
     if (path !== '/' && location.pathname.startsWith(path)) return true
     return false
   }
