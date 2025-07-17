@@ -82,10 +82,15 @@ const CanvasElement = ({ element, isSelected, onSelect, onMove, onResize }) => {
       setInitialPosition({ x: element.x, y: element.y });
     } else {
       setIsDragging(true);
-      setDragStart({
-        x: e.clientX - element.x,
-        y: e.clientY - element.y
-      });
+      // Calculate relative position within the canvas
+      const canvasContainer = elementRef.current?.parentElement;
+      if (canvasContainer) {
+        const rect = canvasContainer.getBoundingClientRect();
+        setDragStart({
+          x: e.clientX - rect.left - element.x,
+          y: e.clientY - rect.top - element.y
+        });
+      }
     }
     onSelect(element.id);
     e.stopPropagation();
@@ -93,9 +98,14 @@ const CanvasElement = ({ element, isSelected, onSelect, onMove, onResize }) => {
 
   const handleMouseMove = (e) => {
     if (isDragging && !isResizing) {
-      const newX = e.clientX - dragStart.x;
-      const newY = e.clientY - dragStart.y;
-      onMove(element.id, { x: newX, y: newY });
+      // Get canvas container to calculate relative position
+      const canvasContainer = elementRef.current?.parentElement;
+      if (canvasContainer) {
+        const rect = canvasContainer.getBoundingClientRect();
+        const newX = e.clientX - rect.left - dragStart.x;
+        const newY = e.clientY - rect.top - dragStart.y;
+        onMove(element.id, { x: newX, y: newY });
+      }
     } else if (isResizing && resizeHandle) {
       const deltaX = e.clientX - dragStart.x;
       const deltaY = e.clientY - dragStart.y;
@@ -506,10 +516,19 @@ const BadgeDesigner = ({
   const [backgroundColor, setBackgroundColor] = useState(initialLayout?.background_color || '#ffffff');
   const [elements, setElements] = useState(initialLayout?.layout_data?.elements || []);
   const [selectedElement, setSelectedElement] = useState(null);
-  // Calculate next ID dynamically to avoid state sync issues
+  
+  // Use ref to track next ID to avoid async state issues
+  const nextElementIdRef = useRef(
+    (() => {
+      const existingElements = initialLayout?.layout_data?.elements || [];
+      return existingElements.length > 0 ? Math.max(...existingElements.map(e => e.id)) + 1 : 1;
+    })()
+  );
+  
   const getNextElementId = () => {
-    if (elements.length === 0) return 1;
-    return Math.max(...elements.map(e => e.id)) + 1;
+    const id = nextElementIdRef.current;
+    nextElementIdRef.current += 1;
+    return id;
   };
 
   const handleCanvasSizeChange = (preset) => {
