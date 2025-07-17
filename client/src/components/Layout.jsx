@@ -85,16 +85,6 @@ function Layout({ children }) {
                 Guests
               </Link>
               <Link
-                to="/templates"
-                className={`inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium ${
-                  isActive('/templates')
-                    ? 'border-blue-500 text-gray-900'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                Templates
-              </Link>
-              <Link
                 to="/settings"
                 className={`inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium ${
                   isActive('/settings')
@@ -104,18 +94,6 @@ function Layout({ children }) {
               >
                 Settings
               </Link>
-              {user?.email === 'vaclav@irmf.cz' && (
-                <Link
-                  to="/audit"
-                  className={`inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium ${
-                    isActive('/audit')
-                      ? 'border-blue-500 text-gray-900'
-                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                  }`}
-                >
-                  Audit Logs
-                </Link>
-              )}
             </div>
 
             {/* Desktop User Menu */}
@@ -208,17 +186,6 @@ function Layout({ children }) {
                 Guests
               </Link>
               <Link
-                to="/templates"
-                onClick={closeMobileMenu}
-                className={`block px-3 py-2 rounded-md text-base font-medium ${
-                  isActive('/templates')
-                    ? 'text-blue-700 bg-blue-50'
-                    : 'text-gray-700 hover:text-gray-900 hover:bg-gray-50'
-                }`}
-              >
-                Templates
-              </Link>
-              <Link
                 to="/settings"
                 onClick={closeMobileMenu}
                 className={`block px-3 py-2 rounded-md text-base font-medium ${
@@ -229,19 +196,6 @@ function Layout({ children }) {
               >
                 Settings
               </Link>
-              {user?.email === 'vaclav@irmf.cz' && (
-                <Link
-                  to="/audit"
-                  onClick={closeMobileMenu}
-                  className={`block px-3 py-2 rounded-md text-base font-medium ${
-                    isActive('/audit')
-                      ? 'text-blue-700 bg-blue-50'
-                      : 'text-gray-700 hover:text-gray-900 hover:bg-gray-50'
-                  }`}
-                >
-                  Audit Logs
-                </Link>
-              )}
               
               {/* Mobile User Section */}
               {user && (
