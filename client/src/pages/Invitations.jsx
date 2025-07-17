@@ -3,22 +3,29 @@ import { useEdition } from '../contexts/EditionContext'
 import { invitationApi } from '../utils/api'
 import { useToast } from '../contexts/ToastContext'
 import Avatar from '../components/Avatar'
+import InvitationDialog from '../components/InvitationDialog'
 
 function Invitations() {
   const { selectedEdition } = useEdition()
   const { success, error: showError } = useToast()
   const [invitations, setInvitations] = useState([])
+  const [assignedNotInvited, setAssignedNotInvited] = useState([])
   const [loading, setLoading] = useState(true)
+  const [loadingAssigned, setLoadingAssigned] = useState(true)
   const [selectedInvitation, setSelectedInvitation] = useState(null)
   const [showDetails, setShowDetails] = useState(false)
   const [filterCategory, setFilterCategory] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
+  const [selectedGuestForInvitation, setSelectedGuestForInvitation] = useState(null)
+  const [showInvitationDialog, setShowInvitationDialog] = useState(false)
 
   useEffect(() => {
     if (selectedEdition) {
       fetchInvitations()
+      fetchAssignedNotInvited()
     } else {
       setLoading(false)
+      setLoadingAssigned(false)
     }
   }, [selectedEdition])
 
@@ -35,6 +42,19 @@ function Invitations() {
     }
   }
 
+  const fetchAssignedNotInvited = async () => {
+    try {
+      const response = await invitationApi.getAssignedNotInvited(selectedEdition.id)
+      setAssignedNotInvited(response.data.data || [])
+    } catch (error) {
+      console.error('Error fetching assigned but not invited guests:', error)
+      showError('Failed to load assigned guests')
+      setAssignedNotInvited([]) // Ensure it's always an array
+    } finally {
+      setLoadingAssigned(false)
+    }
+  }
+
   const handleResendInvitation = async (invitationId) => {
     try {
       await invitationApi.resend(invitationId)
@@ -44,6 +64,16 @@ function Invitations() {
       console.error('Error resending invitation:', error)
       showError('Failed to resend invitation')
     }
+  }
+
+  const handleSendInvitation = (guest) => {
+    setSelectedGuestForInvitation(guest)
+    setShowInvitationDialog(true)
+  }
+
+  const handleInvitationSent = () => {
+    fetchInvitations()
+    fetchAssignedNotInvited()
   }
 
   const handleDeleteInvitation = async (invitationId) => {
@@ -359,6 +389,88 @@ function Invitations() {
         </div>
       )}
 
+      {/* Assigned but Not Invited Guests Section */}
+      {selectedEdition && (
+        <div className="mt-8">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-lg font-semibold text-gray-900">Assigned but Not Invited</h2>
+            <p className="text-sm text-gray-500">
+              {assignedNotInvited.length} guest{assignedNotInvited.length !== 1 ? 's' : ''} assigned to this edition but not yet invited
+            </p>
+          </div>
+
+          {loadingAssigned ? (
+            <div className="text-center py-8">Loading assigned guests...</div>
+          ) : !Array.isArray(assignedNotInvited) || assignedNotInvited.length === 0 ? (
+            <div className="text-center py-8 bg-gray-50 rounded-lg">
+              <h3 className="text-sm font-medium text-gray-900 mb-2">All assigned guests have been invited</h3>
+              <p className="text-sm text-gray-600">All guests assigned to this edition have already received invitations.</p>
+            </div>
+          ) : (
+            <div className="bg-white shadow rounded-lg overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Guest
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Email
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Category
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {assignedNotInvited.map((guest) => (
+                      <tr key={guest.id} className="hover:bg-gray-50">
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="flex items-center">
+                            <Avatar
+                              photo={guest.photo}
+                              firstName={guest.first_name}
+                              lastName={guest.last_name}
+                              size="sm"
+                            />
+                            <div className="ml-4">
+                              <div className="text-sm font-medium text-gray-900">
+                                {guest.first_name} {guest.last_name}
+                              </div>
+                              <div className="text-sm text-gray-500">
+                                {guest.company}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm text-gray-900">{guest.email}</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          {getCategoryBadge(guest.category)}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                          <button
+                            onClick={() => handleSendInvitation(guest)}
+                            className="text-blue-600 hover:text-blue-900"
+                          >
+                            Send Invitation
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Details Modal */}
       {showDetails && selectedInvitation && (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
@@ -482,6 +594,15 @@ function Invitations() {
           </div>
         </div>
       )}
+
+      {/* Invitation Modal */}
+      <InvitationDialog
+        isOpen={showInvitationDialog}
+        onClose={() => setShowInvitationDialog(false)}
+        guest={selectedGuestForInvitation}
+        edition={selectedEdition}
+        onInvitationSent={handleInvitationSent}
+      />
     </div>
   )
 }

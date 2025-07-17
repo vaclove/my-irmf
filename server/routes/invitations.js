@@ -86,7 +86,7 @@ router.post('/send', async (req, res) => {
       JOIN tags year_tag ON gt.tag_id = year_tag.id
       JOIN editions e ON year_tag.name = e.year::text
       WHERE g.id = $1 AND e.id = $2
-    `, [guestId, editionId]);
+    `, [guest_id, edition_id]);
     
     if (guestEditionResult.rows.length === 0) {
       return res.status(404).json({ 
@@ -210,12 +210,12 @@ router.post('/send', async (req, res) => {
         covered_nights
       });
     } catch (emailError) {
-      logError(emailError, req, { operation: 'send_invitation_email', guestId: guestId, editionId: editionId });
+      logError(emailError, req, { operation: 'send_invitation_email', guestId: guest_id, editionId: edition_id });
       res.status(500).json({ error: 'Failed to send email: ' + emailError.message });
     }
     
   } catch (error) {
-    logError(error, req, { operation: 'send_invitation', guestId: guestId, editionId: editionId, formData: req.body });
+    logError(error, req, { operation: 'send_invitation', guestId: guest_id, editionId: edition_id, formData: req.body });
     res.status(500).json({ error: error.message });
   }
 });
@@ -251,7 +251,7 @@ router.post('/resend', async (req, res) => {
     const invitationResult = await pool.query(`
       SELECT * FROM guest_invitations 
       WHERE guest_id = $1 AND edition_id = $2
-    `, [guestId, editionId]);
+    `, [guest_id, edition_id]);
     
     if (invitationResult.rows.length === 0) {
       return res.status(404).json({ 
@@ -399,7 +399,7 @@ router.post('/resend', async (req, res) => {
              token = $3,
              confirmed_at = NULL
          WHERE guest_id = $1 AND edition_id = $2`,
-        [guest_id, edition_id, confirmationToken]
+        [guestId, editionId, confirmationToken]
       );
       
       res.json({ 
@@ -503,6 +503,76 @@ router.get('/edition/:editionId', async (req, res) => {
     res.json({ data: invitations });
   } catch (error) {
     console.error('Error fetching invitations:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get guests assigned to edition but not invited
+router.get('/edition/:editionId/assigned-not-invited', async (req, res) => {
+  try {
+    const { editionId } = req.params;
+    
+    const result = await pool.query(`
+      SELECT 
+        g.id,
+        g.first_name,
+        g.last_name,
+        g.email,
+        g.company,
+        g.photo,
+        g.language,
+        e.name as edition_name,
+        e.year as edition_year,
+        COALESCE(
+          (SELECT tag_name FROM (
+            SELECT t2.name as tag_name, 
+                   CASE t2.name 
+                     WHEN 'filmmaker' THEN 1
+                     WHEN 'press' THEN 2  
+                     WHEN 'staff' THEN 3
+                     WHEN 'guest' THEN 4
+                     ELSE 5
+                   END as priority
+            FROM guest_tags gt2 
+            JOIN tags t2 ON gt2.tag_id = t2.id 
+            WHERE gt2.guest_id = g.id 
+            AND t2.name IN ('filmmaker', 'press', 'staff', 'guest')
+            ORDER BY priority
+            LIMIT 1
+          ) sub),
+          'guest'
+        ) as category
+      FROM guests g
+      JOIN guest_tags gt ON g.id = gt.guest_id
+      JOIN tags year_tag ON gt.tag_id = year_tag.id
+      JOIN editions e ON year_tag.name = e.year::text
+      WHERE e.id = $1
+      AND NOT EXISTS (
+        SELECT 1 FROM guest_invitations gi 
+        WHERE gi.guest_id = g.id AND gi.edition_id = e.id
+      )
+      ORDER BY g.first_name, g.last_name
+    `, [editionId]);
+    
+    // Transform data to match frontend expectations
+    const assignedNotInvited = result.rows.map(row => ({
+      id: row.id,
+      first_name: row.first_name,
+      last_name: row.last_name,
+      email: row.email,
+      company: row.company,
+      photo: row.photo,
+      language: row.language,
+      category: row.category,
+      edition: {
+        name: row.edition_name,
+        year: row.edition_year
+      }
+    }));
+    
+    res.json({ data: assignedNotInvited });
+  } catch (error) {
+    console.error('Error fetching assigned but not invited guests:', error);
     res.status(500).json({ error: error.message });
   }
 });

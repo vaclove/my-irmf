@@ -52,6 +52,7 @@ export const invitationApi = {
   resend: (invitationId) => api.post('/invitations/resend', { invitation_id: invitationId }),
   delete: (invitationId) => api.delete(`/invitations/${invitationId}`),
   getByEdition: (editionId) => api.get(`/invitations/edition/${editionId}`),
+  getAssignedNotInvited: (editionId) => api.get(`/invitations/edition/${editionId}/assigned-not-invited`),
   confirm: (token) => publicApi.post(`/confirm/${token}`),
   getStatus: (guestId, editionId) => publicApi.get(`/status/${guestId}/${editionId}`),
 }
