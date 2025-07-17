@@ -182,12 +182,28 @@ export const generateBadgePDF = async (layout, guestData, editionYear) => {
   return pdf;
 };
 
-// Print badge - generate PDF and download
+// Print badge - generate PDF and display in browser
 export const printBadge = async (layout, guestData, editionYear) => {
   try {
     const pdf = await generateBadgePDF(layout, guestData, editionYear);
-    const filename = `badge_${guestData.formatted_badge_number || guestData.id}.pdf`;
-    pdf.save(filename);
+    const blob = pdf.output('blob');
+    const url = URL.createObjectURL(blob);
+    
+    // Open PDF in new browser tab
+    const newWindow = window.open(url, '_blank');
+    if (newWindow) {
+      newWindow.focus();
+    } else {
+      // Fallback if popup blocked - create download link
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `badge_${guestData.formatted_badge_number || guestData.id}.pdf`;
+      link.click();
+    }
+    
+    // Clean up the URL object after a delay
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    
     return true;
   } catch (error) {
     console.error('Error printing badge:', error);
