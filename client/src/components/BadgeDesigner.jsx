@@ -461,10 +461,11 @@ const BadgeDesigner = ({
   const [backgroundColor, setBackgroundColor] = useState(initialLayout?.background_color || '#ffffff');
   const [elements, setElements] = useState(initialLayout?.layout_data?.elements || []);
   const [selectedElement, setSelectedElement] = useState(null);
-  const [nextElementId, setNextElementId] = useState(() => {
-    const existingElements = initialLayout?.layout_data?.elements || [];
-    return existingElements.length > 0 ? Math.max(...existingElements.map(e => e.id)) + 1 : 1;
-  });
+  // Calculate next ID dynamically to avoid state sync issues
+  const getNextElementId = () => {
+    if (elements.length === 0) return 1;
+    return Math.max(...elements.map(e => e.id)) + 1;
+  };
 
   const handleCanvasSizeChange = (preset) => {
     if (preset === 'CUSTOM') return;
@@ -475,8 +476,11 @@ const BadgeDesigner = ({
   };
 
   const handleElementAdd = (elementType, position) => {
+    const newElementId = getNextElementId();
+    console.log('Adding element:', { elementType, newElementId, currentElements: elements.length });
+    
     const newElement = {
-      id: nextElementId,
+      id: newElementId,
       type: elementType,
       x: position.x,
       y: position.y,
@@ -498,9 +502,13 @@ const BadgeDesigner = ({
       newElement.height = 40;
     }
 
-    setElements(prev => [...prev, newElement]);
-    setNextElementId(prev => prev + 1);
-    setSelectedElement(newElement.id);
+    setElements(prev => {
+      console.log('Previous elements:', prev.map(e => ({ id: e.id, type: e.type })));
+      const newArray = [...prev, newElement];
+      console.log('New elements array:', newArray.map(e => ({ id: e.id, type: e.type })));
+      return newArray;
+    });
+    setSelectedElement(newElementId);
   };
 
   const handleElementMove = (elementId, position) => {
