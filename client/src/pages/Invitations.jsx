@@ -402,12 +402,6 @@ function Invitations() {
                           Details
                         </button>
                         <button
-                          onClick={() => handleResendInvitation(invitation.id)}
-                          className="text-green-600 hover:text-green-900"
-                        >
-                          Resend
-                        </button>
-                        <button
                           onClick={() => handlePrintBadge(invitation.guest_id)}
                           className="text-purple-600 hover:text-purple-900"
                         >
@@ -428,17 +422,13 @@ function Invitations() {
         <div className="mt-8">
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-lg font-semibold text-gray-900">Assigned but Not Invited</h2>
-            <p className="text-sm text-gray-500">
-              {assignedNotInvited.length} guest{assignedNotInvited.length !== 1 ? 's' : ''} assigned to this edition but not yet invited
-            </p>
           </div>
 
           {loadingAssigned ? (
             <div className="text-center py-8">Loading assigned guests...</div>
           ) : !Array.isArray(assignedNotInvited) || assignedNotInvited.length === 0 ? (
             <div className="text-center py-8 bg-gray-50 rounded-lg">
-              <h3 className="text-sm font-medium text-gray-900 mb-2">All assigned guests have been invited</h3>
-              <p className="text-sm text-gray-600">All guests assigned to this edition have already received invitations.</p>
+              <h3 className="text-sm font-medium text-gray-900">All assigned guests have been invited</h3>
             </div>
           ) : (
             <div className="bg-white shadow rounded-lg overflow-hidden">

@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { badgeApi } from '../utils/api';
+import { useToast } from '../contexts/ToastContext';
 import BadgeDesigner from '../components/BadgeDesigner';
 
 const BadgeSettings = () => {
   const { editionId } = useParams();
   const navigate = useNavigate();
+  const { success, error: showError } = useToast();
   const [layouts, setLayouts] = useState([]);
   const [assignments, setAssignments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -52,15 +54,20 @@ const BadgeSettings = () => {
     try {
       if (editingLayout) {
         await badgeApi.updateLayout(editingLayout.id, layoutData);
+        success('Layout updated successfully!');
       } else {
         await badgeApi.createLayout(layoutData);
+        success('Layout created successfully!');
       }
       
       setShowDesigner(false);
       setEditingLayout(null);
       fetchData();
+      setError('');
     } catch (err) {
-      setError('Failed to save layout');
+      const errorMessage = 'Failed to save layout: ' + (err.response?.data?.error || err.message);
+      setError(errorMessage);
+      showError(errorMessage);
       console.error('Error saving layout:', err);
     }
   };
@@ -72,36 +79,41 @@ const BadgeSettings = () => {
 
     try {
       await badgeApi.deleteLayout(layoutId);
+      success('Layout deleted successfully!');
       fetchData();
+      setError('');
     } catch (err) {
-      setError('Failed to delete layout');
+      const errorMessage = 'Failed to delete layout: ' + (err.response?.data?.error || err.message);
+      setError(errorMessage);
+      showError(errorMessage);
       console.error('Error deleting layout:', err);
     }
   };
 
-  const handleAssignmentChange = (category, layoutId) => {
-    setAssignments(prev => {
-      const existing = prev.find(a => a.category === category);
+  const handleAssignmentChange = async (category, layoutId) => {
+    const newAssignments = (() => {
+      const existing = assignments.find(a => a.category === category);
       if (existing) {
-        return prev.map(a => 
+        return assignments.map(a => 
           a.category === category ? { ...a, layout_id: layoutId } : a
         );
       } else {
-        return [...prev, { category, layout_id: layoutId }];
+        return [...assignments, { category, layout_id: layoutId }];
       }
-    });
-  };
+    })();
 
-  const handleSaveAssignments = async () => {
+    setAssignments(newAssignments);
+
     try {
-      await badgeApi.updateAssignments(editionId, assignments);
+      await badgeApi.updateAssignments(editionId, newAssignments);
+      success('Assignment updated successfully!');
       setError('');
-      alert('Assignments saved successfully!');
     } catch (err) {
-      setError('Failed to save assignments');
-      console.error('Error saving assignments:', err);
+      showError('Failed to save assignment: ' + (err.response?.data?.error || err.message));
+      console.error('Error saving assignment:', err);
     }
   };
+
 
   if (loading) {
     return (
@@ -248,14 +260,9 @@ const BadgeSettings = () => {
         {/* Assignments Tab */}
         {activeTab === 'assignments' && (
           <div>
-            <div className="flex justify-between items-center mb-6">
+            <div className="mb-6">
               <h2 className="text-xl font-semibold">Category Assignments</h2>
-              <button
-                onClick={handleSaveAssignments}
-                className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
-              >
-                Save Assignments
-              </button>
+              <p className="text-sm text-gray-600 mt-1">Changes are automatically saved when you make selections.</p>
             </div>
 
             <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
