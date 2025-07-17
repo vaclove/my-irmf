@@ -223,10 +223,13 @@ const CanvasArea = ({
   onElementMove, 
   onElementResize,
   onElementAdd,
-  backgroundColor 
+  backgroundColor,
+  canvasScale,
+  onScaleChange
 }) => {
   const canvasRef = useRef(null);
-  const scale = 2; // 2 pixels per mm for display
+  const baseScale = 3; // 3 pixels per mm for better visibility
+  const displayScale = baseScale * canvasScale;
 
   const [{ isOver }, drop] = useDrop(() => ({
     accept: 'element',
@@ -251,35 +254,63 @@ const CanvasArea = ({
 
   return (
     <div className="bg-white rounded-lg shadow-sm border p-4">
-      <h3 className="text-lg font-semibold mb-3">Canvas</h3>
-      <div 
-        ref={drop}
-        className="relative border-2 border-dashed border-gray-300 mx-auto"
-        style={{
-          width: canvasSize.width * scale,
-          height: canvasSize.height * scale,
-          backgroundColor: backgroundColor || '#ffffff'
-        }}
-        onClick={handleCanvasClick}
-      >
-        <div
-          ref={canvasRef}
-          className={`relative w-full h-full ${isOver ? 'bg-blue-50' : ''}`}
-        >
-          {elements.map((element) => (
-            <CanvasElement
-              key={element.id}
-              element={element}
-              isSelected={selectedElement === element.id}
-              onSelect={onElementSelect}
-              onMove={onElementMove}
-              onResize={onElementResize}
-            />
-          ))}
+      <div className="flex justify-between items-center mb-3">
+        <h3 className="text-lg font-semibold">Canvas</h3>
+        <div className="flex items-center space-x-2">
+          <label className="text-sm font-medium text-gray-700">Zoom:</label>
+          <select
+            value={canvasScale}
+            onChange={(e) => onScaleChange(parseFloat(e.target.value))}
+            className="px-2 py-1 border border-gray-300 rounded text-sm"
+          >
+            <option value={0.5}>50%</option>
+            <option value={0.75}>75%</option>
+            <option value={1}>100%</option>
+            <option value={1.5}>150%</option>
+            <option value={2}>200%</option>
+          </select>
         </div>
       </div>
+      
+      <div className="overflow-auto max-h-[500px] border border-gray-200 rounded p-4 bg-gray-50">
+        <div 
+          ref={drop}
+          className="relative border-2 border-dashed border-gray-300 mx-auto"
+          style={{
+            width: canvasSize.width * displayScale,
+            height: canvasSize.height * displayScale,
+            backgroundColor: backgroundColor || '#ffffff',
+            minWidth: 200,
+            minHeight: 150
+          }}
+          onClick={handleCanvasClick}
+        >
+          <div
+            ref={canvasRef}
+            className={`relative w-full h-full ${isOver ? 'bg-blue-50' : ''}`}
+          >
+            {elements.map((element) => (
+              <CanvasElement
+                key={element.id}
+                element={{
+                  ...element,
+                  x: element.x * displayScale,
+                  y: element.y * displayScale,
+                  width: element.width * displayScale,
+                  height: element.height * displayScale
+                }}
+                isSelected={selectedElement === element.id}
+                onSelect={onElementSelect}
+                onMove={(id, pos) => onElementMove(id, { x: pos.x, y: pos.y })}
+                onResize={onElementResize}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+      
       <div className="text-xs text-gray-500 text-center mt-2">
-        {canvasSize.width}mm × {canvasSize.height}mm
+        {canvasSize.width}mm × {canvasSize.height}mm (Scale: {Math.round(canvasScale * 100)}%)
       </div>
     </div>
   );
@@ -461,7 +492,17 @@ const BadgeDesigner = ({
   const [backgroundColor, setBackgroundColor] = useState(initialLayout?.background_color || '#ffffff');
   const [elements, setElements] = useState(initialLayout?.layout_data?.elements || []);
   const [selectedElement, setSelectedElement] = useState(null);
-  const [nextElementId, setNextElementId] = useState(1);
+  const [nextElementId, setNextElementId] = useState(() => {
+    const existingElements = initialLayout?.layout_data?.elements || [];
+    return existingElements.length > 0 ? Math.max(...existingElements.map(e => e.id)) + 1 : 1;
+  });
+  const [canvasScale, setCanvasScale] = useState(() => {
+    // Default scale to fit nicely on screen - smaller canvases get bigger scale
+    const maxDimension = Math.max(canvasSize.width, canvasSize.height);
+    if (maxDimension < 60) return 2;
+    if (maxDimension < 100) return 1.5;
+    return 1;
+  });
 
   const handleCanvasSizeChange = (preset) => {
     if (preset === 'CUSTOM') return;
@@ -475,8 +516,8 @@ const BadgeDesigner = ({
     const newElement = {
       id: nextElementId,
       type: elementType,
-      x: position.x,
-      y: position.y,
+      x: Math.round(position.x / canvasScale),
+      y: Math.round(position.y / canvasScale),
       width: 80,
       height: 30,
       fontSize: 14,
@@ -495,32 +536,36 @@ const BadgeDesigner = ({
       newElement.height = 40;
     }
 
-    setElements([...elements, newElement]);
-    setNextElementId(nextElementId + 1);
+    setElements(prev => [...prev, newElement]);
+    setNextElementId(prev => prev + 1);
     setSelectedElement(newElement.id);
   };
 
   const handleElementMove = (elementId, position) => {
-    setElements(elements.map(el => 
-      el.id === elementId ? { ...el, ...position } : el
+    setElements(prev => prev.map(el => 
+      el.id === elementId ? { 
+        ...el, 
+        x: Math.round(position.x / canvasScale), 
+        y: Math.round(position.y / canvasScale) 
+      } : el
     ));
   };
 
   const handleElementResize = (elementId, size) => {
-    setElements(elements.map(el => 
+    setElements(prev => prev.map(el => 
       el.id === elementId ? { ...el, ...size } : el
     ));
   };
 
   const handleElementUpdate = (elementId, updates) => {
-    setElements(elements.map(el => 
+    setElements(prev => prev.map(el => 
       el.id === elementId ? { ...el, ...updates } : el
     ));
   };
 
   const handleElementDelete = () => {
     if (selectedElement) {
-      setElements(elements.filter(el => el.id !== selectedElement));
+      setElements(prev => prev.filter(el => el.id !== selectedElement));
       setSelectedElement(null);
     }
   };
@@ -662,6 +707,8 @@ const BadgeDesigner = ({
                 onElementResize={handleElementResize}
                 onElementAdd={handleElementAdd}
                 backgroundColor={backgroundColor}
+                canvasScale={canvasScale}
+                onScaleChange={setCanvasScale}
               />
             </div>
 
