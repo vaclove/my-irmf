@@ -12,6 +12,7 @@ import Invitations from './pages/Invitations'
 import EmailTemplates from './pages/EmailTemplates'
 import AuditLogs from './pages/AuditLogs'
 import BadgeSettings from './pages/BadgeSettings'
+import Settings from './pages/Settings'
 import Confirmation from './pages/Confirmation'
 
 function App() {
@@ -35,6 +36,7 @@ function App() {
                   <Route path="/invitations" element={<Invitations />} />
                   <Route path="/templates" element={<EmailTemplates />} />
                   <Route path="/badges/:editionId" element={<BadgeSettings />} />
+                  <Route path="/settings" element={<Settings />} />
                   <Route path="/audit" element={<AuditLogs />} />
                 </Routes>
               </Layout>
