@@ -65,3 +65,7 @@ Use `npm version patch|minor|major` before committing to update the version. The
 **Rule**: Default to PATCH if unsure. Only skip if the change is truly non-functional (like fixing a typo in a comment).
 
 **Commit Message Format**: When package.json is committed (version bump), the version number will be automatically appended to the commit message in the format "v1.1.2" before the Co-Authored-By line. Never use just the version number as the entire commit message.
+
+### Git Repository Structure
+
+**IMPORTANT**: When running git commands, always execute them from the repository root directory (`/Users/vaclav.martinovsky/GitHub/claude-test`) to ensure all changes from both client and server directories are included. Use `cd /Users/vaclav.martinovsky/GitHub/claude-test && git command` format to avoid missing changes in subdirectories.
