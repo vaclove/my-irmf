@@ -264,7 +264,7 @@ router.post('/resend', async (req, res) => {
     const invitationResult = await pool.query(`
       SELECT * FROM guest_invitations 
       WHERE guest_id = $1 AND edition_id = $2
-    `, [guest_id, edition_id]);
+    `, [guestId, editionId]);
     
     if (invitationResult.rows.length === 0) {
       return res.status(404).json({ 

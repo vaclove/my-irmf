@@ -1,6 +1,6 @@
 {
   "name": "movie-festival-guest-manager",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "description": "Movie festival guest management system",
   "main": "server/index.js",
   "scripts": {

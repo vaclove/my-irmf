@@ -52,21 +52,35 @@ The repository has Claude Code permissions configured in `.claude/settings.local
 
 ### Version Bump Guidelines
 
-**IMPORTANT**: ALWAYS bump the version for any functional changes. Never skip version bumping unless the commit only contains non-functional changes like typos in comments.
+**IMPORTANT**: This project uses SEPARATE versioning for Backend (BE) and Frontend (FE). Always bump versions for both components when making changes.
 
-When committing changes, bump the package.json version:
+#### Backend and Frontend Separate Versioning
 
+- **Backend version**: Located in root `package.json` 
+- **Frontend version**: Located in `client/package.json`
+
+When making changes:
+
+1. **Backend changes only**: Bump version in root `package.json` using `npm version patch|minor|major --no-git-tag-version`
+2. **Frontend changes only**: Bump version in `client/package.json` using `cd client && npm version patch|minor|major --no-git-tag-version`
+3. **Both backend and frontend changes**: Bump versions in BOTH package.json files
+
+#### Version Bump Types:
 - **PATCH (x.x.X)**: Bug fixes, small improvements, refactoring, documentation updates
 - **MINOR (x.X.x)**: New features, new API endpoints, significant UI changes  
 - **MAJOR (X.x.x)**: Breaking changes, major refactoring, API changes that affect compatibility
 
-Use `npm version patch|minor|major` before committing to update the version. The pre-commit hook will prompt you to decide on version bumping.
+#### Version Bump Process:
+1. Determine which components are affected (BE, FE, or both)
+2. Bump appropriate version(s) using `npm version` commands above
+3. Commit all changes including both package.json and package-lock.json files
+4. The commit message should indicate which component versions were bumped
 
-**Rule**: Default to PATCH if unsure. Only skip if the change is truly non-functional (like fixing a typo in a comment).
+**Rule**: Default to PATCH if unsure. Only skip version bumping if the change is truly non-functional (like fixing a typo in a comment).
 
-**Commit Message Format**: When package.json is committed (version bump), the version number will be automatically appended to the commit message in the format "v1.1.2" before the Co-Authored-By line. Never use just the version number as the entire commit message.
+**Commit Message Format**: When package.json files are committed (version bump), mention the component versions in the commit message (e.g., "BE v1.2.3, FE v2.1.4").
 
-**Package Lock File**: ALWAYS include package-lock.json when committing version bumps. If you manually bump the version with `npm version --no-git-tag-version`, both package.json and package-lock.json will be updated and both files must be committed together.
+**Package Lock Files**: ALWAYS include package-lock.json files when committing version bumps. Both root and client package-lock.json files must be committed together with their respective package.json files.
 
 ### Git Repository Structure
 
