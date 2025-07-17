@@ -66,6 +66,8 @@ Use `npm version patch|minor|major` before committing to update the version. The
 
 **Commit Message Format**: When package.json is committed (version bump), the version number will be automatically appended to the commit message in the format "v1.1.2" before the Co-Authored-By line. Never use just the version number as the entire commit message.
 
+**Package Lock File**: ALWAYS include package-lock.json when committing version bumps. If you manually bump the version with `npm version --no-git-tag-version`, both package.json and package-lock.json will be updated and both files must be committed together.
+
 ### Git Repository Structure
 
 **IMPORTANT**: When running git commands, always execute them from the repository root directory (`/Users/vaclav.martinovsky/GitHub/claude-test`) to ensure all changes from both client and server directories are included. Use `cd /Users/vaclav.martinovsky/GitHub/claude-test && git command` format to avoid missing changes in subdirectories.
