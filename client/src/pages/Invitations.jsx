@@ -76,6 +76,12 @@ function Invitations() {
     fetchAssignedNotInvited()
   }
 
+  const handlePrintBadge = (guestId) => {
+    // TODO: Implement badge printing functionality
+    console.log('Print badge for guest:', guestId)
+    showError('Badge printing not yet implemented')
+  }
+
   const handleDeleteInvitation = async (invitationId) => {
     if (!confirm('Are you sure you want to delete this invitation?')) return
     
@@ -378,6 +384,12 @@ function Invitations() {
                           className="text-green-600 hover:text-green-900"
                         >
                           Resend
+                        </button>
+                        <button
+                          onClick={() => handlePrintBadge(invitation.guest_id)}
+                          className="text-purple-600 hover:text-purple-900"
+                        >
+                          Print Badge
                         </button>
                       </div>
                     </td>

@@ -1,0 +1,310 @@
+const express = require('express');
+const { pool } = require('../models/database');
+const router = express.Router();
+
+// Get badge layouts for edition
+router.get('/layouts/edition/:editionId', async (req, res) => {
+  try {
+    const { editionId } = req.params;
+    
+    const result = await pool.query(`
+      SELECT 
+        id,
+        name,
+        canvas_width_mm,
+        canvas_height_mm,
+        background_color,
+        background_image,
+        layout_data,
+        created_at,
+        updated_at
+      FROM badge_layouts 
+      WHERE edition_id = $1
+      ORDER BY created_at DESC
+    `, [editionId]);
+    
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching badge layouts:', error);
+    res.status(500).json({ error: 'Failed to fetch badge layouts' });
+  }
+});
+
+// Create new badge layout
+router.post('/layouts', async (req, res) => {
+  try {
+    const {
+      edition_id,
+      name,
+      canvas_width_mm,
+      canvas_height_mm,
+      background_color,
+      background_image,
+      layout_data
+    } = req.body;
+    
+    const result = await pool.query(`
+      INSERT INTO badge_layouts (
+        edition_id, name, canvas_width_mm, canvas_height_mm,
+        background_color, background_image, layout_data
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING *
+    `, [edition_id, name, canvas_width_mm, canvas_height_mm, background_color, background_image, layout_data]);
+    
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error creating badge layout:', error);
+    res.status(500).json({ error: 'Failed to create badge layout' });
+  }
+});
+
+// Update badge layout
+router.put('/layouts/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      name,
+      canvas_width_mm,
+      canvas_height_mm,
+      background_color,
+      background_image,
+      layout_data
+    } = req.body;
+    
+    const result = await pool.query(`
+      UPDATE badge_layouts 
+      SET 
+        name = $1,
+        canvas_width_mm = $2,
+        canvas_height_mm = $3,
+        background_color = $4,
+        background_image = $5,
+        layout_data = $6,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $7
+      RETURNING *
+    `, [name, canvas_width_mm, canvas_height_mm, background_color, background_image, layout_data, id]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Badge layout not found' });
+    }
+    
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating badge layout:', error);
+    res.status(500).json({ error: 'Failed to update badge layout' });
+  }
+});
+
+// Delete badge layout
+router.delete('/layouts/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const result = await pool.query('DELETE FROM badge_layouts WHERE id = $1 RETURNING id', [id]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Badge layout not found' });
+    }
+    
+    res.json({ message: 'Badge layout deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting badge layout:', error);
+    res.status(500).json({ error: 'Failed to delete badge layout' });
+  }
+});
+
+// Get category assignments for edition
+router.get('/assignments/edition/:editionId', async (req, res) => {
+  try {
+    const { editionId } = req.params;
+    
+    const result = await pool.query(`
+      SELECT 
+        cba.id,
+        cba.category,
+        cba.layout_id,
+        bl.name as layout_name
+      FROM category_badge_assignments cba
+      LEFT JOIN badge_layouts bl ON cba.layout_id = bl.id
+      WHERE cba.edition_id = $1
+      ORDER BY cba.category
+    `, [editionId]);
+    
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching category assignments:', error);
+    res.status(500).json({ error: 'Failed to fetch category assignments' });
+  }
+});
+
+// Update category assignments for edition
+router.put('/assignments/edition/:editionId', async (req, res) => {
+  try {
+    const { editionId } = req.params;
+    const { assignments } = req.body; // Array of { category, layout_id }
+    
+    const client = await pool.connect();
+    
+    try {
+      await client.query('BEGIN');
+      
+      // Delete existing assignments for this edition
+      await client.query('DELETE FROM category_badge_assignments WHERE edition_id = $1', [editionId]);
+      
+      // Insert new assignments
+      for (const assignment of assignments) {
+        if (assignment.layout_id) {
+          await client.query(`
+            INSERT INTO category_badge_assignments (edition_id, category, layout_id)
+            VALUES ($1, $2, $3)
+          `, [editionId, assignment.category, assignment.layout_id]);
+        }
+      }
+      
+      await client.query('COMMIT');
+      res.json({ message: 'Category assignments updated successfully' });
+      
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    console.error('Error updating category assignments:', error);
+    res.status(500).json({ error: 'Failed to update category assignments' });
+  }
+});
+
+// Get badge numbers for edition
+router.get('/numbers/edition/:editionId', async (req, res) => {
+  try {
+    const { editionId } = req.params;
+    
+    const result = await pool.query(`
+      SELECT 
+        gbn.id,
+        gbn.guest_id,
+        gbn.badge_number,
+        gbn.assigned_at,
+        g.first_name,
+        g.last_name,
+        g.email,
+        e.year
+      FROM guest_badge_numbers gbn
+      JOIN guests g ON gbn.guest_id = g.id
+      JOIN editions e ON gbn.edition_id = e.id
+      WHERE gbn.edition_id = $1
+      ORDER BY gbn.badge_number
+    `, [editionId]);
+    
+    // Format badge numbers with year prefix
+    const formattedResults = result.rows.map(row => ({
+      ...row,
+      formatted_badge_number: `${row.year}${row.badge_number.toString().padStart(3, '0')}`
+    }));
+    
+    res.json(formattedResults);
+  } catch (error) {
+    console.error('Error fetching badge numbers:', error);
+    res.status(500).json({ error: 'Failed to fetch badge numbers' });
+  }
+});
+
+// Assign badge number to guest
+router.post('/numbers/assign/:guestId/:editionId', async (req, res) => {
+  try {
+    const { guestId, editionId } = req.params;
+    
+    // Check if guest already has a badge number for this edition
+    const existing = await pool.query(`
+      SELECT id FROM guest_badge_numbers 
+      WHERE guest_id = $1 AND edition_id = $2
+    `, [guestId, editionId]);
+    
+    if (existing.rows.length > 0) {
+      return res.status(400).json({ error: 'Guest already has a badge number for this edition' });
+    }
+    
+    // Get next badge number and assign it
+    const result = await pool.query(`
+      INSERT INTO guest_badge_numbers (guest_id, edition_id, badge_number)
+      VALUES ($1, $2, get_next_badge_number($2))
+      RETURNING id, badge_number
+    `, [guestId, editionId]);
+    
+    // Get edition year for formatting
+    const editionResult = await pool.query('SELECT year FROM editions WHERE id = $1', [editionId]);
+    const year = editionResult.rows[0].year;
+    
+    const badgeNumber = result.rows[0].badge_number;
+    const formattedBadgeNumber = `${year}${badgeNumber.toString().padStart(3, '0')}`;
+    
+    res.status(201).json({
+      id: result.rows[0].id,
+      badge_number: badgeNumber,
+      formatted_badge_number: formattedBadgeNumber
+    });
+  } catch (error) {
+    console.error('Error assigning badge number:', error);
+    res.status(500).json({ error: 'Failed to assign badge number' });
+  }
+});
+
+// Generate badge preview
+router.get('/preview/:layoutId/:guestId', async (req, res) => {
+  try {
+    const { layoutId, guestId } = req.params;
+    
+    // Get layout data
+    const layoutResult = await pool.query(`
+      SELECT 
+        bl.*,
+        e.year
+      FROM badge_layouts bl
+      JOIN editions e ON bl.edition_id = e.id
+      WHERE bl.id = $1
+    `, [layoutId]);
+    
+    if (layoutResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Badge layout not found' });
+    }
+    
+    // Get guest data
+    const guestResult = await pool.query(`
+      SELECT 
+        g.*,
+        gbn.badge_number
+      FROM guests g
+      LEFT JOIN guest_badge_numbers gbn ON g.id = gbn.guest_id AND gbn.edition_id = $2
+      WHERE g.id = $1
+    `, [guestId, layoutResult.rows[0].edition_id]);
+    
+    if (guestResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Guest not found' });
+    }
+    
+    const layout = layoutResult.rows[0];
+    const guest = guestResult.rows[0];
+    
+    // Format badge number
+    const formattedBadgeNumber = guest.badge_number 
+      ? `${layout.year}${guest.badge_number.toString().padStart(3, '0')}`
+      : null;
+    
+    res.json({
+      layout,
+      guest: {
+        ...guest,
+        formatted_badge_number: formattedBadgeNumber
+      }
+    });
+  } catch (error) {
+    console.error('Error generating badge preview:', error);
+    res.status(500).json({ error: 'Failed to generate badge preview' });
+  }
+});
+
+module.exports = router;

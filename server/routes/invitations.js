@@ -200,6 +200,19 @@ router.post('/send', async (req, res) => {
            covered_nights = $6`,
         [guest_id, edition_id, template.id, confirmationToken, accommodation, covered_nights]
       );
+
+      // Assign badge number if guest doesn't have one for this edition
+      const badgeNumberResult = await pool.query(`
+        SELECT id FROM guest_badge_numbers 
+        WHERE guest_id = $1 AND edition_id = $2
+      `, [guest_id, edition_id]);
+      
+      if (badgeNumberResult.rows.length === 0) {
+        await pool.query(`
+          INSERT INTO guest_badge_numbers (guest_id, edition_id, badge_number)
+          VALUES ($1, $2, get_next_badge_number($2))
+        `, [guest_id, edition_id]);
+      }
       
       res.json({ 
         message: 'Invitation sent successfully',
