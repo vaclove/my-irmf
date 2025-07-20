@@ -23,14 +23,25 @@ class MailgunService {
     }
 
     try {
+      // In non-production environments, redirect all emails to vaclav@irmf.cz
+      let actualTo = to;
+      let actualSubject = subject;
+      
+      if (process.env.NODE_ENV !== 'production') {
+        const originalTo = Array.isArray(to) ? to.join(', ') : to;
+        actualTo = 'vaclav@irmf.cz';
+        actualSubject = `[DEV - Original: ${originalTo}] ${subject}`;
+      }
+
       const messageData = {
         from: this.fromEmail,
-        to: to,
-        subject: subject,
+        to: actualTo,
+        subject: actualSubject,
         html: html,
         text: text || this.stripHtml(html)
       };
 
+      console.log(`Sending email: ${actualTo} (original: ${to}) - ${actualSubject}`);
       const response = await this.mg.messages.create(this.domain, messageData);
       return response;
     } catch (error) {
