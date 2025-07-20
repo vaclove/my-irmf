@@ -3,6 +3,7 @@ import { movieApi, editionApi } from '../utils/api'
 import { useToast } from '../contexts/ToastContext'
 import { useEdition } from '../contexts/EditionContext'
 import Modal from '../components/Modal'
+import { formatCountryWithFlags, getCountryName } from '../utils/countryFlags'
 
 function Movies() {
   const { success, error: showError } = useToast()
@@ -22,8 +23,8 @@ function Movies() {
     name: true,
     director: true,
     year: true,
+    country: true,
     section: true,
-    country: false,
     runtime: false,
     premiere: false
   })
@@ -295,8 +296,8 @@ function Movies() {
                       { key: 'name', label: 'Name', disabled: true },
                       { key: 'director', label: 'Director' },
                       { key: 'year', label: 'Year' },
-                      { key: 'section', label: 'Section' },
                       { key: 'country', label: 'Country' },
+                      { key: 'section', label: 'Section' },
                       { key: 'runtime', label: 'Runtime' },
                       { key: 'premiere', label: 'Premiere' }
                     ].map(column => (
@@ -648,14 +649,14 @@ function Movies() {
                     Year
                   </th>
                 )}
-                {visibleColumns.section && (
-                  <th className={`${condensedView ? 'px-3 py-2' : 'px-6 py-3'} text-left text-xs font-medium text-gray-500 uppercase ${condensedView ? '' : 'tracking-wider'}`}>
-                    Section
-                  </th>
-                )}
                 {visibleColumns.country && (
                   <th className={`${condensedView ? 'px-3 py-2' : 'px-6 py-3'} text-left text-xs font-medium text-gray-500 uppercase ${condensedView ? '' : 'tracking-wider'}`}>
                     Country
+                  </th>
+                )}
+                {visibleColumns.section && (
+                  <th className={`${condensedView ? 'px-3 py-2' : 'px-6 py-3'} text-left text-xs font-medium text-gray-500 uppercase ${condensedView ? '' : 'tracking-wider'}`}>
+                    Section
                   </th>
                 )}
                 {visibleColumns.runtime && (
@@ -711,14 +712,49 @@ function Movies() {
                       {movie.year || '-'}
                     </td>
                   )}
+                  {visibleColumns.country && (
+                    <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} text-sm text-gray-500`}>
+                      {movie.country ? (
+                        <div className="space-y-0.5">
+                          {(() => {
+                            const countryDisplay = formatCountryWithFlags(movie.country);
+                            if (countryDisplay && countryDisplay.isMultiple) {
+                              // Multiple countries - show each on separate row
+                              return countryDisplay.countries.map((country, index) => (
+                                <div key={index} className="flex items-center space-x-1 leading-tight">
+                                  <span className="text-sm" title={`${country.name} (${country.code})`}>
+                                    {country.flag}
+                                  </span>
+                                  <span className="text-xs text-gray-600">
+                                    {country.name}
+                                  </span>
+                                </div>
+                              ));
+                            } else if (countryDisplay && countryDisplay.countries.length > 0) {
+                              // Single country
+                              const country = countryDisplay.countries[0];
+                              return (
+                                <div className="flex items-center space-x-1">
+                                  {country.flag && (
+                                    <span className="text-sm" title={`${country.name} (${country.code})`}>
+                                      {country.flag}
+                                    </span>
+                                  )}
+                                  <span className="text-xs text-gray-600">
+                                    {country.name}
+                                  </span>
+                                </div>
+                              );
+                            }
+                            return <span className="text-xs">{movie.country}</span>;
+                          })()}
+                        </div>
+                      ) : '-'}
+                    </td>
+                  )}
                   {visibleColumns.section && (
                     <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} text-sm text-gray-500`}>
                       {movie.section ? sections.find(s => s.value === movie.section)?.label || movie.section : '-'}
-                    </td>
-                  )}
-                  {visibleColumns.country && (
-                    <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} text-sm text-gray-500`}>
-                      {movie.country || '-'}
                     </td>
                   )}
                   {visibleColumns.runtime && (
