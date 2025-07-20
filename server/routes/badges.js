@@ -313,30 +313,65 @@ router.get('/print-data/:guestId/:editionId', async (req, res) => {
     const { guestId, editionId } = req.params;
     console.log('Badge print request:', { guestId, editionId });
     
-    // Get guest data with badge number
+    // Get guest data with badge number and category for this edition
+    // Check both guest_editions (confirmed guests) and guest_invitations (invited but not confirmed)
     const guestResult = await pool.query(`
       SELECT 
         g.*,
+        COALESCE(
+          ge.category,
+          -- If guest not in guest_editions, get category from tags like in invitations
+          (SELECT tag_name::guest_category FROM (
+            SELECT t2.name as tag_name, 
+                   CASE t2.name 
+                     WHEN 'filmmaker' THEN 1
+                     WHEN 'press' THEN 2  
+                     WHEN 'staff' THEN 3
+                     WHEN 'guest' THEN 4
+                     ELSE 5
+                   END as priority
+            FROM guest_tags gt2 
+            JOIN tags t2 ON gt2.tag_id = t2.id 
+            WHERE gt2.guest_id = g.id 
+            AND t2.name IN ('filmmaker', 'press', 'staff', 'guest')
+            ORDER BY priority
+            LIMIT 1
+          ) sub),
+          'guest'::guest_category
+        ) as category,
         gbn.badge_number,
-        e.year
+        e.year,
+        CASE 
+          WHEN ge.id IS NOT NULL THEN 'confirmed'
+          WHEN gi.id IS NOT NULL THEN 'invited'
+          ELSE NULL
+        END as status
       FROM guests g
+      LEFT JOIN guest_editions ge ON g.id = ge.guest_id AND ge.edition_id = $2
+      LEFT JOIN guest_invitations gi ON g.id = gi.guest_id AND gi.edition_id = $2
       LEFT JOIN guest_badge_numbers gbn ON g.id = gbn.guest_id AND gbn.edition_id = $2
       JOIN editions e ON e.id = $2
       WHERE g.id = $1
+        AND (ge.id IS NOT NULL OR gi.id IS NOT NULL)
     `, [guestId, editionId]);
     
     console.log('Guest query result:', guestResult.rows.length);
     
     if (guestResult.rows.length === 0) {
-      console.log('Guest not found');
-      return res.status(404).json({ error: 'Guest not found' });
+      console.log('Guest not found or not invited to this edition');
+      return res.status(404).json({ error: 'Guest not found or not invited to this edition. Please send invitation first.' });
     }
     
     const guest = guestResult.rows[0];
     console.log('Guest found:', { id: guest.id, category: guest.category, badge_number: guest.badge_number });
     
-    // Default to 'guest' category if none assigned
-    const guestCategory = guest.category || 'guest';
+    // Validate that the guest has a category
+    if (!guest.category) {
+      console.error('Guest has no category assigned:', { guestId: guest.id, email: guest.email });
+      return res.status(400).json({ error: 'Guest has no category assigned - cannot determine badge layout' });
+    }
+    
+    const guestCategory = guest.category;
     console.log('Using category:', guestCategory);
     
     // Get category assignment for layout
@@ -366,16 +401,45 @@ router.get('/print-data/:guestId/:editionId', async (req, res) => {
       `, [editionId]);
       
       console.log('All assignments for edition:', allAssignments.rows);
-      console.log('No badge layout assigned to category:', guestCategory);
-      return res.status(404).json({ error: 'No badge layout assigned to this guest category' });
+      console.error('No badge layout assigned to category:', guestCategory, 'for edition:', editionId);
+      console.error('Guest details:', { id: guest.id, email: guest.email, category: guest.category });
+      return res.status(404).json({ 
+        error: `No badge layout assigned to guest category '${guestCategory}' for this edition`,
+        availableCategories: allAssignments.rows.map(a => a.category)
+      });
     }
     
     const layout = assignmentResult.rows[0];
+    console.log('Selected layout:', { layout_id: layout.layout_id, layout_name: layout.layout_name, category: guestCategory });
     
     // Format badge number
     const formattedBadgeNumber = guest.badge_number 
       ? `${guest.year}${guest.badge_number.toString().padStart(3, '0')}`
       : null;
+    
+    // Update badge_printed_at timestamp
+    try {
+      // Update in guest_editions if confirmed
+      if (guest.status === 'confirmed') {
+        await pool.query(`
+          UPDATE guest_editions 
+          SET badge_printed_at = CURRENT_TIMESTAMP 
+          WHERE guest_id = $1 AND edition_id = $2
+        `, [guestId, editionId]);
+      }
+      
+      // Always update in guest_invitations if invited
+      await pool.query(`
+        UPDATE guest_invitations 
+        SET badge_printed_at = CURRENT_TIMESTAMP 
+        WHERE guest_id = $1 AND edition_id = $2
+      `, [guestId, editionId]);
+      
+      console.log('Badge print timestamp updated for guest:', guestId);
+    } catch (updateError) {
+      console.error('Error updating badge print timestamp:', updateError);
+      // Don't fail the request if timestamp update fails
+    }
     
     res.json({
       layout,

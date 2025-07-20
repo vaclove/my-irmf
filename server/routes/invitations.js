@@ -449,7 +449,9 @@ router.get('/edition/:editionId', async (req, res) => {
         gi.confirmed_at as responded_at,
         gi.accommodation,
         gi.covered_nights,
+        gi.badge_printed_at,
         CASE 
+          WHEN gi.badge_printed_at IS NOT NULL THEN 'badge_printed'
           WHEN gi.confirmed_at IS NOT NULL THEN 'confirmed'
           ELSE 'sent'
         END as status,
@@ -496,6 +498,7 @@ router.get('/edition/:editionId', async (req, res) => {
       sent_at: row.sent_at,
       opened_at: row.opened_at,
       responded_at: row.responded_at,
+      badge_printed_at: row.badge_printed_at,
       status: row.status,
       accommodation: row.accommodation,
       covered_nights: row.covered_nights,

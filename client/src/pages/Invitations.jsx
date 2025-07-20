@@ -93,8 +93,15 @@ function Invitations() {
         const errorMsg = error.response.data?.error || 'Badge data not found';
         if (errorMsg.includes('badge layout assigned')) {
           showError('No badge layout assigned to this guest category. Please configure badge settings first.');
-        } else if (errorMsg.includes('Guest not found')) {
-          showError('Guest not found or badge number not assigned. Please send invitation first.');
+        } else if (errorMsg.includes('Guest not found') || errorMsg.includes('not assigned to this edition')) {
+          showError('Guest not found or not assigned to this edition. Please send invitation first.');
+        } else {
+          showError(errorMsg);
+        }
+      } else if (error.response?.status === 400) {
+        const errorMsg = error.response.data?.error || 'Badge printing error';
+        if (errorMsg.includes('no category assigned')) {
+          showError('Guest has no category assigned. Please edit guest to assign a category.');
         } else {
           showError(errorMsg);
         }
@@ -184,7 +191,17 @@ function Invitations() {
   }
 
   const getStatusBadge = (invitation) => {
-    if (invitation.status === 'confirmed') {
+    if (invitation.status === 'badge_printed') {
+      const printedDate = invitation.badge_printed_at ? formatDate(invitation.badge_printed_at) : null
+      return (
+        <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-2 space-y-1 sm:space-y-0">
+          <span className="bg-purple-100 text-purple-800 px-2 py-1 rounded text-xs whitespace-nowrap">Badge Printed</span>
+          {printedDate && (
+            <span className="text-xs text-gray-600 whitespace-nowrap">• {printedDate}</span>
+          )}
+        </div>
+      )
+    } else if (invitation.status === 'confirmed') {
       const confirmedDate = invitation.responded_at ? formatDate(invitation.responded_at) : null
       return (
         <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-2 space-y-1 sm:space-y-0">
