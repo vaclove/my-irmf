@@ -24,6 +24,11 @@ function Invitations() {
   const [editingGuest, setEditingGuest] = useState(null)
   const [showGuestForm, setShowGuestForm] = useState(false)
   const [generatingGreeting, setGeneratingGreeting] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [condensedView, setCondensedView] = useState(() => {
+    return localStorage.getItem('invitationsCondensedView') === 'true'
+  })
+  const [showColumnSettings, setShowColumnSettings] = useState(false)
   const [formData, setFormData] = useState({ 
     first_name: '', 
     last_name: '',
@@ -63,6 +68,20 @@ function Invitations() {
       document.removeEventListener('keydown', handleEscape)
     }
   }, [showDetails])
+
+  // Handle click outside for column settings dropdown
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (showColumnSettings && !event.target.closest('.column-settings-container')) {
+        setShowColumnSettings(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [showColumnSettings])
 
   const fetchInvitations = async () => {
     try {
@@ -268,9 +287,26 @@ function Invitations() {
     )
   }
 
+  const toggleCondensedView = () => {
+    const newValue = !condensedView
+    setCondensedView(newValue)
+    localStorage.setItem('invitationsCondensedView', newValue.toString())
+  }
+
   const getFilteredAndSortedInvitations = () => {
     return invitations
       .filter(invitation => {
+        // Filter by search query
+        if (searchQuery.trim()) {
+          const query = searchQuery.toLowerCase().trim()
+          const fullName = `${invitation.guest?.first_name || ''} ${invitation.guest?.last_name || ''}`.toLowerCase()
+          const email = (invitation.guest?.email || '').toLowerCase()
+          const company = (invitation.guest?.company || '').toLowerCase()
+          if (!fullName.includes(query) && !email.includes(query) && !company.includes(query)) {
+            return false
+          }
+        }
+        
         // Filter by category
         if (filterCategory && invitation.guest?.category !== filterCategory) {
           return false
@@ -399,10 +435,56 @@ function Invitations() {
         </div>
       </div>
 
-      {/* Filter Controls */}
+      {/* Search and Filter Controls */}
       <div className="bg-white shadow rounded-lg p-4 mb-6">
-        <h3 className="text-sm font-medium text-gray-700 mb-3">Filters</h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="flex justify-between items-center mb-3">
+          <h3 className="text-sm font-medium text-gray-700">Search & Filters</h3>
+          <div className="relative column-settings-container">
+            <button
+              onClick={() => setShowColumnSettings(!showColumnSettings)}
+              className="bg-gray-600 text-white px-4 py-2 rounded-md hover:bg-gray-700 flex items-center space-x-2"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 002 2m0 0v10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2z" />
+              </svg>
+              <span>Settings</span>
+            </button>
+            {showColumnSettings && (
+              <div className="absolute right-0 mt-2 w-56 bg-white rounded-md shadow-lg border border-gray-200 z-10">
+                <div className="p-3">
+                  <h4 className="text-sm font-medium text-gray-900 mb-2">Table Settings</h4>
+                  <div className="mb-3">
+                    <label className="flex items-center space-x-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={condensedView}
+                        onChange={toggleCondensedView}
+                        className="rounded text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="text-sm text-gray-700">Condensed view</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="md:col-span-1">
+            <label className="block text-xs font-medium text-gray-700 mb-1">Search</label>
+            <div className="relative">
+              <input
+                type="text"
+                placeholder="Search guests..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+              <svg className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            </div>
+          </div>
           <div>
             <label className="block text-xs font-medium text-gray-700 mb-1">Category</label>
             <select
@@ -435,12 +517,13 @@ function Invitations() {
           <div className="flex items-end">
             <button
               onClick={() => {
+                setSearchQuery('')
                 setFilterCategory('')
                 setFilterStatus('')
               }}
               className="bg-gray-200 text-gray-700 px-3 py-2 rounded-md hover:bg-gray-300 text-sm"
             >
-              Clear Filters
+              Clear All
             </button>
           </div>
         </div>
@@ -454,39 +537,45 @@ function Invitations() {
       ) : getFilteredAndSortedInvitations().length === 0 ? (
         <div className="text-center py-12">
           <h3 className="text-lg font-medium text-gray-900 mb-2">No invitations match your filters</h3>
-          <p className="text-gray-600 mb-4">Try adjusting your category or status filters to see more results.</p>
+          <p className="text-gray-600 mb-4">Try adjusting your search or filters to see more results.</p>
           <button
             onClick={() => {
+              setSearchQuery('')
               setFilterCategory('')
               setFilterStatus('')
             }}
             className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700"
           >
-            Clear Filters
+            Clear All
           </button>
         </div>
       ) : (
         <div className="bg-white shadow rounded-lg overflow-hidden">
+          <div className="px-6 py-4 border-b border-gray-200">
+            <h3 className="text-lg font-medium">
+              {(searchQuery.trim() || filterCategory || filterStatus) ? `Filtered Invitations (${getFilteredAndSortedInvitations().length}/${invitations.length})` : `All Invitations (${invitations.length})`}
+            </h3>
+          </div>
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className={`${condensedView ? 'px-3 py-2' : 'px-6 py-3'} text-left text-xs font-medium text-gray-500 uppercase ${condensedView ? '' : 'tracking-wider'}`}>
                     Guest
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className={`${condensedView ? 'px-3 py-2' : 'px-6 py-3'} text-left text-xs font-medium text-gray-500 uppercase ${condensedView ? '' : 'tracking-wider'}`}>
                     Email
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className={`${condensedView ? 'px-3 py-2' : 'px-6 py-3'} text-left text-xs font-medium text-gray-500 uppercase ${condensedView ? '' : 'tracking-wider'}`}>
                     Category
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className={`${condensedView ? 'px-3 py-2' : 'px-6 py-3'} text-left text-xs font-medium text-gray-500 uppercase ${condensedView ? '' : 'tracking-wider'}`}>
                     Status
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className={`${condensedView ? 'px-3 py-2' : 'px-6 py-3'} text-left text-xs font-medium text-gray-500 uppercase ${condensedView ? '' : 'tracking-wider'}`}>
                     Accommodation
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className={`${condensedView ? 'px-3 py-2' : 'px-6 py-3'} text-left text-xs font-medium text-gray-500 uppercase ${condensedView ? '' : 'tracking-wider'}`}>
                     Actions
                   </th>
                 </tr>
@@ -494,38 +583,38 @@ function Invitations() {
               <tbody className="bg-white divide-y divide-gray-200">
                 {Array.isArray(invitations) && getFilteredAndSortedInvitations().map((invitation) => (
                   <tr key={invitation.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap">
+                    <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} whitespace-nowrap`}>
                       <button
                         onClick={() => handleEditGuest(invitation.guest)}
-                        className="flex items-center text-left hover:bg-gray-50 rounded-md p-2 -m-2 transition-colors w-full"
+                        className={`flex items-center text-left hover:bg-gray-50 rounded-md ${condensedView ? 'p-1 -m-1' : 'p-2 -m-2'} transition-colors w-full`}
                         title="Click to edit guest"
                       >
                         <Avatar
                           photo={invitation.guest?.photo}
                           firstName={invitation.guest?.first_name}
                           lastName={invitation.guest?.last_name}
-                          size="sm"
+                          size={condensedView ? "xs" : "sm"}
                         />
-                        <div className="ml-4">
+                        <div className={condensedView ? 'ml-2' : 'ml-4'}>
                           <div className="text-sm font-medium text-gray-900 hover:text-blue-600 transition-colors">
                             {invitation.guest?.first_name} {invitation.guest?.last_name}
                           </div>
-                          <div className="text-sm text-gray-500">
+                          <div className={`${condensedView ? 'text-xs' : 'text-sm'} text-gray-500`}>
                             {invitation.guest?.company}
                           </div>
                         </div>
                       </button>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
+                    <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} whitespace-nowrap`}>
                       <div className="text-sm text-gray-900">{invitation.guest?.email}</div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
+                    <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} whitespace-nowrap`}>
                       {getCategoryBadge(invitation.guest?.category || 'guest')}
                     </td>
-                    <td className="px-6 py-4">
+                    <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'}`}>
                       {getStatusBadge(invitation)}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} whitespace-nowrap text-sm text-gray-500`}>
                       {invitation.accommodation ? (
                         <span className="text-green-600">
                           {invitation.covered_nights} {invitation.covered_nights === 1 ? 'night' : 'nights'}
@@ -534,8 +623,8 @@ function Invitations() {
                         <span className="text-gray-400">-</span>
                       )}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                      <div className="flex space-x-2">
+                    <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} whitespace-nowrap text-sm font-medium`}>
+                      <div className={`flex ${condensedView ? 'space-x-1' : 'space-x-2'}`}>
                         <button
                           onClick={() => {
                             setSelectedInvitation(invitation)
@@ -582,16 +671,19 @@ function Invitations() {
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className={`${condensedView ? 'px-3 py-2' : 'px-6 py-3'} text-left text-xs font-medium text-gray-500 uppercase ${condensedView ? '' : 'tracking-wider'}`}>
                         Guest
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className={`${condensedView ? 'px-3 py-2' : 'px-6 py-3'} text-left text-xs font-medium text-gray-500 uppercase ${condensedView ? '' : 'tracking-wider'}`}>
                         Email
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className={`${condensedView ? 'px-3 py-2' : 'px-6 py-3'} text-left text-xs font-medium text-gray-500 uppercase ${condensedView ? '' : 'tracking-wider'}`}>
                         Category
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className={`${condensedView ? 'px-3 py-2' : 'px-6 py-3'} text-left text-xs font-medium text-gray-500 uppercase ${condensedView ? '' : 'tracking-wider'}`}>
+                        Notes
+                      </th>
+                      <th className={`${condensedView ? 'px-3 py-2' : 'px-6 py-3'} text-left text-xs font-medium text-gray-500 uppercase ${condensedView ? '' : 'tracking-wider'}`}>
                         Actions
                       </th>
                     </tr>
@@ -599,35 +691,40 @@ function Invitations() {
                   <tbody className="bg-white divide-y divide-gray-200">
                     {assignedNotInvited.map((guest) => (
                       <tr key={guest.id} className="hover:bg-gray-50">
-                        <td className="px-6 py-4 whitespace-nowrap">
+                        <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} whitespace-nowrap`}>
                           <button
                             onClick={() => handleEditGuest(guest)}
-                            className="flex items-center text-left hover:bg-gray-50 rounded-md p-2 -m-2 transition-colors w-full"
+                            className={`flex items-center text-left hover:bg-gray-50 rounded-md ${condensedView ? 'p-1 -m-1' : 'p-2 -m-2'} transition-colors w-full`}
                             title="Click to edit guest"
                           >
                             <Avatar
                               photo={guest.photo}
                               firstName={guest.first_name}
                               lastName={guest.last_name}
-                              size="sm"
+                              size={condensedView ? "xs" : "sm"}
                             />
-                            <div className="ml-4">
+                            <div className={condensedView ? 'ml-2' : 'ml-4'}>
                               <div className="text-sm font-medium text-gray-900 hover:text-blue-600 transition-colors">
                                 {guest.first_name} {guest.last_name}
                               </div>
-                              <div className="text-sm text-gray-500">
+                              <div className={`${condensedView ? 'text-xs' : 'text-sm'} text-gray-500`}>
                                 {guest.company}
                               </div>
                             </div>
                           </button>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
+                        <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} whitespace-nowrap`}>
                           <div className="text-sm text-gray-900">{guest.email}</div>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
+                        <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} whitespace-nowrap`}>
                           {getCategoryBadge(guest.category)}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                        <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} text-sm text-gray-500 max-w-xs`}>
+                          <div className="truncate" title={guest.notes}>
+                            {guest.notes || '-'}
+                          </div>
+                        </td>
+                        <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} whitespace-nowrap text-sm font-medium`}>
                           <button
                             onClick={() => handleSendInvitation(guest)}
                             className="text-blue-600 hover:text-blue-900"

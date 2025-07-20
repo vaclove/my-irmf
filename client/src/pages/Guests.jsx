@@ -32,6 +32,9 @@ function Guests() {
   })
   const [showColumnSettings, setShowColumnSettings] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [condensedView, setCondensedView] = useState(() => {
+    return localStorage.getItem('guestsCondensedView') === 'true'
+  })
   const [formData, setFormData] = useState({ 
     first_name: '', 
     last_name: '',
@@ -122,6 +125,20 @@ function Guests() {
 
     return () => clearTimeout(timeoutId)
   }, [formData.first_name, formData.last_name, formData.language, formData.greeting_auto_generated, generateGreeting])
+
+  // Handle click outside for column settings dropdown
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (showColumnSettings && !event.target.closest('.column-settings-container')) {
+        setShowColumnSettings(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [showColumnSettings])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -233,6 +250,12 @@ function Guests() {
     }))
   }
 
+  const toggleCondensedView = () => {
+    const newValue = !condensedView
+    setCondensedView(newValue)
+    localStorage.setItem('guestsCondensedView', newValue.toString())
+  }
+
   const getFilteredGuests = () => {
     let filtered = guests
 
@@ -307,7 +330,7 @@ function Guests() {
           >
             {showTagFilter ? 'Hide Filters' : 'Filter by Tags'}
           </button>
-          <div className="relative">
+          <div className="relative column-settings-container">
             <button
               onClick={() => setShowColumnSettings(!showColumnSettings)}
               className="bg-gray-600 text-white px-4 py-2 rounded-md hover:bg-gray-700 flex items-center space-x-2"
@@ -318,9 +341,21 @@ function Guests() {
               <span>Columns</span>
             </button>
             {showColumnSettings && (
-              <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg border border-gray-200 z-10">
+              <div className="absolute right-0 mt-2 w-56 bg-white rounded-md shadow-lg border border-gray-200 z-10">
                 <div className="p-3">
-                  <h4 className="text-sm font-medium text-gray-900 mb-2">Show Columns</h4>
+                  <h4 className="text-sm font-medium text-gray-900 mb-2">Table Settings</h4>
+                  <div className="mb-3 pb-3 border-b">
+                    <label className="flex items-center space-x-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={condensedView}
+                        onChange={toggleCondensedView}
+                        className="rounded text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="text-sm text-gray-700">Condensed view</span>
+                    </label>
+                  </div>
+                  <h5 className="text-xs font-medium text-gray-700 mb-2">Show Columns</h5>
                   <div className="space-y-2">
                     {[
                       { key: 'name', label: 'Name', disabled: true },
@@ -676,69 +711,69 @@ function Guests() {
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                <th className={`${condensedView ? 'px-3 py-2' : 'px-6 py-3'} text-left text-xs font-medium text-gray-500 uppercase ${condensedView ? '' : 'tracking-wider'}`}>Name</th>
                 {visibleColumns.email && (
-                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
+                  <th className={`${condensedView ? 'px-3 py-2' : 'px-6 py-3'} text-left text-xs font-medium text-gray-500 uppercase ${condensedView ? '' : 'tracking-wider'}`}>Email</th>
                 )}
                 {visibleColumns.phone && (
-                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Phone</th>
+                  <th className={`${condensedView ? 'px-3 py-2' : 'px-6 py-3'} text-left text-xs font-medium text-gray-500 uppercase ${condensedView ? '' : 'tracking-wider'}`}>Phone</th>
                 )}
                 {visibleColumns.notes && (
-                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Notes</th>
+                  <th className={`${condensedView ? 'px-3 py-2' : 'px-6 py-3'} text-left text-xs font-medium text-gray-500 uppercase ${condensedView ? '' : 'tracking-wider'}`}>Notes</th>
                 )}
                 {visibleColumns.tags && (
-                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Tags</th>
+                  <th className={`${condensedView ? 'px-3 py-2' : 'px-6 py-3'} text-left text-xs font-medium text-gray-500 uppercase ${condensedView ? '' : 'tracking-wider'}`}>Tags</th>
                 )}
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {getFilteredGuests().map((guest) => (
                 <tr key={guest.id} className="hover:bg-gray-50">
-                  <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">
+                  <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} whitespace-nowrap text-sm font-medium text-gray-900`}>
                     <button
                       onClick={() => handleEdit(guest)}
-                      className="flex items-center space-x-2 text-left hover:text-blue-600 transition-colors"
+                      className={`flex items-center ${condensedView ? 'space-x-2' : 'space-x-3'} text-left hover:text-blue-600 transition-colors`}
                       title="Click to edit guest"
                     >
                       <Avatar
                         photo={guest.photo}
                         firstName={guest.first_name}
                         lastName={guest.last_name}
-                        size="xs"
+                        size={condensedView ? "xs" : "sm"}
                       />
                       <div>
                         <div className="text-sm font-medium">{guest.first_name} {guest.last_name}</div>
                         {guest.company && (
-                          <div className="text-xs text-gray-500">{guest.company}</div>
+                          <div className={`${condensedView ? 'text-xs' : 'text-sm'} text-gray-500`}>{guest.company}</div>
                         )}
                       </div>
                     </button>
                   </td>
                   {visibleColumns.email && (
-                    <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-500">
+                    <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} whitespace-nowrap text-sm text-gray-500`}>
                       {guest.email}
                     </td>
                   )}
                   {visibleColumns.phone && (
-                    <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-500">
+                    <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} whitespace-nowrap text-sm text-gray-500`}>
                       {guest.phone || '-'}
                     </td>
                   )}
                   {visibleColumns.notes && (
-                    <td className="px-3 py-2 text-sm text-gray-500 max-w-xs">
+                    <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} text-sm text-gray-500 max-w-xs`}>
                       <div className="truncate" title={guest.notes}>
                         {guest.notes || '-'}
                       </div>
                     </td>
                   )}
                   {visibleColumns.tags && (
-                    <td className="px-3 py-2 text-sm text-gray-500">
+                    <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} text-sm text-gray-500`}>
                       <div className="flex flex-wrap gap-1 max-w-xs">
                         {guest.tags && guest.tags.length > 0 ? (
                           guest.tags.map((tag) => (
                             <span
                               key={tag.id}
-                              className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium text-white cursor-pointer group"
+                              className={`inline-flex items-center ${condensedView ? 'px-1.5 py-0.5' : 'px-2 py-1'} rounded-full text-xs font-medium text-white cursor-pointer group`}
                               style={{ backgroundColor: tag.color }}
                               title={`Remove ${tag.name} tag`}
                               onClick={() => handleRemoveTag(guest.id, tag.id)}
@@ -748,19 +783,19 @@ function Guests() {
                             </span>
                           ))
                         ) : (
-                          <span className="text-gray-400 text-xs">-</span>
+                          <span className="text-gray-400 text-xs">No tags</span>
                         )}
                         <button
                           onClick={() => setEditingGuestTags(editingGuestTags === guest.id ? null : guest.id)}
-                          className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-gray-200 text-gray-700 hover:bg-gray-300"
+                          className={`inline-flex items-center ${condensedView ? 'px-1.5 py-0.5' : 'px-2 py-1'} rounded-full text-xs font-medium bg-gray-200 text-gray-700 hover:bg-gray-300`}
                           title="Add tag"
                         >
                           +
                         </button>
                       </div>
                       {editingGuestTags === guest.id && (
-                        <div className="mt-1 p-2 bg-gray-50 rounded-md">
-                          <p className="text-xs text-gray-600 mb-1">Add tags:</p>
+                        <div className={`${condensedView ? 'mt-1 p-1' : 'mt-2 p-2'} bg-gray-50 rounded-md`}>
+                          <p className="text-xs text-gray-600 mb-2">Add tags:</p>
                           <div className="flex flex-wrap gap-1">
                             {allTags
                               .filter(tag => !guest.tags.some(guestTag => guestTag.id === tag.id))
@@ -771,7 +806,7 @@ function Guests() {
                                     handleAddTag(guest.id, tag.id)
                                     setEditingGuestTags(null)
                                   }}
-                                  className="px-1.5 py-0.5 rounded text-xs font-medium text-white hover:opacity-80"
+                                  className={`${condensedView ? 'px-1.5 py-0.5' : 'px-2 py-1'} rounded-full text-xs font-medium text-white hover:opacity-80`}
                                   style={{ backgroundColor: tag.color }}
                                 >
                                   {tag.name}
