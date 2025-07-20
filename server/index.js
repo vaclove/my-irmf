@@ -21,6 +21,7 @@ const templateRoutes = require('./routes/templates');
 const tagRoutes = require('./routes/tags');
 const auditRoutes = require('./routes/audit');
 const badgeRoutes = require('./routes/badges');
+const movieRoutes = require('./routes/movies');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -87,6 +88,7 @@ app.use('/api/templates', requireIrmfDomain, templateRoutes);
 app.use('/api/tags', requireIrmfDomain, tagRoutes);
 app.use('/api/audit', requireIrmfDomain, auditRoutes);
 app.use('/api/badges', requireIrmfDomain, badgeRoutes);
+app.use('/api/movies', requireIrmfDomain, movieRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });

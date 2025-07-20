@@ -113,4 +113,14 @@ export const badgeApi = {
   getPrintData: (guestId, editionId) => api.get(`/badges/print-data/${guestId}/${editionId}`),
 }
 
+// Movies API
+export const movieApi = {
+  getAll: (editionId) => api.get('/movies', { params: editionId ? { edition_id: editionId } : {} }),
+  getById: (id) => api.get(`/movies/${id}`),
+  create: (movie) => api.post('/movies', movie),
+  update: (id, movie) => api.put(`/movies/${id}`, movie),
+  delete: (id) => api.delete(`/movies/${id}`),
+  getBySection: (section, editionId) => api.get(`/movies/section/${section}`, { params: editionId ? { edition_id: editionId } : {} }),
+}
+
 export default api
