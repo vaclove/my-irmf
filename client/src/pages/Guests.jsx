@@ -265,6 +265,13 @@ function Guests() {
       })
     }
     
+    // Sort by last name
+    filtered.sort((a, b) => {
+      const lastNameA = (a.last_name || '').toLowerCase()
+      const lastNameB = (b.last_name || '').toLowerCase()
+      return lastNameA.localeCompare(lastNameB)
+    })
+    
     return filtered
   }
 
