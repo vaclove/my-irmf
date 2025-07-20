@@ -28,6 +28,7 @@ function Guests() {
     tags: true
   })
   const [showColumnSettings, setShowColumnSettings] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
   const [formData, setFormData] = useState({ 
     first_name: '', 
     last_name: '',
@@ -230,16 +231,29 @@ function Guests() {
   }
 
   const getFilteredGuests = () => {
-    if (selectedTags.length === 0) {
-      return guests
+    let filtered = guests
+
+    // Filter by search query
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase().trim()
+      filtered = filtered.filter(guest => {
+        const fullName = `${guest.first_name} ${guest.last_name}`.toLowerCase()
+        const email = guest.email.toLowerCase()
+        return fullName.includes(query) || email.includes(query)
+      })
+    }
+
+    // Filter by selected tags
+    if (selectedTags.length > 0) {
+      filtered = filtered.filter(guest => {
+        // Check if guest has ALL selected tags
+        return selectedTags.every(selectedTagId => 
+          guest.tags.some(guestTag => guestTag.id === selectedTagId)
+        )
+      })
     }
     
-    return guests.filter(guest => {
-      // Check if guest has ALL selected tags
-      return selectedTags.every(selectedTagId => 
-        guest.tags.some(guestTag => guestTag.id === selectedTagId)
-      )
-    })
+    return filtered
   }
 
   const resetForm = () => {
@@ -568,9 +582,36 @@ function Guests() {
 
       <div className="bg-white shadow rounded-lg">
         <div className="px-6 py-4 border-b border-gray-200">
-          <h3 className="text-lg font-medium">
-            {selectedTags.length > 0 ? `Filtered Guests (${getFilteredGuests().length}/${guests.length})` : `All Guests (${guests.length})`}
-          </h3>
+          <div className="flex justify-between items-center">
+            <h3 className="text-lg font-medium">
+              {(selectedTags.length > 0 || searchQuery.trim()) ? `Filtered Guests (${getFilteredGuests().length}/${guests.length})` : `All Guests (${guests.length})`}
+            </h3>
+            <div className="flex items-center space-x-3">
+              <div className="relative">
+                <input
+                  type="text"
+                  placeholder="Search guests..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-8 pr-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+                <svg className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              </div>
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="text-gray-400 hover:text-gray-600"
+                  title="Clear search"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
+            </div>
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
