@@ -27,7 +27,6 @@ function Guests() {
     name: true,
     email: true,
     phone: false, // Hidden by default
-    company: true,
     notes: true,
     tags: true
   })
@@ -243,7 +242,8 @@ function Guests() {
       filtered = filtered.filter(guest => {
         const fullName = `${guest.first_name} ${guest.last_name}`.toLowerCase()
         const email = guest.email.toLowerCase()
-        return fullName.includes(query) || email.includes(query)
+        const company = (guest.company || '').toLowerCase()
+        return fullName.includes(query) || email.includes(query) || company.includes(query)
       })
     }
 
@@ -319,7 +319,6 @@ function Guests() {
                       { key: 'name', label: 'Name', disabled: true },
                       { key: 'email', label: 'Email' },
                       { key: 'phone', label: 'Phone' },
-                      { key: 'company', label: 'Company' },
                       { key: 'notes', label: 'Notes' },
                       { key: 'tags', label: 'Tags' }
                     ].map(column => (
@@ -677,9 +676,6 @@ function Guests() {
                 {visibleColumns.phone && (
                   <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Phone</th>
                 )}
-                {visibleColumns.company && (
-                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Company</th>
-                )}
                 {visibleColumns.notes && (
                   <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Notes</th>
                 )}
@@ -703,7 +699,12 @@ function Guests() {
                         lastName={guest.last_name}
                         size="xs"
                       />
-                      <span className="text-sm">{guest.first_name} {guest.last_name}</span>
+                      <div>
+                        <div className="text-sm font-medium">{guest.first_name} {guest.last_name}</div>
+                        {guest.company && (
+                          <div className="text-xs text-gray-500">{guest.company}</div>
+                        )}
+                      </div>
                     </button>
                   </td>
                   {visibleColumns.email && (
@@ -714,11 +715,6 @@ function Guests() {
                   {visibleColumns.phone && (
                     <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-500">
                       {guest.phone || '-'}
-                    </td>
-                  )}
-                  {visibleColumns.company && (
-                    <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-500">
-                      {guest.company || '-'}
                     </td>
                   )}
                   {visibleColumns.notes && (
