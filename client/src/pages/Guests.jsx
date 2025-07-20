@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { guestApi, tagApi } from '../utils/api'
 import { useToast } from '../contexts/ToastContext'
 import TagCard from '../components/TagCard'
+import TagDeleteButton from '../components/TagDeleteButton'
 import PhotoUpload from '../components/PhotoUpload'
 import Avatar from '../components/Avatar'
 import Modal from '../components/Modal'
@@ -16,6 +17,7 @@ function Guests() {
   const [editingGuest, setEditingGuest] = useState(null)
   const [allTags, setAllTags] = useState([])
   const [selectedTags, setSelectedTags] = useState([])
+  const [excludedTags, setExcludedTags] = useState([])
   const [showTagFilter, setShowTagFilter] = useState(false)
   const [editingGuestTags, setEditingGuestTags] = useState(null)
   const [newTagName, setNewTagName] = useState('')
@@ -243,12 +245,20 @@ function Guests() {
       })
     }
 
-    // Filter by selected tags
+    // Filter by selected tags (must have ALL)
     if (selectedTags.length > 0) {
       filtered = filtered.filter(guest => {
-        // Check if guest has ALL selected tags
         return selectedTags.every(selectedTagId => 
           guest.tags.some(guestTag => guestTag.id === selectedTagId)
+        )
+      })
+    }
+
+    // Filter by excluded tags (must NOT have ANY)
+    if (excludedTags.length > 0) {
+      filtered = filtered.filter(guest => {
+        return !excludedTags.some(excludedTagId => 
+          guest.tags.some(guestTag => guestTag.id === excludedTagId)
         )
       })
     }
@@ -377,30 +387,71 @@ function Guests() {
           
           <div className="mb-4">
             <p className="text-sm text-gray-600 mb-2">
-              Selected tags: {selectedTags.length} | Showing {getFilteredGuests().length} of {guests.length} guests
+              Include: {selectedTags.length} | Exclude: {excludedTags.length} | Showing {getFilteredGuests().length} of {guests.length} guests
+            </p>
+            <p className="text-xs text-gray-500 mb-3">
+              💡 Click to include, Ctrl+click (Cmd+click on Mac) to exclude
             </p>
             <div className="flex flex-wrap gap-2">
-              {allTags.map((tag) => (
-                <TagCard
-                  key={tag.id}
-                  tag={tag}
-                  isSelected={selectedTags.includes(tag.id)}
-                  onToggleSelect={() => {
-                    setSelectedTags(prev => 
-                      prev.includes(tag.id) 
-                        ? prev.filter(id => id !== tag.id)
-                        : [...prev, tag.id]
-                    )
-                  }}
-                  onDeleteSuccess={handleTagDeleted}
-                />
-              ))}
+              {allTags.map((tag) => {
+                const isSelected = selectedTags.includes(tag.id)
+                const isExcluded = excludedTags.includes(tag.id)
+                
+                return (
+                  <div key={tag.id} className="relative">
+                    <div
+                      className={`px-3 py-1 rounded-full text-sm font-medium border-2 transition-colors flex items-center justify-between min-w-0 cursor-pointer ${
+                        isSelected 
+                          ? 'border-green-500 text-white' 
+                          : isExcluded 
+                          ? 'border-red-500 text-white'
+                          : 'border-gray-300 text-gray-700 hover:border-gray-400'
+                      }`}
+                      style={{
+                        backgroundColor: isSelected ? 'green' : isExcluded ? 'red' : 'white',
+                        borderColor: isSelected ? 'green' : isExcluded ? 'red' : undefined
+                      }}
+                      onClick={(e) => {
+                        if (e.ctrlKey || e.metaKey) {
+                          // Ctrl/Cmd click for exclude
+                          setExcludedTags(prev => 
+                            prev.includes(tag.id) 
+                              ? prev.filter(id => id !== tag.id)
+                              : [...prev, tag.id]
+                          )
+                          setSelectedTags(prev => prev.filter(id => id !== tag.id))
+                        } else {
+                          // Normal click for include
+                          setSelectedTags(prev => 
+                            prev.includes(tag.id) 
+                              ? prev.filter(id => id !== tag.id)
+                              : [...prev, tag.id]
+                          )
+                          setExcludedTags(prev => prev.filter(id => id !== tag.id))
+                        }
+                      }}
+                      title={`Click to include, Ctrl+click to exclude ${tag.name}`}
+                    >
+                      <span className="truncate flex-1">
+                        {isExcluded && '¬'}{tag.name} ({tag.guest_count || 0})
+                      </span>
+                      <TagDeleteButton 
+                        tag={tag} 
+                        onDeleteSuccess={handleTagDeleted}
+                      />
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           </div>
           
-          {selectedTags.length > 0 && (
+          {(selectedTags.length > 0 || excludedTags.length > 0) && (
             <button
-              onClick={() => setSelectedTags([])}
+              onClick={() => {
+                setSelectedTags([])
+                setExcludedTags([])
+              }}
               className="text-sm text-gray-600 hover:text-gray-800"
             >
               Clear all filters
@@ -584,7 +635,7 @@ function Guests() {
         <div className="px-6 py-4 border-b border-gray-200">
           <div className="flex justify-between items-center">
             <h3 className="text-lg font-medium">
-              {(selectedTags.length > 0 || searchQuery.trim()) ? `Filtered Guests (${getFilteredGuests().length}/${guests.length})` : `All Guests (${guests.length})`}
+              {(selectedTags.length > 0 || excludedTags.length > 0 || searchQuery.trim()) ? `Filtered Guests (${getFilteredGuests().length}/${guests.length})` : `All Guests (${guests.length})`}
             </h3>
             <div className="flex items-center space-x-3">
               <div className="relative">
