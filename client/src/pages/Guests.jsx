@@ -5,6 +5,7 @@ import { useToast } from '../contexts/ToastContext'
 import TagCard from '../components/TagCard'
 import PhotoUpload from '../components/PhotoUpload'
 import Avatar from '../components/Avatar'
+import Modal from '../components/Modal'
 
 function Guests() {
   const { success, error: showError } = useToast()
@@ -18,6 +19,15 @@ function Guests() {
   const [showTagFilter, setShowTagFilter] = useState(false)
   const [editingGuestTags, setEditingGuestTags] = useState(null)
   const [newTagName, setNewTagName] = useState('')
+  const [visibleColumns, setVisibleColumns] = useState({
+    name: true,
+    email: true,
+    phone: false, // Hidden by default
+    company: true,
+    notes: true,
+    tags: true
+  })
+  const [showColumnSettings, setShowColumnSettings] = useState(false)
   const [formData, setFormData] = useState({ 
     first_name: '', 
     last_name: '',
@@ -212,6 +222,13 @@ function Guests() {
     await fetchGuests()
   }
 
+  const toggleColumnVisibility = (column) => {
+    setVisibleColumns(prev => ({
+      ...prev,
+      [column]: !prev[column]
+    }))
+  }
+
   const getFilteredGuests = () => {
     if (selectedTags.length === 0) {
       return guests
@@ -257,6 +274,46 @@ function Guests() {
           >
             {showTagFilter ? 'Hide Filters' : 'Filter by Tags'}
           </button>
+          <div className="relative">
+            <button
+              onClick={() => setShowColumnSettings(!showColumnSettings)}
+              className="bg-gray-600 text-white px-4 py-2 rounded-md hover:bg-gray-700 flex items-center space-x-2"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 002 2m0 0v10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2z" />
+              </svg>
+              <span>Columns</span>
+            </button>
+            {showColumnSettings && (
+              <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg border border-gray-200 z-10">
+                <div className="p-3">
+                  <h4 className="text-sm font-medium text-gray-900 mb-2">Show Columns</h4>
+                  <div className="space-y-2">
+                    {[
+                      { key: 'name', label: 'Name', disabled: true },
+                      { key: 'email', label: 'Email' },
+                      { key: 'phone', label: 'Phone' },
+                      { key: 'company', label: 'Company' },
+                      { key: 'notes', label: 'Notes' },
+                      { key: 'tags', label: 'Tags' }
+                    ].map(column => (
+                      <label key={column.key} className={`flex items-center space-x-2 ${column.disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
+                        <input
+                          type="checkbox"
+                          checked={visibleColumns[column.key]}
+                          onChange={() => !column.disabled && toggleColumnVisibility(column.key)}
+                          disabled={column.disabled}
+                          className="rounded text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="text-sm text-gray-700">{column.label}</span>
+                        {column.disabled && <span className="text-xs text-gray-400">(required)</span>}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
           <button
             onClick={() => {
               setEditingGuest(null)
@@ -338,169 +395,176 @@ function Guests() {
         </div>
       )}
 
-      {showForm && (
-        <div className="bg-white shadow rounded-lg p-6 mb-6">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-lg font-medium">
-              {editingGuest ? 'Edit Guest' : 'Add New Guest'}
-            </h2>
-            <button
-              type="button"
-              onClick={resetForm}
-              className="text-gray-400 hover:text-gray-600 transition-colors"
-              title="Close form"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
+      <Modal
+        isOpen={showForm}
+        onClose={resetForm}
+        title={editingGuest ? 'Edit Guest' : 'Add New Guest'}
+        size="large"
+      >
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <div className="flex gap-6">
+            {/* Left Column - Photo */}
+            <div className="flex-shrink-0">
+              <PhotoUpload
+                currentPhoto={formData.photo}
+                onPhotoChange={(photo) => setFormData({ ...formData, photo })}
+                guestId={editingGuest?.id}
+                guestData={editingGuest}
+              />
+            </div>
+            
+            {/* Right Column - Form Fields */}
+            <div className="flex-1 space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">First Name</label>
+                  <input
+                    type="text"
+                    required
+                    value={formData.first_name}
+                    onChange={(e) => setFormData({ ...formData, first_name: e.target.value })}
+                    className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Last Name</label>
+                  <input
+                    type="text"
+                    required
+                    value={formData.last_name}
+                    onChange={(e) => setFormData({ ...formData, last_name: e.target.value })}
+                    className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                  />
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                  <input
+                    type="email"
+                    required
+                    value={formData.email}
+                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                    className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+                  <input
+                    type="tel"
+                    value={formData.phone}
+                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                    className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                  />
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Language</label>
+                  <select
+                    value={formData.language}
+                    onChange={(e) => setFormData({ ...formData, language: e.target.value })}
+                    className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                  >
+                    <option value="english">English</option>
+                    <option value="czech">Czech</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Company</label>
+                  <input
+                    type="text"
+                    value={formData.company}
+                    onChange={(e) => setFormData({ ...formData, company: e.target.value })}
+                    className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                    placeholder="Optional"
+                  />
+                </div>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Greeting
+                  {generatingGreeting && (
+                    <span className="ml-2 text-xs text-blue-600">Generating...</span>
+                  )}
+                  {formData.greeting_auto_generated && (
+                    <span className="ml-2 text-xs text-green-600">Auto-generated</span>
+                  )}
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={formData.greeting}
+                    onChange={(e) => setFormData({ 
+                      ...formData, 
+                      greeting: e.target.value,
+                      greeting_auto_generated: false 
+                    })}
+                    className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                    placeholder="e.g., Dear Mr. Smith"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (formData.first_name && formData.last_name) {
+                        setFormData(prev => ({ ...prev, greeting_auto_generated: true }))
+                        generateGreeting(formData.first_name, formData.last_name, formData.language)
+                      }
+                    }}
+                    disabled={!formData.first_name || !formData.last_name || generatingGreeting}
+                    className="px-3 py-2 text-sm bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 disabled:opacity-50 flex-shrink-0"
+                    title="Regenerate greeting"
+                  >
+                    ↻
+                  </button>
+                </div>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+                <textarea
+                  value={formData.notes}
+                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                  rows="2"
+                  className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                  placeholder="Optional notes about the guest..."
+                />
+              </div>
+            </div>
           </div>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <PhotoUpload
-              currentPhoto={formData.photo}
-              onPhotoChange={(photo) => setFormData({ ...formData, photo })}
-              guestId={editingGuest?.id}
-              guestData={editingGuest}
-            />
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700">First Name</label>
-                <input
-                  type="text"
-                  required
-                  value={formData.first_name}
-                  onChange={(e) => setFormData({ ...formData, first_name: e.target.value })}
-                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Last Name</label>
-                <input
-                  type="text"
-                  required
-                  value={formData.last_name}
-                  onChange={(e) => setFormData({ ...formData, last_name: e.target.value })}
-                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
-                />
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Email</label>
-              <input
-                type="email"
-                required
-                value={formData.email}
-                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Phone</label>
-              <input
-                type="tel"
-                value={formData.phone}
-                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Language</label>
-              <select
-                value={formData.language}
-                onChange={(e) => setFormData({ ...formData, language: e.target.value })}
-                className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
+          
+          {/* Action Buttons */}
+          <div className="flex justify-between items-center pt-4 border-t">
+            <div className="flex space-x-3">
+              <button
+                type="submit"
+                className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 text-sm font-medium"
               >
-                <option value="english">English</option>
-                <option value="czech">Czech</option>
-              </select>
+                {editingGuest ? 'Update Guest' : 'Create Guest'}
+              </button>
+              <button
+                type="button"
+                onClick={resetForm}
+                className="bg-gray-300 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-400 text-sm font-medium"
+              >
+                Cancel
+              </button>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">
-                Greeting
-                {generatingGreeting && (
-                  <span className="ml-2 text-xs text-blue-600">Generating...</span>
-                )}
-                {formData.greeting_auto_generated && (
-                  <span className="ml-2 text-xs text-green-600">Auto-generated</span>
-                )}
-              </label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={formData.greeting}
-                  onChange={(e) => setFormData({ 
-                    ...formData, 
-                    greeting: e.target.value,
-                    greeting_auto_generated: false 
-                  })}
-                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
-                  placeholder="e.g., Dear Mr. Smith"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (formData.first_name && formData.last_name) {
-                      // First set auto-generated to true, then generate
-                      setFormData(prev => ({ ...prev, greeting_auto_generated: true }))
-                      generateGreeting(formData.first_name, formData.last_name, formData.language)
-                    }
-                  }}
-                  disabled={!formData.first_name || !formData.last_name || generatingGreeting}
-                  className="mt-1 px-3 py-2 text-sm bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 disabled:opacity-50"
-                  title="Regenerate greeting"
-                >
-                  ↻
-                </button>
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Company (optional)</label>
-              <input
-                type="text"
-                value={formData.company}
-                onChange={(e) => setFormData({ ...formData, company: e.target.value })}
-                className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Notes (optional)</label>
-              <textarea
-                value={formData.notes}
-                onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                rows="3"
-                className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2"
-                placeholder="Additional notes about the guest..."
-              />
-            </div>
-            <div className="flex justify-between items-center">
-              <div className="flex space-x-3">
-                <button
-                  type="submit"
-                  className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700"
-                >
-                  {editingGuest ? 'Update' : 'Create'}
-                </button>
-                <button
-                  type="button"
-                  onClick={resetForm}
-                  className="bg-gray-300 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-400"
-                >
-                  Cancel
-                </button>
-              </div>
-              {editingGuest && (
-                <button
-                  type="button"
-                  onClick={() => handleDelete(editingGuest.id)}
-                  className="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700"
-                >
-                  Delete Guest
-                </button>
-              )}
-            </div>
-          </form>
-        </div>
-      )}
+            {editingGuest && (
+              <button
+                type="button"
+                onClick={() => handleDelete(editingGuest.id)}
+                className="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700 text-sm font-medium"
+              >
+                Delete Guest
+              </button>
+            )}
+          </div>
+        </form>
+      </Modal>
 
       <div className="bg-white shadow rounded-lg">
         <div className="px-6 py-4 border-b border-gray-200">
@@ -512,105 +576,115 @@ function Guests() {
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Phone</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Company</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Notes</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Language</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tags</th>
+                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                {visibleColumns.email && (
+                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
+                )}
+                {visibleColumns.phone && (
+                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Phone</th>
+                )}
+                {visibleColumns.company && (
+                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Company</th>
+                )}
+                {visibleColumns.notes && (
+                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Notes</th>
+                )}
+                {visibleColumns.tags && (
+                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Tags</th>
+                )}
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {getFilteredGuests().map((guest) => (
-                <tr key={guest.id}>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                <tr key={guest.id} className="hover:bg-gray-50">
+                  <td className="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">
                     <button
                       onClick={() => handleEdit(guest)}
-                      className="flex items-center space-x-3 text-left hover:text-blue-600 transition-colors"
+                      className="flex items-center space-x-2 text-left hover:text-blue-600 transition-colors"
                       title="Click to edit guest"
                     >
                       <Avatar
                         photo={guest.photo}
                         firstName={guest.first_name}
                         lastName={guest.last_name}
-                        size="sm"
+                        size="xs"
                       />
-                      <span>{guest.first_name} {guest.last_name}</span>
+                      <span className="text-sm">{guest.first_name} {guest.last_name}</span>
                     </button>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {guest.email}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {guest.phone || '-'}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {guest.company || '-'}
-                  </td>
-                  <td className="px-6 py-4 text-sm text-gray-500 max-w-xs">
-                    <div className="truncate" title={guest.notes}>
-                      {guest.notes || '-'}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    <span className={`inline-flex px-2 py-1 text-xs rounded-full ${
-                      guest.language === 'czech' 
-                        ? 'bg-blue-100 text-blue-800' 
-                        : 'bg-green-100 text-green-800'
-                    }`}>
-                      {guest.language === 'czech' ? 'Czech' : 'English'}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-sm text-gray-500">
-                    <div className="flex flex-wrap gap-1 max-w-xs">
-                      {guest.tags && guest.tags.length > 0 ? (
-                        guest.tags.map((tag) => (
-                          <span
-                            key={tag.id}
-                            className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium text-white cursor-pointer group"
-                            style={{ backgroundColor: tag.color }}
-                            title={`Remove ${tag.name} tag`}
-                            onClick={() => handleRemoveTag(guest.id, tag.id)}
-                          >
-                            {tag.name}
-                            <span className="ml-1 opacity-0 group-hover:opacity-100 transition-opacity">×</span>
-                          </span>
-                        ))
-                      ) : (
-                        <span className="text-gray-400 text-xs">No tags</span>
-                      )}
-                      <button
-                        onClick={() => setEditingGuestTags(editingGuestTags === guest.id ? null : guest.id)}
-                        className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-200 text-gray-700 hover:bg-gray-300"
-                        title="Add tag"
-                      >
-                        +
-                      </button>
-                    </div>
-                    {editingGuestTags === guest.id && (
-                      <div className="mt-2 p-2 bg-gray-50 rounded-md">
-                        <p className="text-xs text-gray-600 mb-2">Add tags:</p>
-                        <div className="flex flex-wrap gap-1">
-                          {allTags
-                            .filter(tag => !guest.tags.some(guestTag => guestTag.id === tag.id))
-                            .map((tag) => (
-                              <button
-                                key={tag.id}
-                                onClick={() => {
-                                  handleAddTag(guest.id, tag.id)
-                                  setEditingGuestTags(null)
-                                }}
-                                className="px-2 py-1 rounded-full text-xs font-medium text-white hover:opacity-80"
-                                style={{ backgroundColor: tag.color }}
-                              >
-                                {tag.name}
-                              </button>
-                            ))}
-                        </div>
+                  {visibleColumns.email && (
+                    <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-500">
+                      {guest.email}
+                    </td>
+                  )}
+                  {visibleColumns.phone && (
+                    <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-500">
+                      {guest.phone || '-'}
+                    </td>
+                  )}
+                  {visibleColumns.company && (
+                    <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-500">
+                      {guest.company || '-'}
+                    </td>
+                  )}
+                  {visibleColumns.notes && (
+                    <td className="px-3 py-2 text-sm text-gray-500 max-w-xs">
+                      <div className="truncate" title={guest.notes}>
+                        {guest.notes || '-'}
                       </div>
-                    )}
-                  </td>
+                    </td>
+                  )}
+                  {visibleColumns.tags && (
+                    <td className="px-3 py-2 text-sm text-gray-500">
+                      <div className="flex flex-wrap gap-1 max-w-xs">
+                        {guest.tags && guest.tags.length > 0 ? (
+                          guest.tags.map((tag) => (
+                            <span
+                              key={tag.id}
+                              className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium text-white cursor-pointer group"
+                              style={{ backgroundColor: tag.color }}
+                              title={`Remove ${tag.name} tag`}
+                              onClick={() => handleRemoveTag(guest.id, tag.id)}
+                            >
+                              {tag.name}
+                              <span className="ml-1 opacity-0 group-hover:opacity-100 transition-opacity">×</span>
+                            </span>
+                          ))
+                        ) : (
+                          <span className="text-gray-400 text-xs">-</span>
+                        )}
+                        <button
+                          onClick={() => setEditingGuestTags(editingGuestTags === guest.id ? null : guest.id)}
+                          className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-gray-200 text-gray-700 hover:bg-gray-300"
+                          title="Add tag"
+                        >
+                          +
+                        </button>
+                      </div>
+                      {editingGuestTags === guest.id && (
+                        <div className="mt-1 p-2 bg-gray-50 rounded-md">
+                          <p className="text-xs text-gray-600 mb-1">Add tags:</p>
+                          <div className="flex flex-wrap gap-1">
+                            {allTags
+                              .filter(tag => !guest.tags.some(guestTag => guestTag.id === tag.id))
+                              .map((tag) => (
+                                <button
+                                  key={tag.id}
+                                  onClick={() => {
+                                    handleAddTag(guest.id, tag.id)
+                                    setEditingGuestTags(null)
+                                  }}
+                                  className="px-1.5 py-0.5 rounded text-xs font-medium text-white hover:opacity-80"
+                                  style={{ backgroundColor: tag.color }}
+                                >
+                                  {tag.name}
+                                </button>
+                              ))}
+                          </div>
+                        </div>
+                      )}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

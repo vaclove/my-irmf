@@ -144,14 +144,14 @@ const PhotoUpload = ({ currentPhoto, onPhotoChange, disabled = false, guestId = 
   }
 
   return (
-    <div className="space-y-4">
-      <label className="block text-sm font-medium text-gray-700">
-        Profile Photo
+    <div className="space-y-2">
+      <label className="block text-sm font-medium text-gray-700 mb-1">
+        Photo
       </label>
       
       {/* Photo Preview */}
       {previewUrl && !showCropper && (
-        <div className="flex items-center space-x-4">
+        <div className="flex flex-col items-center space-y-2">
           <img
             src={previewUrl}
             alt="Profile preview"
@@ -162,15 +162,15 @@ const PhotoUpload = ({ currentPhoto, onPhotoChange, disabled = false, guestId = 
               type="button"
               onClick={() => fileInputRef.current?.click()}
               disabled={disabled}
-              className="text-sm text-blue-600 hover:text-blue-800 disabled:opacity-50"
+              className="text-xs text-blue-600 hover:text-blue-800 disabled:opacity-50 px-2 py-1 bg-blue-50 rounded"
             >
-              Change Photo
+              Change
             </button>
             <button
               type="button"
               onClick={handleRemovePhoto}
               disabled={disabled}
-              className="text-sm text-red-600 hover:text-red-800 disabled:opacity-50"
+              className="text-xs text-red-600 hover:text-red-800 disabled:opacity-50 px-2 py-1 bg-red-50 rounded"
             >
               Remove
             </button>
@@ -182,19 +182,19 @@ const PhotoUpload = ({ currentPhoto, onPhotoChange, disabled = false, guestId = 
       {!previewUrl && !showCropper && (
         <div
           onClick={() => fileInputRef.current?.click()}
-          className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center cursor-pointer hover:border-gray-400 transition-colors"
+          className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center cursor-pointer hover:border-gray-400 transition-colors w-24"
         >
-          <div className="space-y-2">
+          <div className="space-y-1">
             <div className="text-gray-400">
-              <svg className="mx-auto h-12 w-12" stroke="currentColor" fill="none" viewBox="0 0 48 48">
+              <svg className="mx-auto h-8 w-8" stroke="currentColor" fill="none" viewBox="0 0 48 48">
                 <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </div>
-            <div className="text-sm text-gray-600">
-              <span className="font-medium text-blue-600">Click to upload</span> or drag and drop
+            <div className="text-xs text-gray-600">
+              <span className="font-medium text-blue-600">Upload</span>
             </div>
             <p className="text-xs text-gray-500">
-              JPEG, PNG, WebP up to 10MB
+              JPEG, PNG, WebP
             </p>
           </div>
         </div>
