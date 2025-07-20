@@ -3,6 +3,7 @@ import { movieApi, editionApi } from '../utils/api'
 import { useToast } from '../contexts/ToastContext'
 import { useEdition } from '../contexts/EditionContext'
 import Modal from '../components/Modal'
+import CountryPicker from '../components/CountryPicker'
 import { formatCountryWithFlags, getCountryName } from '../utils/countryFlags'
 
 function Movies() {
@@ -435,15 +436,19 @@ function Movies() {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Year</label>
-              <input
-                type="number"
-                value={formData.year}
-                onChange={(e) => setFormData({ ...formData, year: parseInt(e.target.value) || '' })}
+              <label className="block text-sm font-medium text-gray-700 mb-1">Section</label>
+              <select
+                value={formData.section}
+                onChange={(e) => setFormData({ ...formData, section: e.target.value })}
                 className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                min="1900"
-                max="2100"
-              />
+              >
+                <option value="">Select Section</option>
+                {sections.map(section => (
+                  <option key={section.value} value={section.value}>
+                    {section.label}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 
@@ -481,30 +486,26 @@ function Movies() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Country</label>
-              <input
-                type="text"
+              <CountryPicker
                 value={formData.country}
-                onChange={(e) => setFormData({ ...formData, country: e.target.value })}
-                className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                onChange={(value) => setFormData({ ...formData, country: value })}
+                placeholder="Select countries..."
+                className="w-full"
               />
             </div>
           </div>
 
           <div className="grid grid-cols-3 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Section</label>
-              <select
-                value={formData.section}
-                onChange={(e) => setFormData({ ...formData, section: e.target.value })}
+              <label className="block text-sm font-medium text-gray-700 mb-1">Year</label>
+              <input
+                type="number"
+                value={formData.year}
+                onChange={(e) => setFormData({ ...formData, year: parseInt(e.target.value) || '' })}
                 className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-              >
-                <option value="">Select Section</option>
-                {sections.map(section => (
-                  <option key={section.value} value={section.value}>
-                    {section.label}
-                  </option>
-                ))}
-              </select>
+                min="1900"
+                max="2100"
+              />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Runtime (min)</label>
@@ -532,28 +533,65 @@ function Movies() {
             </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Cast</label>
-            <textarea
-              value={formData.cast}
-              onChange={(e) => setFormData({ ...formData, cast: e.target.value })}
-              rows="2"
-              className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-              placeholder="Main cast members..."
-            />
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Cast</label>
+              <textarea
+                value={formData.cast}
+                onChange={(e) => setFormData({ ...formData, cast: e.target.value })}
+                rows="2"
+                className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                placeholder="Main cast members..."
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Movie Attributes</label>
+              <div className="flex flex-col space-y-3 pt-2">
+                <label className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    checked={formData.is_35mm}
+                    onChange={(e) => setFormData({ ...formData, is_35mm: e.target.checked })}
+                    className="rounded text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-sm text-gray-700">35mm Film</span>
+                </label>
+                <label className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    checked={formData.has_delegation}
+                    onChange={(e) => setFormData({ ...formData, has_delegation: e.target.checked })}
+                    className="rounded text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-sm text-gray-700">Has Delegation</span>
+                </label>
+              </div>
+            </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Full Text *</label>
-            <textarea
-              required
-              value={formData.fulltext_cs}
-              onChange={(e) => setFormData({ ...formData, fulltext_cs: e.target.value })}
-              rows="4"
-              className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-              placeholder="Full description of the movie..."
-            />
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Czech Synopsis</label>
+              <textarea
+                value={formData.synopsis_cs}
+                onChange={(e) => setFormData({ ...formData, synopsis_cs: e.target.value })}
+                rows="10"
+                className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                placeholder="Czech synopsis..."
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">English Synopsis</label>
+              <textarea
+                value={formData.synopsis_en}
+                onChange={(e) => setFormData({ ...formData, synopsis_en: e.target.value })}
+                rows="10"
+                className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                placeholder="English synopsis..."
+              />
+            </div>
           </div>
+
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Movie Image</label>
@@ -574,26 +612,6 @@ function Movies() {
             )}
           </div>
 
-          <div className="flex space-x-4">
-            <label className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                checked={formData.is_35mm}
-                onChange={(e) => setFormData({ ...formData, is_35mm: e.target.checked })}
-                className="rounded text-blue-600 focus:ring-blue-500"
-              />
-              <span className="text-sm text-gray-700">35mm Film</span>
-            </label>
-            <label className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                checked={formData.has_delegation}
-                onChange={(e) => setFormData({ ...formData, has_delegation: e.target.checked })}
-                className="rounded text-blue-600 focus:ring-blue-500"
-              />
-              <span className="text-sm text-gray-700">Has Delegation</span>
-            </label>
-          </div>
 
           <div className="flex justify-between items-center pt-4 border-t">
             <div className="flex space-x-3">
