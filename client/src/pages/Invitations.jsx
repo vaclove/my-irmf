@@ -30,6 +30,23 @@ function Invitations() {
     }
   }, [selectedEdition])
 
+  // Handle Escape key for details modal
+  useEffect(() => {
+    const handleEscape = (e) => {
+      if (e.key === 'Escape' && showDetails) {
+        setShowDetails(false)
+      }
+    }
+
+    if (showDetails) {
+      document.addEventListener('keydown', handleEscape)
+    }
+
+    return () => {
+      document.removeEventListener('keydown', handleEscape)
+    }
+  }, [showDetails])
+
   const fetchInvitations = async () => {
     try {
       const response = await invitationApi.getByEdition(selectedEdition.id)
@@ -418,12 +435,14 @@ function Invitations() {
                         >
                           Details
                         </button>
-                        <button
-                          onClick={() => handlePrintBadge(invitation.guest_id)}
-                          className="text-purple-600 hover:text-purple-900"
-                        >
-                          Print Badge
-                        </button>
+                        {!invitation.badge_printed_at && (
+                          <button
+                            onClick={() => handlePrintBadge(invitation.guest_id)}
+                            className="text-purple-600 hover:text-purple-900"
+                          >
+                            Print Badge
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -617,6 +636,12 @@ function Invitations() {
                   Delete Invitation
                 </button>
                 <div className="space-x-2">
+                  <button
+                    onClick={() => handlePrintBadge(selectedInvitation.guest_id)}
+                    className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700"
+                  >
+                    Print Badge
+                  </button>
                   <button
                     onClick={() => handleResendInvitation(selectedInvitation.id)}
                     className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"

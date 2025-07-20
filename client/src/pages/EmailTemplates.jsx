@@ -35,6 +35,23 @@ function EmailTemplates() {
     fetchEditions()
   }, [])
 
+  // Handle Escape key for preview modal
+  useEffect(() => {
+    const handleEscape = (e) => {
+      if (e.key === 'Escape' && showPreview) {
+        setShowPreview(false)
+      }
+    }
+
+    if (showPreview) {
+      document.addEventListener('keydown', handleEscape)
+    }
+
+    return () => {
+      document.removeEventListener('keydown', handleEscape)
+    }
+  }, [showPreview])
+
   useEffect(() => {
     if (selectedEdition) {
       fetchTemplates()

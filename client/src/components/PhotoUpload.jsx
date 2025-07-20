@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import Cropper from 'react-easy-crop'
 import { useToast } from '../contexts/ToastContext'
 import { guestApi } from '../utils/api'
@@ -13,6 +13,23 @@ const PhotoUpload = ({ currentPhoto, onPhotoChange, disabled = false, guestId = 
   const [previewUrl, setPreviewUrl] = useState(currentPhoto || null)
   const [saving, setSaving] = useState(false)
   const fileInputRef = useRef(null)
+
+  // Handle Escape key for cropper modal
+  useEffect(() => {
+    const handleEscape = (e) => {
+      if (e.key === 'Escape' && showCropper) {
+        handleCropCancel()
+      }
+    }
+
+    if (showCropper) {
+      document.addEventListener('keydown', handleEscape)
+    }
+
+    return () => {
+      document.removeEventListener('keydown', handleEscape)
+    }
+  }, [showCropper])
 
   const onCropComplete = useCallback((croppedArea, croppedAreaPixels) => {
     setCroppedAreaPixels(croppedAreaPixels)

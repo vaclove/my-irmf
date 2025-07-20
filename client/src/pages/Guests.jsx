@@ -7,6 +7,8 @@ import TagDeleteButton from '../components/TagDeleteButton'
 import PhotoUpload from '../components/PhotoUpload'
 import Avatar from '../components/Avatar'
 import Modal from '../components/Modal'
+import { badgeApi } from '../utils/api'
+import { printBadge } from '../utils/badgePrinter'
 
 function Guests() {
   const { success, error: showError } = useToast()

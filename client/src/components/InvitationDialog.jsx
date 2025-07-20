@@ -21,6 +21,23 @@ function InvitationDialog({ isOpen, onClose, guest, edition, onInvitationSent })
     }
   }, [guest])
 
+  // Handle Escape key to close modal
+  useEffect(() => {
+    const handleEscape = (e) => {
+      if (e.key === 'Escape') {
+        onClose()
+      }
+    }
+
+    if (isOpen) {
+      document.addEventListener('keydown', handleEscape)
+    }
+
+    return () => {
+      document.removeEventListener('keydown', handleEscape)
+    }
+  }, [isOpen, onClose])
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     

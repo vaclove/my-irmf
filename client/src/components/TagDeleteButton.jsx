@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { tagApi } from '../utils/api'
 
 const TagDeleteButton = ({ tag, onDeleteSuccess }) => {
@@ -7,6 +7,28 @@ const TagDeleteButton = ({ tag, onDeleteSuccess }) => {
   const [showConfirmDialog, setShowConfirmDialog] = useState(false)
   const [showRestrictionsDialog, setShowRestrictionsDialog] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
+
+  // Handle Escape key for modals
+  useEffect(() => {
+    const handleEscape = (e) => {
+      if (e.key === 'Escape') {
+        if (showConfirmDialog) {
+          setShowConfirmDialog(false)
+        }
+        if (showRestrictionsDialog) {
+          setShowRestrictionsDialog(false)
+        }
+      }
+    }
+
+    if (showConfirmDialog || showRestrictionsDialog) {
+      document.addEventListener('keydown', handleEscape)
+    }
+
+    return () => {
+      document.removeEventListener('keydown', handleEscape)
+    }
+  }, [showConfirmDialog, showRestrictionsDialog])
 
   const handleDeleteClick = async (e) => {
     e.stopPropagation() // Prevent triggering the parent's onClick
