@@ -52,7 +52,9 @@ const corsOptions = {
     const allowedOrigins = [
       process.env.APP_URL || 'https://my.irmf.cz',
       'https://irmf.cz',
-      'https://www.irmf.cz'
+      'https://www.irmf.cz',
+      'https://irmf.net',
+      'https://www.irmf.net'
     ];
     
     // In development, also allow localhost
