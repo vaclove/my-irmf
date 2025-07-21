@@ -6,3 +6,6 @@ server.log
 # Build outputs
 client/dist/
 build/
+
+# Temporary files
+tmp/

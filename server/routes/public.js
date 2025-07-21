@@ -97,4 +97,190 @@ router.get('/status/:guest_id/:edition_id', async (req, res) => {
   }
 });
 
+// Public movie catalog routes
+// GET /api/public/movies - List movies with optional filtering
+router.get('/public/movies', async (req, res) => {
+  try {
+    const { 
+      edition_id, 
+      section, 
+      year, 
+      country,
+      limit = 100,
+      offset = 0,
+      sort = 'year_desc'
+    } = req.query;
+
+    let query = `
+      SELECT 
+        m.id,
+        m.mysql_id,
+        m.name_cs,
+        m.name_en,
+        m.synopsis_cs,
+        m.synopsis_en,
+        m.director,
+        m.year,
+        m.country,
+        m.runtime,
+        m.section,
+        m.premiere,
+        m.is_35mm,
+        m.has_delegation,
+        m.image_data,
+        e.year as edition_year,
+        e.name as edition_name
+      FROM movies m
+      JOIN editions e ON m.edition_id = e.id
+      WHERE 1=1
+    `;
+    
+    const params = [];
+    let paramCount = 0;
+
+    // Add filters
+    if (edition_id) {
+      params.push(edition_id);
+      query += ` AND m.edition_id = $${++paramCount}`;
+    }
+    
+    if (section) {
+      params.push(section);
+      query += ` AND m.section = $${++paramCount}`;
+    }
+    
+    if (year) {
+      params.push(year);
+      query += ` AND m.year = $${++paramCount}`;
+    }
+    
+    if (country) {
+      params.push(`%${country.toUpperCase()}%`);
+      query += ` AND UPPER(m.country) LIKE $${++paramCount}`;
+    }
+
+    // Add sorting
+    switch (sort) {
+      case 'name_asc':
+        query += ' ORDER BY m.name_cs ASC';
+        break;
+      case 'name_desc':
+        query += ' ORDER BY m.name_cs DESC';
+        break;
+      case 'year_asc':
+        query += ' ORDER BY m.year ASC, m.name_cs ASC';
+        break;
+      case 'year_desc':
+      default:
+        query += ' ORDER BY m.year DESC, m.name_cs ASC';
+        break;
+    }
+
+    // Add pagination
+    params.push(limit);
+    query += ` LIMIT $${++paramCount}`;
+    params.push(offset);
+    query += ` OFFSET $${++paramCount}`;
+
+    const result = await pool.query(query, params);
+
+    // Get total count for pagination
+    let countQuery = `
+      SELECT COUNT(*) as total 
+      FROM movies m
+      WHERE 1=1
+    `;
+    
+    if (edition_id) countQuery += ` AND m.edition_id = '${edition_id}'`;
+    if (section) countQuery += ` AND m.section = '${section}'`;
+    if (year) countQuery += ` AND m.year = ${year}`;
+    if (country) countQuery += ` AND UPPER(m.country) LIKE '%${country.toUpperCase()}%'`;
+    
+    const countResult = await pool.query(countQuery);
+    const total = parseInt(countResult.rows[0].total);
+
+    res.json({
+      movies: result.rows,
+      pagination: {
+        total,
+        limit: parseInt(limit),
+        offset: parseInt(offset),
+        pages: Math.ceil(total / limit)
+      }
+    });
+
+  } catch (error) {
+    logError(error, req, { operation: 'list_public_movies' });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/public/movies/:id - Get specific movie details
+router.get('/public/movies/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Support both UUID and MySQL ID for backward compatibility
+    const isUuid = id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+    
+    const query = `
+      SELECT 
+        m.*,
+        e.year as edition_year,
+        e.name as edition_name
+      FROM movies m
+      JOIN editions e ON m.edition_id = e.id
+      WHERE ${isUuid ? 'm.id' : 'm.mysql_id'} = $1
+    `;
+    
+    const result = await pool.query(query, [id]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Movie not found' });
+    }
+    
+    const movie = result.rows[0];
+    
+    // Remove fulltext_cs from response as it's internal
+    delete movie.fulltext_cs;
+    
+    res.json({
+      movie,
+      // Include WordPress compatibility fields
+      wordpress_url: `/movie/${movie.mysql_id || movie.id}/`
+    });
+
+  } catch (error) {
+    logError(error, req, { operation: 'get_public_movie', movieId: req.params.id });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/public/editions - List available editions
+router.get('/public/editions', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        e.id,
+        e.year,
+        e.name,
+        e.start_date,
+        e.end_date,
+        COUNT(m.id) as movie_count
+      FROM editions e
+      LEFT JOIN movies m ON e.id = m.edition_id
+      GROUP BY e.id, e.year, e.name, e.start_date, e.end_date
+      ORDER BY e.year DESC
+    `);
+    
+    res.json({
+      editions: result.rows
+    });
+
+  } catch (error) {
+    logError(error, req, { operation: 'list_public_editions' });
+    res.status(500).json({ error: error.message });
+  }
+});
+
 module.exports = router;

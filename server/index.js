@@ -42,12 +42,34 @@ app.use(helmet({
     },
   },
 }));
-app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? process.env.APP_URL || 'https://my.irmf.cz'
-    : (process.env.CLIENT_URL || 'http://localhost:5173'),
-  credentials: true
-}));
+// Configure CORS
+const corsOptions = {
+  credentials: true,
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl)
+    if (!origin) return callback(null, true);
+    
+    const allowedOrigins = [
+      process.env.APP_URL || 'https://my.irmf.cz',
+      'https://irmf.cz',
+      'https://www.irmf.cz'
+    ];
+    
+    // In development, also allow localhost
+    if (process.env.NODE_ENV !== 'production') {
+      allowedOrigins.push(process.env.CLIENT_URL || 'http://localhost:5173');
+      allowedOrigins.push('http://localhost:3000');
+    }
+    
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  }
+};
+
+app.use(cors(corsOptions));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
