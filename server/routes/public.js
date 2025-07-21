@@ -125,6 +125,8 @@ router.get('/public/movies', async (req, res) => {
         m.runtime,
         m.section,
         m.premiere,
+        m.language,
+        m.subtitles,
         m.is_35mm,
         m.has_delegation,
         m.image_data,
@@ -240,9 +242,6 @@ router.get('/public/movies/:id', async (req, res) => {
     }
     
     const movie = result.rows[0];
-    
-    // Remove fulltext_cs from response as it's internal
-    delete movie.fulltext_cs;
     
     res.json({
       movie,

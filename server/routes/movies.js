@@ -67,7 +67,6 @@ router.post('/', async (req, res) => {
       name_en,
       synopsis_cs,
       synopsis_en,
-      fulltext_cs,
       image,
       image_data,
       runtime,
@@ -77,12 +76,14 @@ router.post('/', async (req, res) => {
       cast,
       premiere,
       section,
+      language,
+      subtitles,
       is_35mm,
       has_delegation
     } = req.body;
     
-    if (!edition_id || !name_cs || !fulltext_cs) {
-      return res.status(400).json({ error: 'Edition ID, Czech name, and fulltext are required' });
+    if (!edition_id || !name_cs) {
+      return res.status(400).json({ error: 'Edition ID and Czech name are required' });
     }
     
     // Verify edition exists
@@ -94,14 +95,14 @@ router.post('/', async (req, res) => {
     const result = await pool.query(`
       INSERT INTO movies (
         edition_id, catalogue_year, name_cs, name_en, synopsis_cs, synopsis_en,
-        fulltext_cs, image, image_data, runtime, director, year, country, "cast",
-        premiere, section, is_35mm, has_delegation
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+        image, image_data, runtime, director, year, country, "cast",
+        premiere, section, language, subtitles, is_35mm, has_delegation
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
       RETURNING *
     `, [
       edition_id, catalogue_year, name_cs, name_en, synopsis_cs, synopsis_en,
-      fulltext_cs, image, image_data, runtime, director, year, country, cast,
-      premiere, section, is_35mm || false, has_delegation || false
+      image, image_data, runtime, director, year, country, cast,
+      premiere, section, language, subtitles, is_35mm || false, has_delegation || false
     ]);
     
     res.status(201).json(result.rows[0]);
@@ -122,7 +123,6 @@ router.put('/:id', async (req, res) => {
       name_en,
       synopsis_cs,
       synopsis_en,
-      fulltext_cs,
       image,
       image_data,
       runtime,
@@ -132,12 +132,14 @@ router.put('/:id', async (req, res) => {
       cast,
       premiere,
       section,
+      language,
+      subtitles,
       is_35mm,
       has_delegation
     } = req.body;
     
-    if (!name_cs || !fulltext_cs) {
-      return res.status(400).json({ error: 'Czech name and fulltext are required' });
+    if (!name_cs) {
+      return res.status(400).json({ error: 'Czech name is required' });
     }
     
     // Verify edition exists if provided
@@ -156,25 +158,26 @@ router.put('/:id', async (req, res) => {
         name_en = $5,
         synopsis_cs = $6,
         synopsis_en = $7,
-        fulltext_cs = $8,
-        image = $9,
-        image_data = $10,
-        runtime = $11,
-        director = $12,
-        year = $13,
-        country = $14,
-        "cast" = $15,
-        premiere = $16,
-        section = $17,
-        is_35mm = $18,
-        has_delegation = $19,
+        image = $8,
+        image_data = $9,
+        runtime = $10,
+        director = $11,
+        year = $12,
+        country = $13,
+        "cast" = $14,
+        premiere = $15,
+        section = $16,
+        language = $17,
+        subtitles = $18,
+        is_35mm = $19,
+        has_delegation = $20,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = $1
       RETURNING *
     `, [
       id, edition_id, catalogue_year, name_cs, name_en, synopsis_cs, synopsis_en,
-      fulltext_cs, image, image_data, runtime, director, year, country, cast,
-      premiere, section, is_35mm || false, has_delegation || false
+      image, image_data, runtime, director, year, country, cast,
+      premiere, section, language, subtitles, is_35mm || false, has_delegation || false
     ]);
     
     if (result.rows.length === 0) {
