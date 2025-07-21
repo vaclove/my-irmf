@@ -4,7 +4,10 @@ import { useToast } from '../contexts/ToastContext'
 import { useEdition } from '../contexts/EditionContext'
 import Modal from '../components/Modal'
 import CountryPicker from '../components/CountryPicker'
+import LanguagePicker from '../components/LanguagePicker'
+import SubtitlesPicker from '../components/SubtitlesPicker'
 import { formatCountryWithFlags, getCountryName } from '../utils/countryFlags'
+import { formatLanguageCodesForDisplay } from '../utils/languageCodes'
 
 function Movies() {
   const { success, error: showError } = useToast()
@@ -27,7 +30,9 @@ function Movies() {
     country: true,
     section: true,
     runtime: false,
-    premiere: false
+    premiere: false,
+    language: false,
+    subtitles: false
   })
   const [showColumnSettings, setShowColumnSettings] = useState(false)
   const [formData, setFormData] = useState({
@@ -37,7 +42,6 @@ function Movies() {
     name_en: '',
     synopsis_cs: '',
     synopsis_en: '',
-    fulltext_cs: '',
     image: '',
     image_data: '',
     runtime: '',
@@ -47,6 +51,8 @@ function Movies() {
     cast: '',
     premiere: '',
     section: '',
+    language: '',
+    subtitles: '',
     is_35mm: false,
     has_delegation: false
   })
@@ -141,7 +147,6 @@ function Movies() {
       name_en: movie.name_en || '',
       synopsis_cs: movie.synopsis_cs || '',
       synopsis_en: movie.synopsis_en || '',
-      fulltext_cs: movie.fulltext_cs || '',
       image: movie.image || '',
       image_data: movie.image_data || '',
       runtime: movie.runtime || '',
@@ -151,6 +156,8 @@ function Movies() {
       cast: movie.cast || '',
       premiere: movie.premiere || '',
       section: movie.section || '',
+      language: movie.language || '',
+      subtitles: movie.subtitles || '',
       is_35mm: movie.is_35mm || false,
       has_delegation: movie.has_delegation || false
     })
@@ -240,7 +247,6 @@ function Movies() {
       name_en: '',
       synopsis_cs: '',
       synopsis_en: '',
-      fulltext_cs: '',
       image: '',
       image_data: '',
       runtime: '',
@@ -250,6 +256,8 @@ function Movies() {
       cast: '',
       premiere: '',
       section: '',
+      language: '',
+      subtitles: '',
       is_35mm: false,
       has_delegation: false
     })
@@ -300,7 +308,9 @@ function Movies() {
                       { key: 'country', label: 'Country' },
                       { key: 'section', label: 'Section' },
                       { key: 'runtime', label: 'Runtime' },
-                      { key: 'premiere', label: 'Premiere' }
+                      { key: 'premiere', label: 'Premiere' },
+                      { key: 'language', label: 'Language' },
+                      { key: 'subtitles', label: 'Subtitles' }
                     ].map(column => (
                       <label key={column.key} className={`flex items-center space-x-2 ${column.disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
                         <input
@@ -329,7 +339,6 @@ function Movies() {
                 name_en: '',
                 synopsis_cs: '',
                 synopsis_en: '',
-                fulltext_cs: '',
                 image: '',
                 image_data: '',
                 runtime: '',
@@ -339,6 +348,8 @@ function Movies() {
                 cast: '',
                 premiere: '',
                 section: '',
+                language: '',
+                subtitles: '',
                 is_35mm: false,
                 has_delegation: false
               })
@@ -535,6 +546,28 @@ function Movies() {
 
           <div className="grid grid-cols-2 gap-4">
             <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Language</label>
+              <LanguagePicker
+                value={formData.language}
+                onChange={(value) => setFormData({ ...formData, language: value })}
+                placeholder="Select primary language..."
+                className="w-full"
+                multiple={false}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Subtitles</label>
+              <SubtitlesPicker
+                value={formData.subtitles}
+                onChange={(value) => setFormData({ ...formData, subtitles: value })}
+                placeholder="Select subtitle languages..."
+                className="w-full"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Cast</label>
               <textarea
                 value={formData.cast}
@@ -687,6 +720,16 @@ function Movies() {
                     Premiere
                   </th>
                 )}
+                {visibleColumns.language && (
+                  <th className={`${condensedView ? 'px-3 py-2' : 'px-6 py-3'} text-left text-xs font-medium text-gray-500 uppercase ${condensedView ? '' : 'tracking-wider'}`}>
+                    Language
+                  </th>
+                )}
+                {visibleColumns.subtitles && (
+                  <th className={`${condensedView ? 'px-3 py-2' : 'px-6 py-3'} text-left text-xs font-medium text-gray-500 uppercase ${condensedView ? '' : 'tracking-wider'}`}>
+                    Subtitles
+                  </th>
+                )}
                 <th className={`${condensedView ? 'px-3 py-2' : 'px-6 py-3'} text-left text-xs font-medium text-gray-500 uppercase ${condensedView ? '' : 'tracking-wider'}`}>
                   Edition
                 </th>
@@ -783,6 +826,16 @@ function Movies() {
                   {visibleColumns.premiere && (
                     <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} text-sm text-gray-500`}>
                       {movie.premiere ? premiereTypes.find(p => p.value === movie.premiere)?.label || movie.premiere : '-'}
+                    </td>
+                  )}
+                  {visibleColumns.language && (
+                    <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} text-sm text-gray-500`}>
+                      {movie.language ? formatLanguageCodesForDisplay(movie.language) : '-'}
+                    </td>
+                  )}
+                  {visibleColumns.subtitles && (
+                    <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} text-sm text-gray-500`}>
+                      {movie.subtitles ? formatLanguageCodesForDisplay(movie.subtitles) : '-'}
                     </td>
                   )}
                   <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} text-sm text-gray-500`}>
