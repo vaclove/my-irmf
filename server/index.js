@@ -38,7 +38,7 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       ...helmet.contentSecurityPolicy.getDefaultDirectives(),
-      "img-src": ["'self'", "data:", "https://irmf.cz", "https://lh3.googleusercontent.com"],
+      "img-src": ["'self'", "data:", "https://irmf.cz", "https://lh3.googleusercontent.com", "https://s3.irmf.cz"],
     },
   },
 }));
