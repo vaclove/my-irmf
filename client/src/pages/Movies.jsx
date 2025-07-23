@@ -634,12 +634,12 @@ function Movies() {
               onChange={handleImageUpload}
               className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
             />
-            {formData.image_data && (
+            {(formData.image_data || (editingMovie?.image_urls?.medium)) && (
               <div className="mt-2">
                 <img
-                  src={formData.image_data}
+                  src={formData.image_data || editingMovie?.image_urls?.medium}
                   alt="Preview"
-                  className="w-32 h-48 object-cover rounded border"
+                  className="max-w-[200px] max-h-[300px] object-contain rounded border"
                 />
               </div>
             )}
@@ -745,9 +745,9 @@ function Movies() {
                       title="Click to edit movie"
                     >
                       <div className="flex items-center space-x-3">
-                        {movie.image_data && (
+                        {(movie.image_urls?.thumbnail || movie.image_data) && (
                           <img
-                            src={movie.image_data}
+                            src={movie.image_urls?.thumbnail || movie.image_data}
                             alt={movie.name_cs}
                             className={`${condensedView ? 'w-8 h-12' : 'w-12 h-16'} object-cover rounded`}
                           />
