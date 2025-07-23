@@ -43,7 +43,6 @@ function Movies() {
     synopsis_cs: '',
     synopsis_en: '',
     image: '',
-    image_data: '',
     runtime: '',
     director: '',
     year: new Date().getFullYear(),
@@ -148,7 +147,6 @@ function Movies() {
       synopsis_cs: movie.synopsis_cs || '',
       synopsis_en: movie.synopsis_en || '',
       image: movie.image || '',
-      image_data: movie.image_data || '',
       runtime: movie.runtime || '',
       director: movie.director || '',
       year: movie.year || new Date().getFullYear(),
@@ -185,8 +183,8 @@ function Movies() {
       reader.onloadend = () => {
         setFormData(prev => ({
           ...prev,
-          image_data: reader.result,
-          image: file.name
+          image: file.name,
+          image_base64: reader.result
         }))
       }
       reader.readAsDataURL(file)
@@ -248,8 +246,7 @@ function Movies() {
       synopsis_cs: '',
       synopsis_en: '',
       image: '',
-      image_data: '',
-      runtime: '',
+        runtime: '',
       director: '',
       year: new Date().getFullYear(),
       country: '',
@@ -340,8 +337,7 @@ function Movies() {
                 synopsis_cs: '',
                 synopsis_en: '',
                 image: '',
-                image_data: '',
-                runtime: '',
+                            runtime: '',
                 director: '',
                 year: new Date().getFullYear(),
                 country: '',
@@ -634,10 +630,10 @@ function Movies() {
               onChange={handleImageUpload}
               className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
             />
-            {(formData.image_data || (editingMovie?.image_urls?.medium)) && (
+            {(formData.image_base64 || (editingMovie?.image_urls?.medium)) && (
               <div className="mt-2">
                 <img
-                  src={formData.image_data || editingMovie?.image_urls?.medium}
+                  src={formData.image_base64 || editingMovie?.image_urls?.medium}
                   alt="Preview"
                   className="max-w-[200px] max-h-[300px] object-contain rounded border"
                 />
@@ -745,9 +741,9 @@ function Movies() {
                       title="Click to edit movie"
                     >
                       <div className="flex items-center space-x-3">
-                        {(movie.image_urls?.thumbnail || movie.image_data) && (
+                        {movie.image_urls?.thumbnail && (
                           <img
-                            src={movie.image_urls?.thumbnail || movie.image_data}
+                            src={movie.image_urls?.thumbnail}
                             alt={movie.name_cs}
                             className={`${condensedView ? 'w-8 h-12' : 'w-12 h-16'} object-cover rounded`}
                           />

@@ -97,7 +97,7 @@ router.post('/', async (req, res) => {
       synopsis_cs,
       synopsis_en,
       image,
-      image_data,
+      image_base64,
       runtime,
       director,
       year,
@@ -121,63 +121,47 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Edition not found' });
     }
     
-    // Handle image upload to blob storage
-    let image_url = null;
-    if (image_data) {
+    // First create the movie without image
+    const result = await pool.query(`
+      INSERT INTO movies (
+        edition_id, catalogue_year, name_cs, name_en, synopsis_cs, synopsis_en,
+        image, runtime, director, year, country, "cast",
+        premiere, section, language, subtitles, is_35mm, has_delegation
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+      RETURNING *
+    `, [
+      edition_id, catalogue_year, name_cs, name_en, synopsis_cs, synopsis_en,
+      image, runtime, director, year, country, cast,
+      premiere, section, language, subtitles, is_35mm || false, has_delegation || false
+    ]);
+    
+    const movie = result.rows[0];
+    
+    // Handle image upload to blob storage if provided
+    if (image_base64) {
       try {
         // Get edition year for folder structure
         const editionResult = await pool.query('SELECT year FROM editions WHERE id = $1', [edition_id]);
         const editionYear = editionResult.rows[0].year;
         
-        // First create the movie to get its ID
-        const movieResult = await pool.query(`
-          INSERT INTO movies (
-            edition_id, catalogue_year, name_cs, name_en, synopsis_cs, synopsis_en,
-            image, runtime, director, year, country, "cast",
-            premiere, section, language, subtitles, is_35mm, has_delegation
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
-          RETURNING *
-        `, [
-          edition_id, catalogue_year, name_cs, name_en, synopsis_cs, synopsis_en,
-          image, runtime, director, year, country, cast,
-          premiere, section, language, subtitles, is_35mm || false, has_delegation || false
-        ]);
-        
-        const movieId = movieResult.rows[0].id;
-        
         // Upload image to blob storage
-        const uploadResult = await imageStorage.migrateBase64Image(image_data, editionYear, movieId);
-        image_url = uploadResult.basePath;
+        const uploadResult = await imageStorage.migrateBase64Image(image_base64, editionYear, movie.id);
         
         // Update movie with image URL
-        const result = await pool.query(
-          'UPDATE movies SET image_url = $2, image_data = NULL WHERE id = $1 RETURNING *',
-          [movieId, image_url]
+        await pool.query(
+          'UPDATE movies SET image_url = $2 WHERE id = $1',
+          [movie.id, uploadResult.basePath]
         );
         
-        return res.status(201).json(result.rows[0]);
+        movie.image_url = uploadResult.basePath;
       } catch (uploadError) {
         logError(uploadError, req, { operation: 'upload_movie_image' });
-        // Continue with base64 storage if upload fails
-        console.error('Image upload failed, storing as base64:', uploadError.message);
+        console.error('Image upload failed:', uploadError.message);
+        // Continue without image - don't fail the whole operation
       }
     }
     
-    // Fallback to original query if no image or upload failed
-    const result = await pool.query(`
-      INSERT INTO movies (
-        edition_id, catalogue_year, name_cs, name_en, synopsis_cs, synopsis_en,
-        image, image_data, runtime, director, year, country, "cast",
-        premiere, section, language, subtitles, is_35mm, has_delegation, image_url
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
-      RETURNING *
-    `, [
-      edition_id, catalogue_year, name_cs, name_en, synopsis_cs, synopsis_en,
-      image, image_data, runtime, director, year, country, cast,
-      premiere, section, language, subtitles, is_35mm || false, has_delegation || false, image_url
-    ]);
-    
-    res.status(201).json(result.rows[0]);
+    res.status(201).json(movie);
   } catch (error) {
     logError(error, req, { operation: 'create_movie', body: req.body });
     res.status(500).json({ error: error.message });
@@ -196,7 +180,7 @@ router.put('/:id', async (req, res) => {
       synopsis_cs,
       synopsis_en,
       image,
-      image_data,
+      image_base64,
       runtime,
       director,
       year,
@@ -222,6 +206,7 @@ router.put('/:id', async (req, res) => {
       }
     }
     
+    // First update the movie data
     const result = await pool.query(`
       UPDATE movies SET 
         edition_id = COALESCE($2, edition_id),
@@ -231,24 +216,23 @@ router.put('/:id', async (req, res) => {
         synopsis_cs = $6,
         synopsis_en = $7,
         image = $8,
-        image_data = $9,
-        runtime = $10,
-        director = $11,
-        year = $12,
-        country = $13,
-        "cast" = $14,
-        premiere = $15,
-        section = $16,
-        language = $17,
-        subtitles = $18,
-        is_35mm = $19,
-        has_delegation = $20,
+        runtime = $9,
+        director = $10,
+        year = $11,
+        country = $12,
+        "cast" = $13,
+        premiere = $14,
+        section = $15,
+        language = $16,
+        subtitles = $17,
+        is_35mm = $18,
+        has_delegation = $19,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = $1
       RETURNING *
     `, [
       id, edition_id, catalogue_year, name_cs, name_en, synopsis_cs, synopsis_en,
-      image, image_data, runtime, director, year, country, cast,
+      image, runtime, director, year, country, cast,
       premiere, section, language, subtitles, is_35mm || false, has_delegation || false
     ]);
     
@@ -256,7 +240,33 @@ router.put('/:id', async (req, res) => {
       return res.status(404).json({ error: 'Movie not found' });
     }
     
-    res.json(result.rows[0]);
+    const movie = result.rows[0];
+    
+    // Handle image upload to blob storage if provided
+    if (image_base64) {
+      try {
+        // Get edition year for folder structure
+        const editionResult = await pool.query('SELECT e.year FROM movies m JOIN editions e ON m.edition_id = e.id WHERE m.id = $1', [id]);
+        const editionYear = editionResult.rows[0].year;
+        
+        // Upload image to blob storage
+        const uploadResult = await imageStorage.migrateBase64Image(image_base64, editionYear, id);
+        
+        // Update movie with image URL
+        await pool.query(
+          'UPDATE movies SET image_url = $2 WHERE id = $1',
+          [id, uploadResult.basePath]
+        );
+        
+        movie.image_url = uploadResult.basePath;
+      } catch (uploadError) {
+        logError(uploadError, req, { operation: 'upload_movie_image' });
+        console.error('Image upload failed:', uploadError.message);
+        // Continue without image update - don't fail the whole operation
+      }
+    }
+    
+    res.json(movie);
   } catch (error) {
     logError(error, req, { operation: 'update_movie', movieId: req.params.id, body: req.body });
     res.status(500).json({ error: error.message });
