@@ -2,6 +2,7 @@ const express = require('express');
 const { pool } = require('../models/database');
 const { logError } = require('../utils/logger');
 const { auditMiddleware, captureOriginalData } = require('../utils/auditLogger');
+const imageStorage = require('../services/imageStorage');
 const router = express.Router();
 
 // Apply audit middleware to all routes
@@ -28,7 +29,22 @@ router.get('/', async (req, res) => {
     query += ' ORDER BY m.year DESC, m.name_cs ASC';
     
     const result = await pool.query(query, params);
-    res.json(result.rows);
+    
+    // Add image URLs to each movie
+    const moviesWithImages = result.rows.map(movie => {
+      if (movie.image_url) {
+        movie.image_urls = {
+          original: imageStorage.getImageUrl(movie.image_url, 'original'),
+          large: imageStorage.getImageUrl(movie.image_url, 'large'),
+          medium: imageStorage.getImageUrl(movie.image_url, 'medium'),
+          thumbnail: imageStorage.getImageUrl(movie.image_url, 'thumbnail'),
+          small: imageStorage.getImageUrl(movie.image_url, 'small')
+        };
+      }
+      return movie;
+    });
+    
+    res.json(moviesWithImages);
   } catch (error) {
     logError(error, req, { operation: 'get_all_movies' });
     res.status(500).json({ error: error.message });
@@ -50,7 +66,20 @@ router.get('/:id', async (req, res) => {
       return res.status(404).json({ error: 'Movie not found' });
     }
     
-    res.json(result.rows[0]);
+    const movie = result.rows[0];
+    
+    // Add image URLs if image_url exists
+    if (movie.image_url) {
+      movie.image_urls = {
+        original: imageStorage.getImageUrl(movie.image_url, 'original'),
+        large: imageStorage.getImageUrl(movie.image_url, 'large'),
+        medium: imageStorage.getImageUrl(movie.image_url, 'medium'),
+        thumbnail: imageStorage.getImageUrl(movie.image_url, 'thumbnail'),
+        small: imageStorage.getImageUrl(movie.image_url, 'small')
+      };
+    }
+    
+    res.json(movie);
   } catch (error) {
     logError(error, req, { operation: 'get_movie_by_id', movieId: req.params.id });
     res.status(500).json({ error: error.message });
@@ -92,17 +121,60 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Edition not found' });
     }
     
+    // Handle image upload to blob storage
+    let image_url = null;
+    if (image_data) {
+      try {
+        // Get edition year for folder structure
+        const editionResult = await pool.query('SELECT year FROM editions WHERE id = $1', [edition_id]);
+        const editionYear = editionResult.rows[0].year;
+        
+        // First create the movie to get its ID
+        const movieResult = await pool.query(`
+          INSERT INTO movies (
+            edition_id, catalogue_year, name_cs, name_en, synopsis_cs, synopsis_en,
+            image, runtime, director, year, country, "cast",
+            premiere, section, language, subtitles, is_35mm, has_delegation
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+          RETURNING *
+        `, [
+          edition_id, catalogue_year, name_cs, name_en, synopsis_cs, synopsis_en,
+          image, runtime, director, year, country, cast,
+          premiere, section, language, subtitles, is_35mm || false, has_delegation || false
+        ]);
+        
+        const movieId = movieResult.rows[0].id;
+        
+        // Upload image to blob storage
+        const uploadResult = await imageStorage.migrateBase64Image(image_data, editionYear, movieId);
+        image_url = uploadResult.basePath;
+        
+        // Update movie with image URL
+        const result = await pool.query(
+          'UPDATE movies SET image_url = $2, image_data = NULL WHERE id = $1 RETURNING *',
+          [movieId, image_url]
+        );
+        
+        return res.status(201).json(result.rows[0]);
+      } catch (uploadError) {
+        logError(uploadError, req, { operation: 'upload_movie_image' });
+        // Continue with base64 storage if upload fails
+        console.error('Image upload failed, storing as base64:', uploadError.message);
+      }
+    }
+    
+    // Fallback to original query if no image or upload failed
     const result = await pool.query(`
       INSERT INTO movies (
         edition_id, catalogue_year, name_cs, name_en, synopsis_cs, synopsis_en,
         image, image_data, runtime, director, year, country, "cast",
-        premiere, section, language, subtitles, is_35mm, has_delegation
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+        premiere, section, language, subtitles, is_35mm, has_delegation, image_url
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
       RETURNING *
     `, [
       edition_id, catalogue_year, name_cs, name_en, synopsis_cs, synopsis_en,
       image, image_data, runtime, director, year, country, cast,
-      premiere, section, language, subtitles, is_35mm || false, has_delegation || false
+      premiere, section, language, subtitles, is_35mm || false, has_delegation || false, image_url
     ]);
     
     res.status(201).json(result.rows[0]);
@@ -231,7 +303,22 @@ router.get('/section/:section', async (req, res) => {
     query += ' ORDER BY m.year DESC, m.name_cs ASC';
     
     const result = await pool.query(query, params);
-    res.json(result.rows);
+    
+    // Add image URLs to each movie
+    const moviesWithImages = result.rows.map(movie => {
+      if (movie.image_url) {
+        movie.image_urls = {
+          original: imageStorage.getImageUrl(movie.image_url, 'original'),
+          large: imageStorage.getImageUrl(movie.image_url, 'large'),
+          medium: imageStorage.getImageUrl(movie.image_url, 'medium'),
+          thumbnail: imageStorage.getImageUrl(movie.image_url, 'thumbnail'),
+          small: imageStorage.getImageUrl(movie.image_url, 'small')
+        };
+      }
+      return movie;
+    });
+    
+    res.json(moviesWithImages);
   } catch (error) {
     logError(error, req, { operation: 'get_movies_by_section', section: req.params.section });
     res.status(500).json({ error: error.message });

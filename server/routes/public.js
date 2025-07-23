@@ -1,6 +1,7 @@
 const express = require('express');
 const { pool } = require('../models/database');
 const { logError } = require('../utils/logger');
+const imageStorage = require('../services/imageStorage');
 const router = express.Router();
 
 // Confirm invitation - public route (no authentication required)
@@ -130,6 +131,7 @@ router.get('/public/movies', async (req, res) => {
         m.is_35mm,
         m.has_delegation,
         m.image_data,
+        m.image_url,
         e.year as edition_year,
         e.name as edition_name
       FROM movies m
@@ -201,8 +203,24 @@ router.get('/public/movies', async (req, res) => {
     const countResult = await pool.query(countQuery);
     const total = parseInt(countResult.rows[0].total);
 
+    // Add image URLs to movies
+    const moviesWithImages = result.rows.map(movie => {
+      if (movie.image_url) {
+        movie.image_urls = {
+          original: imageStorage.getImageUrl(movie.image_url, 'original'),
+          large: imageStorage.getImageUrl(movie.image_url, 'large'),
+          medium: imageStorage.getImageUrl(movie.image_url, 'medium'),
+          thumbnail: imageStorage.getImageUrl(movie.image_url, 'thumbnail'),
+          small: imageStorage.getImageUrl(movie.image_url, 'small')
+        };
+      }
+      // Remove image_data from response to reduce payload size
+      delete movie.image_data;
+      return movie;
+    });
+
     res.json({
-      movies: result.rows,
+      movies: moviesWithImages,
       pagination: {
         total,
         limit: parseInt(limit),
@@ -242,6 +260,20 @@ router.get('/public/movies/:id', async (req, res) => {
     }
     
     const movie = result.rows[0];
+    
+    // Add image URLs if image_url exists
+    if (movie.image_url) {
+      movie.image_urls = {
+        original: imageStorage.getImageUrl(movie.image_url, 'original'),
+        large: imageStorage.getImageUrl(movie.image_url, 'large'),
+        medium: imageStorage.getImageUrl(movie.image_url, 'medium'),
+        thumbnail: imageStorage.getImageUrl(movie.image_url, 'thumbnail'),
+        small: imageStorage.getImageUrl(movie.image_url, 'small')
+      };
+    }
+    
+    // Remove image_data from response to reduce payload size
+    delete movie.image_data;
     
     res.json({
       movie,
