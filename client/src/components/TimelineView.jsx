@@ -120,27 +120,7 @@ const TimelineView = ({ schedule, venues, selectedDate, onEditEntry, onTimelineC
   const timeSlots = generateTimeSlots()
   const majorTimeSlots = timeSlots.filter((time, index) => index % 4 === 0).slice(1) // Every hour, skip 08:00
 
-  if (filteredSchedule.length === 0) {
-    return (
-      <div className="bg-white rounded-lg shadow-sm border p-8 text-center">
-        <div className="max-w-md mx-auto">
-          <div className="text-4xl mb-4">📅</div>
-          <p className="text-gray-500 text-lg">No programming entries for this date.</p>
-          <p className="text-gray-400 text-sm mt-2">
-            {selectedDate && (() => {
-              const [year, month, day] = selectedDate.split('-').map(Number);
-              const date = new Date(year, month - 1, day);
-              return `${date.toLocaleDateString('cs-CZ', { 
-                weekday: 'long', 
-                day: 'numeric', 
-                month: 'long' 
-              })} appears to be a free day.`;
-            })()}
-          </p>
-        </div>
-      </div>
-    )
-  }
+  // Show timeline interface even when empty so users can click to add entries
 
   return (
     <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
@@ -246,7 +226,13 @@ const TimelineView = ({ schedule, venues, selectedDate, onEditEntry, onTimelineC
                         <div
                           key={entry.id}
                           className={`absolute top-1 bottom-1 ${colors.bg} ${colors.text} rounded px-1 py-1 shadow-sm cursor-move hover:shadow-md transition-all duration-200 hover:scale-105 hover:z-10`}
-                          style={entryStyle}
+                          style={{
+                            ...entryStyle,
+                            ...(entry.block_id && {
+                              backgroundImage: `linear-gradient(45deg, rgba(255,255,255,0.2) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.2) 50%, rgba(255,255,255,0.2) 75%, transparent 75%, transparent)`,
+                              backgroundSize: '8px 8px'
+                            })
+                          }}
                           draggable
                           onClick={() => onEditEntry && onEditEntry(entry)}
                           onDragStart={(e) => handleDragStart(e, entry)}
