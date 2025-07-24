@@ -19,6 +19,8 @@ const Programming = () => {
   const [overlapWarning, setOverlapWarning] = useState(null)
   const [checkingOverlap, setCheckingOverlap] = useState(false)
   const [cancelOverlapCheck, setCancelOverlapCheck] = useState(null)
+  const [movieSearch, setMovieSearch] = useState('')
+  const [contentType, setContentType] = useState('movie') // Default to 'movie'
   const [formData, setFormData] = useState({
     venue_id: '',
     scheduled_date: '',
@@ -119,6 +121,8 @@ const Programming = () => {
     setEditingEntry(null)
     setShowForm(false)
     setOverlapWarning(null)
+    setMovieSearch('')
+    setContentType('movie') // Reset to default 'movie'
   }
 
   const checkOverlap = async (venue_id, scheduled_date, scheduled_time, movie_id, block_id, discussion_time) => {
@@ -222,6 +226,7 @@ const Programming = () => {
       title_override_en: entry.title_override_en || '',
       notes: entry.notes || ''
     })
+    setContentType(entry.movie_id ? 'movie' : entry.block_id ? 'block' : '')
     setEditingEntry(entry)
     setShowForm(true)
   }
@@ -234,13 +239,14 @@ const Programming = () => {
       return
     }
 
-    if (!formData.movie_id && !formData.block_id) {
-      error('Please select either a movie or a block')
+
+    if (contentType === 'movie' && !formData.movie_id) {
+      error('Please select a movie')
       return
     }
 
-    if (formData.movie_id && formData.block_id) {
-      error('Please select either a movie OR a block, not both')
+    if (contentType === 'block' && !formData.block_id) {
+      error('Please select a movie block')
       return
     }
 
@@ -326,6 +332,24 @@ const Programming = () => {
       }
     }
     return slots
+  }
+
+  // Filter movies based on search
+  const getFilteredMovies = () => {
+    if (!movieSearch.trim()) return movies
+    
+    const searchTerm = movieSearch.toLowerCase().trim()
+    return movies.filter(movie => {
+      const czechName = (movie.name_cs || '').toLowerCase()
+      const englishName = (movie.name_en || '').toLowerCase()
+      const director = (movie.director || '').toLowerCase()
+      const year = movie.year ? movie.year.toString() : ''
+      
+      return czechName.includes(searchTerm) || 
+             englishName.includes(searchTerm) ||
+             director.includes(searchTerm) ||
+             year.includes(searchTerm)
+    })
   }
 
   // Color coding for venues
@@ -564,48 +588,143 @@ const Programming = () => {
               )}
 
               <div className="border-t pt-4">
-                <p className="text-sm font-medium text-gray-700 mb-3">
-                  Content (select one):
-                </p>
-                
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Single Movie
+                <div className="mb-4">
+                  <h3 className="text-sm font-medium text-gray-700 mb-3">Content Selection *</h3>
+                  
+                  {/* Content Type Radio Buttons */}
+                  <div className="flex space-x-6 mb-4">
+                    <label className="flex items-center cursor-pointer">
+                      <input
+                        type="radio"
+                        name="contentType"
+                        value="movie"
+                        checked={contentType === 'movie'}
+                        onChange={(e) => {
+                          setContentType(e.target.value)
+                          setFormData({...formData, movie_id: '', block_id: ''})
+                          setMovieSearch('')
+                        }}
+                        className="mr-2 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="text-sm font-medium text-gray-700">📽️ Single Movie</span>
                     </label>
-                    <select
-                      value={formData.movie_id}
-                      onChange={(e) => setFormData({...formData, movie_id: e.target.value, block_id: ''})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="">Select Movie</option>
-                      {movies.map(movie => (
-                        <option key={movie.id} value={movie.id}>
-                          {movie.name_cs} ({movie.runtime} min, {movie.director})
-                        </option>
-                      ))}
-                    </select>
+                    <label className="flex items-center cursor-pointer">
+                      <input
+                        type="radio"
+                        name="contentType"
+                        value="block"
+                        checked={contentType === 'block'}
+                        onChange={(e) => {
+                          setContentType(e.target.value)
+                          setFormData({...formData, movie_id: '', block_id: ''})
+                        }}
+                        className="mr-2 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="text-sm font-medium text-gray-700">🎬 Movie Block</span>
+                    </label>
                   </div>
 
-                  <div className="text-center text-gray-400">OR</div>
+                  {/* Movie Selection with Search */}
+                  {contentType === 'movie' && (
+                    <div className="space-y-3">
+                      {/* Show selected movie */}
+                      {formData.movie_id && (
+                        <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <div className="font-medium text-blue-900">
+                                Selected: {movies.find(m => m.id === formData.movie_id)?.name_cs}
+                              </div>
+                              <div className="text-sm text-blue-700">
+                                {movies.find(m => m.id === formData.movie_id)?.name_en && 
+                                  `${movies.find(m => m.id === formData.movie_id)?.name_en} • `
+                                }
+                                {movies.find(m => m.id === formData.movie_id)?.runtime} min • {movies.find(m => m.id === formData.movie_id)?.director} • {movies.find(m => m.id === formData.movie_id)?.year}
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFormData({...formData, movie_id: ''})
+                                setMovieSearch('')
+                              }}
+                              className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+                            >
+                              Change
+                            </button>
+                          </div>
+                        </div>
+                      )}
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Movie Block
-                    </label>
-                    <select
-                      value={formData.block_id}
-                      onChange={(e) => setFormData({...formData, block_id: e.target.value, movie_id: ''})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="">Select Block</option>
-                      {blocks.map(block => (
-                        <option key={block.id} value={block.id}>
-                          {block.name_cs} ({block.total_runtime} min, {block.movie_count} movies)
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                      {/* Search input - only show when no movie selected */}
+                      {!formData.movie_id && (
+                        <>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              Search Movies
+                            </label>
+                            <input
+                              type="text"
+                              value={movieSearch}
+                              onChange={(e) => setMovieSearch(e.target.value)}
+                              placeholder="Search by title, director, or year..."
+                              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                          </div>
+                          
+                          {movieSearch && (
+                            <div className="max-h-48 overflow-y-auto border border-gray-200 rounded-md">
+                              {getFilteredMovies().length === 0 ? (
+                                <div className="p-3 text-sm text-gray-500 text-center">
+                                  No movies found matching "{movieSearch}"
+                                </div>
+                              ) : (
+                                getFilteredMovies().map(movie => (
+                                  <div
+                                    key={movie.id}
+                                    onClick={() => {
+                                      setFormData({...formData, movie_id: movie.id, block_id: ''})
+                                      setMovieSearch('')
+                                    }}
+                                    className="p-3 cursor-pointer hover:bg-gray-50 border-b border-gray-100 last:border-b-0"
+                                  >
+                                    <div className="font-medium text-gray-900">{movie.name_cs}</div>
+                                    <div className="text-sm text-gray-500">
+                                      {movie.name_en && `${movie.name_en} • `}
+                                      {movie.runtime} min • {movie.director} • {movie.year}
+                                    </div>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          )}
+                          
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Block Selection */}
+                  {contentType === 'block' && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Select Movie Block
+                      </label>
+                      <select
+                        value={formData.block_id}
+                        onChange={(e) => setFormData({...formData, block_id: e.target.value, movie_id: ''})}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="">Select Block</option>
+                        {blocks.map(block => (
+                          <option key={block.id} value={block.id}>
+                            {block.name_cs} ({block.total_runtime} min, {block.movie_count} movies)
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
                 </div>
               </div>
 
