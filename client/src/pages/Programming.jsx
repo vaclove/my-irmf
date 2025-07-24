@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import axios from 'axios'
 import { useEdition } from '../contexts/EditionContext'
 import { useToast } from '../contexts/ToastContext'
+import TimelineView from '../components/TimelineView'
 
 const Programming = () => {
   const { selectedEdition } = useEdition()
@@ -21,6 +22,7 @@ const Programming = () => {
   const [cancelOverlapCheck, setCancelOverlapCheck] = useState(null)
   const [movieSearch, setMovieSearch] = useState('')
   const [contentType, setContentType] = useState('movie') // Default to 'movie'
+  const [viewMode, setViewMode] = useState('table') // 'table' or 'timeline'
   const [formData, setFormData] = useState({
     venue_id: '',
     scheduled_date: '',
@@ -394,12 +396,40 @@ const Programming = () => {
             Program movies and blocks to specific venues, dates, and times
           </p>
         </div>
-        <button
-          onClick={handleAddEntry}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md font-medium transition-colors duration-200"
-        >
-          Add Entry
-        </button>
+        <div className="flex items-center space-x-3">
+          {/* View Toggle */}
+          <div className="flex rounded-md border border-gray-300 overflow-hidden">
+            <button
+              onClick={() => setViewMode('table')}
+              className={`px-3 py-2 text-sm font-medium transition-colors duration-200 ${
+                viewMode === 'table'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-white text-gray-700 hover:bg-gray-50'
+              }`}
+              title="Table View"
+            >
+              📋 Table
+            </button>
+            <button
+              onClick={() => setViewMode('timeline')}
+              className={`px-3 py-2 text-sm font-medium transition-colors duration-200 ${
+                viewMode === 'timeline'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-white text-gray-700 hover:bg-gray-50'
+              }`}
+              title="Timeline View"
+            >
+              📊 Timeline
+            </button>
+          </div>
+          
+          <button
+            onClick={handleAddEntry}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md font-medium transition-colors duration-200"
+          >
+            Add Entry
+          </button>
+        </div>
       </div>
 
 
@@ -810,14 +840,22 @@ const Programming = () => {
 
 
       {/* Schedule Display */}
-      <div className="bg-white shadow-sm rounded-lg overflow-hidden">
-        {schedule.length === 0 ? (
-          <div className="p-8 text-center text-gray-500">
-            No programming entries found for the selected filters.
-            <br />
-            Click "Add Entry" to create your first programming entry.
-          </div>
-        ) : (
+      {viewMode === 'timeline' ? (
+        <TimelineView 
+          schedule={schedule} 
+          venues={venues} 
+          selectedDate={selectedDate}
+          onEditEntry={handleEdit}
+        />
+      ) : (
+        <div className="bg-white shadow-sm rounded-lg overflow-hidden">
+          {schedule.length === 0 ? (
+            <div className="p-8 text-center text-gray-500">
+              No programming entries found for the selected filters.
+              <br />
+              Click "Add Entry" to create your first programming entry.
+            </div>
+          ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
@@ -915,8 +953,9 @@ const Programming = () => {
               </tbody>
             </table>
           </div>
-        )}
-      </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
