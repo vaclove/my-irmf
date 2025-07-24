@@ -322,6 +322,8 @@ router.put('/:id', async (req, res) => {
     const { id } = req.params;
     const {
       venue_id,
+      movie_id,
+      block_id,
       scheduled_date,
       scheduled_time,
       discussion_time,
@@ -330,23 +332,38 @@ router.put('/:id', async (req, res) => {
       notes
     } = req.body;
     
+    // Validate that either movie_id or block_id is provided, but not both (if either is being updated)
+    if ((movie_id !== undefined || block_id !== undefined) && 
+        ((movie_id && block_id) || (!movie_id && !block_id))) {
+      return res.status(400).json({ 
+        error: 'Either movie ID or block ID must be provided, but not both' 
+      });
+    }
+    
     // Check for time overlaps (excluding current entry)
     if (venue_id && scheduled_date && scheduled_time) {
-      // Get current entry details to determine movie/block
-      const currentEntry = await pool.query(
-        'SELECT movie_id, block_id FROM programming_schedule WHERE id = $1', 
-        [id]
-      );
+      // Use new movie/block IDs from request, or fall back to current ones
+      let checkMovieId = movie_id;
+      let checkBlockId = block_id;
       
-      if (currentEntry.rows.length === 0) {
-        return res.status(404).json({ error: 'Programming entry not found' });
+      // If movie/block IDs are not being updated, get current ones
+      if (movie_id === undefined && block_id === undefined) {
+        const currentEntry = await pool.query(
+          'SELECT movie_id, block_id FROM programming_schedule WHERE id = $1', 
+          [id]
+        );
+        
+        if (currentEntry.rows.length === 0) {
+          return res.status(404).json({ error: 'Programming entry not found' });
+        }
+        
+        checkMovieId = currentEntry.rows[0].movie_id;
+        checkBlockId = currentEntry.rows[0].block_id;
       }
-      
-      const { movie_id: currentMovieId, block_id: currentBlockId } = currentEntry.rows[0];
       
       const overlapCheck = await checkTimeOverlap(
         venue_id, scheduled_date, scheduled_time, 
-        currentMovieId, currentBlockId, discussion_time, id
+        checkMovieId, checkBlockId, discussion_time, id
       );
       
       if (overlapCheck.hasOverlap) {
@@ -361,16 +378,18 @@ router.put('/:id', async (req, res) => {
       UPDATE programming_schedule 
       SET 
         venue_id = COALESCE($1, venue_id),
-        scheduled_date = COALESCE($2, scheduled_date),
-        scheduled_time = COALESCE($3, scheduled_time),
-        discussion_time = COALESCE($4, discussion_time),
-        title_override_cs = $5,
-        title_override_en = $6,
-        notes = $7
-      WHERE id = $8
+        movie_id = CASE WHEN $2::UUID IS NOT NULL THEN $2 ELSE movie_id END,
+        block_id = CASE WHEN $3::UUID IS NOT NULL THEN $3 ELSE block_id END,
+        scheduled_date = COALESCE($4, scheduled_date),
+        scheduled_time = COALESCE($5, scheduled_time),
+        discussion_time = COALESCE($6, discussion_time),
+        title_override_cs = $7,
+        title_override_en = $8,
+        notes = $9
+      WHERE id = $10
       RETURNING *
     `, [
-      venue_id, scheduled_date, scheduled_time, discussion_time,
+      venue_id, movie_id || null, block_id || null, scheduled_date, scheduled_time, discussion_time,
       title_override_cs, title_override_en, notes, id
     ]);
     
