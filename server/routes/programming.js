@@ -146,7 +146,21 @@ router.get('/edition/:editionId', async (req, res) => {
     
     let query = `
       SELECT 
-        ps.*,
+        ps.id,
+        ps.edition_id,
+        ps.venue_id,
+        ps.movie_id,
+        ps.block_id,
+        ps.scheduled_date::text as scheduled_date,
+        ps.scheduled_time,
+        ps.base_runtime,
+        ps.discussion_time,
+        ps.total_runtime,
+        ps.title_override_cs,
+        ps.title_override_en,
+        ps.notes,
+        ps.created_at,
+        ps.updated_at,
         v.name_cs as venue_name_cs,
         v.name_en as venue_name_en,
         v.capacity as venue_capacity,
@@ -200,7 +214,21 @@ router.get('/:id', async (req, res) => {
     
     const result = await pool.query(`
       SELECT 
-        ps.*,
+        ps.id,
+        ps.edition_id,
+        ps.venue_id,
+        ps.movie_id,
+        ps.block_id,
+        ps.scheduled_date::text as scheduled_date,
+        ps.scheduled_time,
+        ps.base_runtime,
+        ps.discussion_time,
+        ps.total_runtime,
+        ps.title_override_cs,
+        ps.title_override_en,
+        ps.notes,
+        ps.created_at,
+        ps.updated_at,
         v.name_cs as venue_name_cs,
         v.name_en as venue_name_en,
         v.capacity as venue_capacity,
@@ -296,16 +324,21 @@ router.post('/', async (req, res) => {
       });
     }
     
+    // Ensure date is in YYYY-MM-DD format
+    const cleanDate = scheduled_date.split('T')[0];
+    console.log('Received scheduled_date:', scheduled_date);
+    console.log('Clean date for DB:', cleanDate);
+    
     const result = await pool.query(`
       INSERT INTO programming_schedule (
         edition_id, venue_id, movie_id, block_id, scheduled_date, scheduled_time,
         discussion_time, title_override_cs, title_override_en, notes
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      VALUES ($1, $2, $3, $4, $5::date, $6::time, $7, $8, $9, $10)
       RETURNING *
     `, [
       edition_id, venue_id, movie_id || null, block_id || null, 
-      scheduled_date, scheduled_time, discussion_time || 0,
+      cleanDate, scheduled_time, discussion_time || 0,
       title_override_cs || null, title_override_en || null, notes || null
     ]);
     
@@ -374,14 +407,17 @@ router.put('/:id', async (req, res) => {
       }
     }
     
+    // Ensure date is in YYYY-MM-DD format if provided
+    const cleanDate = scheduled_date ? scheduled_date.split('T')[0] : null;
+    
     const result = await pool.query(`
       UPDATE programming_schedule 
       SET 
         venue_id = COALESCE($1, venue_id),
         movie_id = CASE WHEN $2::UUID IS NOT NULL THEN $2 ELSE movie_id END,
         block_id = CASE WHEN $3::UUID IS NOT NULL THEN $3 ELSE block_id END,
-        scheduled_date = COALESCE($4, scheduled_date),
-        scheduled_time = COALESCE($5, scheduled_time),
+        scheduled_date = COALESCE($4::date, scheduled_date),
+        scheduled_time = COALESCE($5::time, scheduled_time),
         discussion_time = COALESCE($6, discussion_time),
         title_override_cs = $7,
         title_override_en = $8,
@@ -389,7 +425,7 @@ router.put('/:id', async (req, res) => {
       WHERE id = $10
       RETURNING *
     `, [
-      venue_id, movie_id || null, block_id || null, scheduled_date, scheduled_time, discussion_time,
+      venue_id, movie_id || null, block_id || null, cleanDate, scheduled_time, discussion_time,
       title_override_cs, title_override_en, notes, id
     ]);
     

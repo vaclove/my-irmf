@@ -1,8 +1,11 @@
 import React, { useState } from 'react'
 
-const TimelineView = ({ schedule, venues, selectedDate, onEditEntry, onTimelineClick }) => {
+const TimelineView = ({ schedule, venues, selectedDate, onEditEntry, onTimelineClick, onTimeUpdate }) => {
   const [hoveredEntry, setHoveredEntry] = useState(null)
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 })
+  const [draggingEntry, setDraggingEntry] = useState(null)
+  const [dragOffset, setDragOffset] = useState(0)
+  const [previewTime, setPreviewTime] = useState(null)
   // Generate time slots for the day (every 15 minutes from 8:00 to 24:00)
   const generateTimeSlots = () => {
     const slots = []
@@ -38,6 +41,38 @@ const TimelineView = ({ schedule, venues, selectedDate, onEditEntry, onTimelineC
     if (hours >= 24) return '23:45'
     
     return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`
+  }
+
+  // Handle drag start
+  const handleDragStart = (e, entry) => {
+    const rect = e.currentTarget.getBoundingClientRect()
+    setDraggingEntry(entry)
+    setDragOffset(e.clientX - rect.left)
+    e.currentTarget.style.opacity = '0.5'
+    e.currentTarget.style.zIndex = '20'
+  }
+
+  // Handle drag end
+  const handleDragEnd = (e) => {
+    e.currentTarget.style.opacity = '1'
+    e.currentTarget.style.zIndex = '10'
+    
+    if (draggingEntry && previewTime && onTimeUpdate) {
+      onTimeUpdate(draggingEntry.id, previewTime)
+    }
+    
+    setDraggingEntry(null)
+    setPreviewTime(null)
+  }
+
+  // Handle drag over timeline
+  const handleTimelineDragOver = (e) => {
+    e.preventDefault()
+    if (!draggingEntry) return
+    
+    const rect = e.currentTarget.getBoundingClientRect()
+    const time = positionToTime(e.clientX - dragOffset, rect)
+    setPreviewTime(time)
   }
 
   // Get venue colors (matching the existing color scheme)
@@ -169,6 +204,8 @@ const TimelineView = ({ schedule, venues, selectedDate, onEditEntry, onTimelineC
                         }
                       }
                     }}
+                    onDragOver={handleTimelineDragOver}
+                    onDrop={(e) => e.preventDefault()}
                   >
                     {/* Hour grid lines */}
                     {majorTimeSlots.map((time, index) => {
@@ -185,6 +222,21 @@ const TimelineView = ({ schedule, venues, selectedDate, onEditEntry, onTimelineC
                       )
                     })}
 
+                    {/* Preview ghost for dragging */}
+                    {draggingEntry && previewTime && draggingEntry.venue_id === venue.id && (
+                      <div
+                        className={`absolute top-1 bottom-1 bg-gray-400 opacity-50 rounded px-1 py-1`}
+                        style={{
+                          left: `${(timeToMinutes(previewTime) / (16 * 60)) * 100}%`,
+                          width: `${((draggingEntry.total_runtime || 0) / (16 * 60)) * 100}%`
+                        }}
+                      >
+                        <div className="text-xs font-medium text-white text-center">
+                          {previewTime}
+                        </div>
+                      </div>
+                    )}
+
                     {/* Programming entries */}
                     {venueEntries.map(entry => {
                       const entryStyle = getEntryStyle(entry)
@@ -193,13 +245,18 @@ const TimelineView = ({ schedule, venues, selectedDate, onEditEntry, onTimelineC
                       return (
                         <div
                           key={entry.id}
-                          className={`absolute top-1 bottom-1 ${colors.bg} ${colors.text} rounded px-1 py-1 shadow-sm cursor-pointer hover:shadow-md transition-all duration-200 hover:scale-105 hover:z-10`}
+                          className={`absolute top-1 bottom-1 ${colors.bg} ${colors.text} rounded px-1 py-1 shadow-sm cursor-move hover:shadow-md transition-all duration-200 hover:scale-105 hover:z-10`}
                           style={entryStyle}
+                          draggable
                           onClick={() => onEditEntry && onEditEntry(entry)}
+                          onDragStart={(e) => handleDragStart(e, entry)}
+                          onDragEnd={handleDragEnd}
                           onMouseEnter={(e) => {
-                            setHoveredEntry(entry)
-                            const rect = e.currentTarget.getBoundingClientRect()
-                            setMousePosition({ x: rect.left + rect.width / 2, y: rect.top })
+                            if (!draggingEntry) {
+                              setHoveredEntry(entry)
+                              const rect = e.currentTarget.getBoundingClientRect()
+                              setMousePosition({ x: rect.left + rect.width / 2, y: rect.top })
+                            }
                           }}
                           onMouseLeave={() => setHoveredEntry(null)}
                         >
@@ -240,22 +297,6 @@ const TimelineView = ({ schedule, venues, selectedDate, onEditEntry, onTimelineC
             })}
           </div>
 
-          {/* Legend */}
-          <div className="mt-6 pt-4 border-t">
-            <div className="flex flex-wrap gap-4 text-xs text-gray-600">
-              <div className="flex items-center">
-                <div className="w-2 h-2 bg-gray-200 rounded mr-1"></div>
-                <span>Timeline (8:00 - 24:00)</span>
-              </div>
-              <div className="flex items-center">
-                <div className="w-2 h-2 bg-blue-500 rounded mr-1"></div>
-                <span>Programming blocks</span>
-              </div>
-              <div className="text-gray-500">
-                Hover for details • Click to edit
-              </div>
-            </div>
-          </div>
         </div>
       </div>
       

@@ -322,12 +322,47 @@ const Programming = () => {
     }
   }
 
+  const handleTimeUpdate = async (entryId, newTime) => {
+    try {
+      // Find the entry to get all its current data
+      const entry = schedule.find(e => e.id === entryId)
+      if (!entry) return
+
+      // Format the date properly to avoid timezone issues
+      const [year, month, day] = entry.scheduled_date.split('T')[0].split('-')
+      const formattedDate = `${year}-${month}-${day}`
+
+      // Update just the time, keeping the date unchanged
+      await axios.put(`/api/programming/${entryId}`, {
+        venue_id: entry.venue_id,
+        scheduled_date: formattedDate,
+        scheduled_time: newTime,
+        movie_id: entry.movie_id,
+        block_id: entry.block_id,
+        discussion_time: entry.discussion_time || 0,
+        title_override_cs: entry.title_override_cs,
+        title_override_en: entry.title_override_en,
+        notes: entry.notes
+      })
+      
+      success('Schedule time updated successfully')
+      fetchSchedule()
+    } catch (err) {
+      console.error('Error updating time:', err)
+      error(err.response?.data?.error || 'Failed to update schedule time')
+    }
+  }
+
   const formatTime = (timeString) => {
     return timeString.slice(0, 5) // Remove seconds
   }
 
   const formatDate = (dateString) => {
-    return new Date(dateString).toLocaleDateString('cs-CZ')
+    if (!dateString) return ''
+    
+    // Backend now returns date as text "2024-10-16"
+    const [year, month, day] = dateString.split('-')
+    return `${parseInt(day)}. ${parseInt(month)}. ${year}`
   }
 
   // Generate festival dates based on edition start/end dates
@@ -341,7 +376,7 @@ const Programming = () => {
     const currentDate = new Date(startDate)
     while (currentDate <= endDate) {
       dates.push({
-        value: currentDate.toISOString().split('T')[0],
+        value: `${currentDate.getFullYear()}-${(currentDate.getMonth() + 1).toString().padStart(2, '0')}-${currentDate.getDate().toString().padStart(2, '0')}`,
         label: currentDate.toLocaleDateString('cs-CZ', { 
           weekday: 'long', 
           day: 'numeric', 
@@ -905,6 +940,7 @@ const Programming = () => {
             selectedDate={selectedDate}
             onEditEntry={handleEdit}
             onTimelineClick={handleTimelineClick}
+            onTimeUpdate={handleTimeUpdate}
           />
         )
       ) : (
