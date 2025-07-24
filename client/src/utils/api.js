@@ -123,4 +123,22 @@ export const movieApi = {
   getBySection: (section, editionId) => api.get(`/movies/section/${section}`, { params: editionId ? { edition_id: editionId } : {} }),
 }
 
+// Sections API
+const sectionApi = {
+  getByEdition: (editionId) => api.get(`/sections/edition/${editionId}`),
+  getById: (id) => api.get(`/sections/${id}`),
+  create: (section) => api.post('/sections', section),
+  update: (id, section) => api.put(`/sections/${id}`, section),
+  delete: (id) => api.delete(`/sections/${id}`),
+  reorder: (editionId, data) => api.put(`/sections/edition/${editionId}/reorder`, data),
+  initialize: (editionId) => api.post(`/sections/edition/${editionId}/initialize`),
+}
+
+// Export combined API object
+const combinedApi = {
+  ...api,
+  sections: sectionApi
+}
+
+export { combinedApi as api }
 export default api

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { movieApi, editionApi } from '../utils/api'
+import { movieApi, editionApi, api } from '../utils/api'
 import { useToast } from '../contexts/ToastContext'
 import { useEdition } from '../contexts/EditionContext'
 import Modal from '../components/Modal'
@@ -32,7 +32,8 @@ function Movies() {
     runtime: false,
     premiere: false,
     language: false,
-    subtitles: false
+    subtitles: false,
+    edition: false
   })
   const [showColumnSettings, setShowColumnSettings] = useState(false)
   const [formData, setFormData] = useState({
@@ -56,16 +57,7 @@ function Movies() {
     has_delegation: false
   })
 
-  const sections = [
-    { value: 'feature', label: 'Feature' },
-    { value: 'documentary', label: 'Documentary' },
-    { value: 'short', label: 'Short' },
-    { value: 'retrospective', label: 'Retrospective' },
-    { value: 'special', label: 'Special' },
-    { value: 'workshop', label: 'Workshop' },
-    { value: 'concert', label: 'Concert' },
-    { value: 'discussion', label: 'Discussion' }
-  ]
+  const [sections, setSections] = useState([])
 
   const premiereTypes = [
     { value: '', label: 'None' },
@@ -74,10 +66,33 @@ function Movies() {
     { value: 'world', label: 'World Premiere' }
   ]
 
+  const fetchSections = useCallback(async () => {
+    if (!selectedEdition?.id) return
+    
+    try {
+      const response = await api.sections.getByEdition(selectedEdition.id)
+      setSections(response.data.map(section => ({
+        value: section.key,
+        label: section.name_cs,
+        color: section.color_code
+      })))
+    } catch (error) {
+      console.error('Error fetching sections:', error)
+      showError('Failed to load sections')
+    }
+  }, [selectedEdition?.id])
+
+  // Get section color by key
+  const getSectionColor = useCallback((sectionKey) => {
+    const section = sections.find(s => s.value === sectionKey)
+    return section?.color || '#6B7280' // Default gray color
+  }, [sections])
+
   useEffect(() => {
     fetchMovies()
     fetchEditions()
-  }, [editionFilter])
+    fetchSections()
+  }, [editionFilter, fetchSections])
 
   useEffect(() => {
     if (selectedEdition && !editionFilter) {
@@ -734,8 +749,13 @@ function Movies() {
                     Subtitles
                   </th>
                 )}
-                <th className={`${condensedView ? 'px-3 py-2' : 'px-6 py-3'} text-left text-xs font-medium text-gray-500 uppercase ${condensedView ? '' : 'tracking-wider'}`}>
-                  Edition
+                {visibleColumns.edition && (
+                  <th className={`${condensedView ? 'px-3 py-2' : 'px-6 py-3'} text-left text-xs font-medium text-gray-500 uppercase ${condensedView ? '' : 'tracking-wider'}`}>
+                    Edition
+                  </th>
+                )}
+                <th className={`${condensedView ? 'px-3 py-2' : 'px-6 py-3'} text-right text-xs font-medium text-gray-500 uppercase ${condensedView ? '' : 'tracking-wider'}`}>
+                  Actions
                 </th>
               </tr>
             </thead>
@@ -818,8 +838,20 @@ function Movies() {
                     </td>
                   )}
                   {visibleColumns.section && (
-                    <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} text-sm text-gray-500`}>
-                      {movie.section ? sections.find(s => s.value === movie.section)?.label || movie.section : '-'}
+                    <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} text-sm`}>
+                      {movie.section ? (
+                        <span 
+                          className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium"
+                          style={{ 
+                            backgroundColor: getSectionColor(movie.section) + '20', // 20% opacity
+                            color: getSectionColor(movie.section)
+                          }}
+                        >
+                          {sections.find(s => s.value === movie.section)?.label || movie.section}
+                        </span>
+                      ) : (
+                        <span className="text-gray-500">-</span>
+                      )}
                     </td>
                   )}
                   {visibleColumns.runtime && (
@@ -842,8 +874,18 @@ function Movies() {
                       {movie.subtitles ? formatLanguageCodesForDisplay(movie.subtitles) : '-'}
                     </td>
                   )}
-                  <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} text-sm text-gray-500`}>
-                    {movie.edition_year}
+                  {visibleColumns.edition && (
+                    <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} text-sm text-gray-500`}>
+                      {movie.edition_year}
+                    </td>
+                  )}
+                  <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} text-sm text-right`}>
+                    <button
+                      onClick={() => handleEdit(movie)}
+                      className="text-blue-600 hover:text-blue-900 font-medium"
+                    >
+                      Edit
+                    </button>
                   </td>
                 </tr>
               ))}

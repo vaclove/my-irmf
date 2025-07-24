@@ -16,6 +16,7 @@ import Venues from './pages/Venues'
 import AuditLogs from './pages/AuditLogs'
 import BadgeSettings from './pages/BadgeSettings'
 import Settings from './pages/Settings'
+import Sections from './pages/Sections'
 import Confirmation from './pages/Confirmation'
 
 function App() {
@@ -44,6 +45,7 @@ function App() {
                   <Route path="/venues" element={<ProgrammingTabs />} />
                   <Route path="/badges/:editionId" element={<BadgeSettings />} />
                   <Route path="/settings" element={<Settings />} />
+                  <Route path="/settings/sections" element={<Sections />} />
                   <Route path="/audit" element={<AuditLogs />} />
                 </Routes>
               </Layout>

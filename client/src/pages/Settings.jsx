@@ -70,6 +70,26 @@ const Settings = () => {
           </p>
         </Link>
 
+        {/* Movie Sections */}
+        <Link
+          to="/settings/sections"
+          className="block bg-white rounded-lg shadow-sm border hover:shadow-md transition-shadow p-6"
+        >
+          <div className="flex items-center mb-4">
+            <div className="flex-shrink-0">
+              <div className="w-8 h-8 bg-orange-100 rounded-full flex items-center justify-center">
+                <span className="text-orange-600 text-lg">🎬</span>
+              </div>
+            </div>
+            <div className="ml-4">
+              <h3 className="text-lg font-medium text-gray-900">Movie Sections</h3>
+            </div>
+          </div>
+          <p className="text-sm text-gray-600">
+            Configure movie sections with custom names and color codes for visual organization.
+          </p>
+        </Link>
+
         {/* Audit Logs */}
         <Link
           to="/audit"
