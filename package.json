@@ -1,6 +1,6 @@
 {
   "name": "my-irmf",
-  "version": "1.3.4",
+  "version": "1.3.5",
   "description": "International Road Movie Festival management system",
   "main": "server/index.js",
   "scripts": {

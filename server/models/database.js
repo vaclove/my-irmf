@@ -5,6 +5,11 @@ const pool = new Pool({
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 });
 
+// Set timezone to avoid date conversion issues
+pool.on('connect', (client) => {
+  client.query('SET timezone = "Europe/Prague"');
+});
+
 const createTables = async () => {
   console.log('🔧 Starting database migration process...');
   const client = await pool.connect();

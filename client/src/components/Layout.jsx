@@ -27,6 +27,12 @@ function Layout({ children }) {
              location.pathname === '/templates' || 
              location.pathname === '/audit'
     }
+    if (path === '/programming') {
+      // Keep programming active for programming-related pages
+      return location.pathname === '/programming' || 
+             location.pathname === '/blocks' ||
+             location.pathname === '/venues'
+    }
     if (path !== '/' && location.pathname.startsWith(path)) return true
     return false
   }
@@ -100,6 +106,16 @@ function Layout({ children }) {
                 }`}
               >
                 Movies
+              </Link>
+              <Link
+                to="/programming"
+                className={`inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium ${
+                  isActive('/programming')
+                    ? 'border-blue-500 text-gray-900'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                Programming
               </Link>
               <Link
                 to="/settings"
@@ -215,6 +231,17 @@ function Layout({ children }) {
                 }`}
               >
                 Movies
+              </Link>
+              <Link
+                to="/programming"
+                onClick={closeMobileMenu}
+                className={`block px-3 py-2 rounded-md text-base font-medium ${
+                  isActive('/programming')
+                    ? 'text-blue-700 bg-blue-50'
+                    : 'text-gray-700 hover:text-gray-900 hover:bg-gray-50'
+                }`}
+              >
+                Programming
               </Link>
               <Link
                 to="/settings"

@@ -22,6 +22,9 @@ const tagRoutes = require('./routes/tags');
 const auditRoutes = require('./routes/audit');
 const badgeRoutes = require('./routes/badges');
 const movieRoutes = require('./routes/movies');
+const venueRoutes = require('./routes/venues');
+const blockRoutes = require('./routes/blocks');
+const programmingRoutes = require('./routes/programming');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -114,6 +117,9 @@ app.use('/api/tags', requireIrmfDomain, tagRoutes);
 app.use('/api/audit', requireIrmfDomain, auditRoutes);
 app.use('/api/badges', requireIrmfDomain, badgeRoutes);
 app.use('/api/movies', requireIrmfDomain, movieRoutes);
+app.use('/api/venues', requireIrmfDomain, venueRoutes);
+app.use('/api/blocks', requireIrmfDomain, blockRoutes);
+app.use('/api/programming', requireIrmfDomain, programmingRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });

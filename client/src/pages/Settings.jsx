@@ -90,6 +90,8 @@ const Settings = () => {
           </p>
         </Link>
 
+
+
         {/* Placeholder for future settings */}
         <div className="bg-gray-50 rounded-lg shadow-sm border p-6 opacity-50">
           <div className="flex items-center mb-4">

@@ -51,6 +51,42 @@ router.get('/', async (req, res) => {
   }
 });
 
+// Get movies by edition ID
+router.get('/edition/:editionId', async (req, res) => {
+  try {
+    const { editionId } = req.params;
+    
+    const query = `
+      SELECT m.*, e.year as edition_year, e.name as edition_name 
+      FROM movies m 
+      JOIN editions e ON m.edition_id = e.id
+      WHERE m.edition_id = $1
+      ORDER BY m.year DESC, m.name_cs ASC
+    `;
+    
+    const result = await pool.query(query, [editionId]);
+    
+    // Add image URLs to each movie
+    const moviesWithImages = result.rows.map(movie => {
+      if (movie.image_url) {
+        movie.image_urls = {
+          original: imageStorage.getImageUrl(movie.image_url, 'original'),
+          large: imageStorage.getImageUrl(movie.image_url, 'large'),
+          medium: imageStorage.getImageUrl(movie.image_url, 'medium'),
+          thumbnail: imageStorage.getImageUrl(movie.image_url, 'thumbnail'),
+          small: imageStorage.getImageUrl(movie.image_url, 'small')
+        };
+      }
+      return movie;
+    });
+    
+    res.json(moviesWithImages);
+  } catch (error) {
+    logError(error, req, { operation: 'get_movies_by_edition' });
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Get movie by ID
 router.get('/:id', async (req, res) => {
   try {
