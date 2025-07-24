@@ -16,6 +16,9 @@ const Programming = () => {
   const [selectedVenue, setSelectedVenue] = useState('')
   const [showForm, setShowForm] = useState(false)
   const [editingEntry, setEditingEntry] = useState(null)
+  const [overlapWarning, setOverlapWarning] = useState(null)
+  const [checkingOverlap, setCheckingOverlap] = useState(false)
+  const [cancelOverlapCheck, setCancelOverlapCheck] = useState(null)
   const [formData, setFormData] = useState({
     venue_id: '',
     scheduled_date: '',
@@ -41,6 +44,24 @@ const Programming = () => {
       fetchSchedule()
     }
   }, [selectedEdition, selectedDate, selectedVenue])
+
+  // Check for overlaps when form data changes
+  useEffect(() => {
+    if (showForm) {
+      const timeoutId = setTimeout(() => {
+        checkOverlap(
+          formData.venue_id,
+          formData.scheduled_date,
+          formData.scheduled_time,
+          formData.movie_id,
+          formData.block_id,
+          formData.discussion_time
+        )
+      }, 500) // Increased debounce to 500ms to reduce blinking
+
+      return () => clearTimeout(timeoutId)
+    }
+  }, [formData.venue_id, formData.scheduled_date, formData.scheduled_time, formData.movie_id, formData.block_id, formData.discussion_time, showForm])
 
   const fetchData = async () => {
     try {
@@ -97,6 +118,63 @@ const Programming = () => {
     })
     setEditingEntry(null)
     setShowForm(false)
+    setOverlapWarning(null)
+  }
+
+  const checkOverlap = async (venue_id, scheduled_date, scheduled_time, movie_id, block_id, discussion_time) => {
+    if (!venue_id || !scheduled_date || !scheduled_time || (!movie_id && !block_id)) {
+      setOverlapWarning(null)
+      return
+    }
+
+    // Cancel previous request if still running
+    if (cancelOverlapCheck) {
+      cancelOverlapCheck()
+    }
+
+    // Create new cancel token
+    const controller = new AbortController()
+    setCancelOverlapCheck(() => () => controller.abort())
+
+    // Only show checking indicator for slower operations
+    const checkingTimer = setTimeout(() => {
+      if (!controller.signal.aborted) {
+        setCheckingOverlap(true)
+      }
+    }, 100) // Delay showing the checking indicator
+
+    try {
+      const response = await axios.post('/api/programming/check-overlap', {
+        venue_id,
+        scheduled_date,
+        scheduled_time,
+        movie_id: movie_id || null,
+        block_id: block_id || null,
+        discussion_time: parseInt(discussion_time) || 0,
+        exclude_id: editingEntry?.id || null
+      }, { signal: controller.signal })
+
+      // Clear the timer and update states
+      clearTimeout(checkingTimer)
+      setCheckingOverlap(false)
+      setCancelOverlapCheck(null)
+      
+      if (response.data.hasOverlap) {
+        setOverlapWarning(response.data.conflictDetails)
+      } else {
+        setOverlapWarning(null)
+      }
+    } catch (err) {
+      if (err.name === 'CanceledError') {
+        // Request was cancelled, don't update state
+        return
+      }
+      console.error('Error checking overlap:', err)
+      clearTimeout(checkingTimer)
+      setCheckingOverlap(false)
+      setCancelOverlapCheck(null)
+      setOverlapWarning(null)
+    }
   }
 
   const handleAddEntry = () => {
@@ -414,15 +492,19 @@ const Programming = () => {
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Date *
                   </label>
-                  <input
-                    type="date"
+                  <select
                     value={formData.scheduled_date}
                     onChange={(e) => setFormData({...formData, scheduled_date: e.target.value})}
-                    min={selectedEdition.start_date?.split('T')[0]}
-                    max={selectedEdition.end_date?.split('T')[0]}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                     required
-                  />
+                  >
+                    <option value="">Select Date</option>
+                    {getFestivalDates().map(date => (
+                      <option key={date.value} value={date.value}>
+                        {date.label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
@@ -444,6 +526,42 @@ const Programming = () => {
                   ))}
                 </select>
               </div>
+
+              {/* Overlap Warning - moved here after time selection */}
+              {overlapWarning && (
+                <div className="bg-yellow-50 border border-yellow-200 rounded-md p-4">
+                  <div className="flex items-start">
+                    <div className="flex-shrink-0">
+                      <svg className="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                      </svg>
+                    </div>
+                    <div className="ml-3">
+                      <h3 className="text-sm font-medium text-yellow-800">
+                        Time Overlap Warning
+                      </h3>
+                      <div className="mt-2 text-sm text-yellow-700">
+                        <p>
+                          Your scheduled time ({overlapWarning.newStart}-{overlapWarning.newEnd}) 
+                          overlaps with an existing entry ({overlapWarning.existingStart}-{overlapWarning.existingEnd}).
+                        </p>
+                        <p className="mt-1">
+                          Please choose a different time slot to avoid conflicts.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {checkingOverlap && (
+                <div className="bg-blue-50 border border-blue-200 rounded-md p-4">
+                  <div className="flex items-center">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-3"></div>
+                    <span className="text-sm text-blue-700">Checking for time conflicts...</span>
+                  </div>
+                </div>
+              )}
 
               <div className="border-t pt-4">
                 <p className="text-sm font-medium text-gray-700 mb-3">
@@ -493,7 +611,7 @@ const Programming = () => {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Discussion Time (minutes)
+                  Additional Discussion Time (minutes)
                 </label>
                 <input
                   type="number"
@@ -556,9 +674,14 @@ const Programming = () => {
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors duration-200"
+                  disabled={overlapWarning || checkingOverlap}
+                  className={`px-4 py-2 rounded-md transition-colors duration-200 ${
+                    overlapWarning || checkingOverlap
+                      ? 'bg-gray-400 text-gray-700 cursor-not-allowed'
+                      : 'bg-blue-600 text-white hover:bg-blue-700'
+                  }`}
                 >
-                  {editingEntry ? 'Update' : 'Add'}
+                  {checkingOverlap ? 'Checking...' : editingEntry ? 'Update' : 'Add'}
                 </button>
               </div>
             </form>

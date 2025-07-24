@@ -6,6 +6,138 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
 });
 
+// Helper function to check for time overlaps
+const checkTimeOverlap = async (venue_id, scheduled_date, scheduled_time, movie_id, block_id, discussion_time, excludeId = null) => {
+  try {
+    // Get the runtime of the current entry
+    let currentRuntime = 0;
+    if (movie_id) {
+      const movieResult = await pool.query('SELECT runtime FROM movies WHERE id = $1', [movie_id]);
+      if (movieResult.rows.length > 0) {
+        currentRuntime = parseInt(movieResult.rows[0].runtime) || 0;
+      }
+    } else if (block_id) {
+      const blockResult = await pool.query('SELECT calculate_block_runtime($1) as runtime', [block_id]);
+      if (blockResult.rows.length > 0) {
+        currentRuntime = parseInt(blockResult.rows[0].runtime) || 0;
+      }
+    }
+    
+    const totalCurrentRuntime = currentRuntime + parseInt(discussion_time || 0);
+    
+    // Calculate end time for current entry
+    const [year, month, day] = scheduled_date.split('-').map(Number);
+    const [hours, minutes] = scheduled_time.split(':').map(Number);
+    
+    const currentStart = new Date(Date.UTC(year, month - 1, day, hours, minutes));
+    const currentEnd = new Date(currentStart.getTime() + totalCurrentRuntime * 60000); // Convert minutes to milliseconds
+    
+    // Find all existing entries for the same venue and date
+    let conflictQuery = `
+      SELECT 
+        ps.id,
+        ps.scheduled_time,
+        ps.discussion_time,
+        ps.movie_id,
+        ps.block_id,
+        m.runtime as movie_runtime
+      FROM programming_schedule ps
+      LEFT JOIN movies m ON ps.movie_id = m.id
+      WHERE ps.venue_id = $1 AND ps.scheduled_date = $2
+    `;
+    
+    const queryParams = [venue_id, scheduled_date];
+    
+    if (excludeId) {
+      conflictQuery += ' AND ps.id != $3';
+      queryParams.push(excludeId);
+    }
+    
+    const existingEntries = await pool.query(conflictQuery, queryParams);
+    
+    // Check each existing entry for overlap
+    for (const entry of existingEntries.rows) {
+      const [existingHours, existingMinutes] = entry.scheduled_time.split(':').map(Number);
+      const existingStart = new Date(Date.UTC(year, month - 1, day, existingHours, existingMinutes));
+      
+      // Calculate runtime for existing entry
+      let existingRuntime = 0;
+      if (entry.movie_id) {
+        existingRuntime = parseInt(entry.movie_runtime) || 0;
+      } else if (entry.block_id) {
+        // Calculate block runtime using the database function
+        const blockRuntimeResult = await pool.query('SELECT calculate_block_runtime($1) as runtime', [entry.block_id]);
+        existingRuntime = parseInt(blockRuntimeResult.rows[0]?.runtime) || 0;
+      }
+      
+      const existingTotalRuntime = existingRuntime + parseInt(entry.discussion_time || 0);
+      const existingEnd = new Date(existingStart.getTime() + existingTotalRuntime * 60000);
+      
+      // Check if times overlap
+      if (currentStart < existingEnd && currentEnd > existingStart) {
+        const formatTime = (date) => {
+          // Use UTC methods to avoid timezone conversion issues
+          const hours = date.getUTCHours().toString().padStart(2, '0');
+          const minutes = date.getUTCMinutes().toString().padStart(2, '0');
+          return `${hours}:${minutes}`;
+        };
+        
+        return {
+          hasOverlap: true,
+          conflictDetails: {
+            existingStart: formatTime(existingStart),
+            existingEnd: formatTime(existingEnd),
+            newStart: formatTime(currentStart),
+            newEnd: formatTime(currentEnd)
+          }
+        };
+      }
+    }
+    
+    return { hasOverlap: false };
+  } catch (error) {
+    console.error('Error checking time overlap:', error);
+    throw error;
+  }
+};
+
+// Check for time overlaps without creating an entry
+router.post('/check-overlap', async (req, res) => {
+  try {
+    const {
+      venue_id,
+      scheduled_date,
+      scheduled_time,
+      movie_id,
+      block_id,
+      discussion_time,
+      exclude_id
+    } = req.body;
+    
+    if (!venue_id || !scheduled_date || !scheduled_time) {
+      return res.status(400).json({ 
+        error: 'Venue ID, date, and time are required' 
+      });
+    }
+    
+    if ((!movie_id && !block_id) || (movie_id && block_id)) {
+      return res.status(400).json({ 
+        error: 'Either movie ID or block ID must be provided, but not both' 
+      });
+    }
+    
+    const overlapCheck = await checkTimeOverlap(
+      venue_id, scheduled_date, scheduled_time, 
+      movie_id, block_id, discussion_time, exclude_id
+    );
+    
+    res.json(overlapCheck);
+  } catch (error) {
+    console.error('Error checking overlap:', error);
+    res.status(500).json({ error: 'Failed to check for overlaps' });
+  }
+});
+
 // Get programming schedule for an edition
 router.get('/edition/:editionId', async (req, res) => {
   try {
@@ -151,15 +283,16 @@ router.post('/', async (req, res) => {
       });
     }
     
-    // Check for time conflicts
-    const conflictCheck = await pool.query(`
-      SELECT id FROM programming_schedule 
-      WHERE venue_id = $1 AND scheduled_date = $2 AND scheduled_time = $3
-    `, [venue_id, scheduled_date, scheduled_time]);
+    // Check for time overlaps
+    const overlapCheck = await checkTimeOverlap(
+      venue_id, scheduled_date, scheduled_time, 
+      movie_id, block_id, discussion_time
+    );
     
-    if (conflictCheck.rows.length > 0) {
+    if (overlapCheck.hasOverlap) {
+      const { conflictDetails } = overlapCheck;
       return res.status(400).json({ 
-        error: 'Time slot is already booked for this venue' 
+        error: `Time overlap detected! New entry (${conflictDetails.newStart}-${conflictDetails.newEnd}) overlaps with existing entry (${conflictDetails.existingStart}-${conflictDetails.existingEnd})` 
       });
     }
     
@@ -197,16 +330,29 @@ router.put('/:id', async (req, res) => {
       notes
     } = req.body;
     
-    // Check for time conflicts (excluding current entry)
+    // Check for time overlaps (excluding current entry)
     if (venue_id && scheduled_date && scheduled_time) {
-      const conflictCheck = await pool.query(`
-        SELECT id FROM programming_schedule 
-        WHERE venue_id = $1 AND scheduled_date = $2 AND scheduled_time = $3 AND id != $4
-      `, [venue_id, scheduled_date, scheduled_time, id]);
+      // Get current entry details to determine movie/block
+      const currentEntry = await pool.query(
+        'SELECT movie_id, block_id FROM programming_schedule WHERE id = $1', 
+        [id]
+      );
       
-      if (conflictCheck.rows.length > 0) {
+      if (currentEntry.rows.length === 0) {
+        return res.status(404).json({ error: 'Programming entry not found' });
+      }
+      
+      const { movie_id: currentMovieId, block_id: currentBlockId } = currentEntry.rows[0];
+      
+      const overlapCheck = await checkTimeOverlap(
+        venue_id, scheduled_date, scheduled_time, 
+        currentMovieId, currentBlockId, discussion_time, id
+      );
+      
+      if (overlapCheck.hasOverlap) {
+        const { conflictDetails } = overlapCheck;
         return res.status(400).json({ 
-          error: 'Time slot is already booked for this venue' 
+          error: `Time overlap detected! Updated entry (${conflictDetails.newStart}-${conflictDetails.newEnd}) would overlap with existing entry (${conflictDetails.existingStart}-${conflictDetails.existingEnd})` 
         });
       }
     }
