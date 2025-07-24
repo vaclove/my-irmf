@@ -8,7 +8,7 @@ This is a repository connected to GitHub at: https://github.com/vaclove/my-irmf
 
 ## Current State
 
-This repository contains a complete Movie Festival Guest Management System with:
+This repository contains a complete International Road Movie Festival Management System (My IRMF) with:
 - Node.js/Express backend with PostgreSQL database
 - React frontend with Tailwind CSS
 - Google OAuth authentication

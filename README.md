@@ -1,6 +1,6 @@
-# Movie Festival Guest Manager
+# My IRMF
 
-A complete guest management system for movie festivals with invitation workflows and email confirmations.
+A complete management system for the International Road Movie Festival with guest management, movie catalog, badge printing, and email workflows.
 
 ## Features
 

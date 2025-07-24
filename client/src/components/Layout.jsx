@@ -53,7 +53,7 @@ function Layout({ children }) {
                   src="https://irmf.cz/wp-content/uploads/2022/07/irmf_web_logo_90px_black.png" 
                   alt="IRMF Logo" 
                   className="h-8 w-auto"
-                  title={`IRMF Guest Manager v${version}`}
+                  title={`My IRMF v${version}`}
                 />
                 {selectedEdition && (
                   <span className="ml-2 px-2 py-1 text-xs font-medium text-white bg-gradient-to-r from-blue-600 to-blue-700 rounded-md">

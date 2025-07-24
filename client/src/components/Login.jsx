@@ -8,7 +8,7 @@ const Login = () => {
     <div className="min-h-screen bg-gradient-to-br from-blue-500 via-purple-500 to-pink-500 flex items-center justify-center">
       <div className="bg-white p-8 rounded-lg shadow-2xl max-w-md w-full mx-4">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">🎬 Festival Manager</h1>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">🎬 My IRMF</h1>
           <p className="text-gray-600">Sign in with your IRMF account</p>
         </div>
         
