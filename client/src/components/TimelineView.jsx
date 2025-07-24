@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 
-const TimelineView = ({ schedule, venues, selectedDate, onEditEntry }) => {
+const TimelineView = ({ schedule, venues, selectedDate, onEditEntry, onTimelineClick }) => {
   const [hoveredEntry, setHoveredEntry] = useState(null)
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 })
   // Generate time slots for the day (every 15 minutes from 8:00 to 24:00)
@@ -19,6 +19,25 @@ const TimelineView = ({ schedule, venues, selectedDate, onEditEntry }) => {
   const timeToMinutes = (timeString) => {
     const [hours, minutes] = timeString.split(':').map(Number)
     return (hours - 8) * 60 + minutes
+  }
+
+  // Convert click position to time
+  const positionToTime = (clickX, containerRect) => {
+    const relativeX = clickX - containerRect.left
+    const percentage = relativeX / containerRect.width
+    const minutesSince8AM = Math.round(percentage * 16 * 60) // 16 hours from 8:00 to 24:00
+    
+    // Round to nearest 15 minutes
+    const roundedMinutes = Math.round(minutesSince8AM / 15) * 15
+    
+    const hours = Math.floor(roundedMinutes / 60) + 8
+    const minutes = roundedMinutes % 60
+    
+    // Ensure time is within bounds
+    if (hours < 8) return '08:00'
+    if (hours >= 24) return '23:45'
+    
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`
   }
 
   // Get venue colors (matching the existing color scheme)
@@ -73,11 +92,15 @@ const TimelineView = ({ schedule, venues, selectedDate, onEditEntry }) => {
           <div className="text-4xl mb-4">📅</div>
           <p className="text-gray-500 text-lg">No programming entries for this date.</p>
           <p className="text-gray-400 text-sm mt-2">
-            {selectedDate && `${new Date(selectedDate).toLocaleDateString('cs-CZ', { 
-              weekday: 'long', 
-              day: 'numeric', 
-              month: 'long' 
-            })} appears to be a free day.`}
+            {selectedDate && (() => {
+              const [year, month, day] = selectedDate.split('-').map(Number);
+              const date = new Date(year, month - 1, day);
+              return `${date.toLocaleDateString('cs-CZ', { 
+                weekday: 'long', 
+                day: 'numeric', 
+                month: 'long' 
+              })} appears to be a free day.`;
+            })()}
           </p>
         </div>
       </div>
@@ -88,15 +111,6 @@ const TimelineView = ({ schedule, venues, selectedDate, onEditEntry }) => {
     <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
       <div className="p-4 border-b bg-gray-50">
         <h3 className="text-lg font-semibold text-gray-900">Schedule Timeline</h3>
-        {selectedDate && (
-          <p className="text-sm text-gray-600 mt-1">
-            {new Date(selectedDate).toLocaleDateString('cs-CZ', { 
-              weekday: 'long', 
-              day: 'numeric', 
-              month: 'long' 
-            })}
-          </p>
-        )}
       </div>
       
       <div className="overflow-x-auto">
@@ -143,7 +157,19 @@ const TimelineView = ({ schedule, venues, selectedDate, onEditEntry }) => {
                   </div>
 
                   {/* Timeline track */}
-                  <div className="relative h-16 bg-gray-50 rounded-md border">
+                  <div 
+                    className="relative h-16 bg-gray-50 rounded-md border cursor-cell"
+                    onClick={(e) => {
+                      // Only handle clicks on the track itself, not on entries
+                      if (e.target === e.currentTarget || e.target.classList.contains('timeline-grid-line')) {
+                        const rect = e.currentTarget.getBoundingClientRect()
+                        const time = positionToTime(e.clientX, rect)
+                        if (onTimelineClick) {
+                          onTimelineClick(venue.id, time)
+                        }
+                      }
+                    }}
+                  >
                     {/* Hour grid lines */}
                     {majorTimeSlots.map((time, index) => {
                       const [hours] = time.split(':').map(Number)
@@ -153,7 +179,7 @@ const TimelineView = ({ schedule, venues, selectedDate, onEditEntry }) => {
                       return (
                         <div
                           key={time}
-                          className="absolute top-0 bottom-0 w-px bg-gray-200"
+                          className="absolute top-0 bottom-0 w-px bg-gray-200 timeline-grid-line pointer-events-none"
                           style={{ left: `${position}%` }}
                         ></div>
                       )
@@ -184,9 +210,14 @@ const TimelineView = ({ schedule, venues, selectedDate, onEditEntry }) => {
                                 {formatTime(entry.scheduled_time)}
                               </div>
                             ) : entry.total_runtime < 45 ? (
-                              // For short entries (20-45 min), show abbreviated title
-                              <div className="text-xs font-medium truncate">
-                                {(entry.title_override_cs || entry.movie_name_cs || entry.block_name_cs).substring(0, 8)}...
+                              // For short entries (20-45 min), show abbreviated title and time
+                              <div className="flex flex-col justify-center w-full">
+                                <div className="text-xs font-medium truncate">
+                                  {(entry.title_override_cs || entry.movie_name_cs || entry.block_name_cs).substring(0, 8)}...
+                                </div>
+                                <div className="text-xs opacity-75">
+                                  {formatTime(entry.scheduled_time)}
+                                </div>
                               </div>
                             ) : (
                               // For longer entries, show full content
@@ -194,11 +225,9 @@ const TimelineView = ({ schedule, venues, selectedDate, onEditEntry }) => {
                                 <div className="text-xs font-medium truncate">
                                   {entry.title_override_cs || entry.movie_name_cs || entry.block_name_cs}
                                 </div>
-                                {entry.total_runtime >= 90 && (
-                                  <div className="text-xs opacity-90">
-                                    {formatTime(entry.scheduled_time)} • {entry.total_runtime}min
-                                  </div>
-                                )}
+                                <div className="text-xs opacity-90 whitespace-nowrap">
+                                  {formatTime(entry.scheduled_time)} • {entry.total_runtime}min
+                                </div>
                               </div>
                             )}
                           </div>

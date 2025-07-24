@@ -212,6 +212,21 @@ const Programming = () => {
     setShowForm(true)
   }
 
+  const handleTimelineClick = (venueId, time) => {
+    setFormData({
+      venue_id: venueId,
+      scheduled_date: selectedDate || '',
+      scheduled_time: time,
+      movie_id: '',
+      block_id: '',
+      discussion_time: 0,
+      title_override_cs: '',
+      title_override_en: '',
+      notes: ''
+    })
+    setShowForm(true)
+  }
+
   const handleEdit = (entry) => {
     // Format date to YYYY-MM-DD format for HTML date input
     const formatDate = (dateString) => {
@@ -889,6 +904,7 @@ const Programming = () => {
             venues={venues} 
             selectedDate={selectedDate}
             onEditEntry={handleEdit}
+            onTimelineClick={handleTimelineClick}
           />
         )
       ) : (
