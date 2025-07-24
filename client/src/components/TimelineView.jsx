@@ -1,6 +1,8 @@
-import React from 'react'
+import React, { useState } from 'react'
 
 const TimelineView = ({ schedule, venues, selectedDate, onEditEntry }) => {
+  const [hoveredEntry, setHoveredEntry] = useState(null)
+  const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 })
   // Generate time slots for the day (every 15 minutes from 8:00 to 24:00)
   const generateTimeSlots = () => {
     const slots = []
@@ -47,14 +49,13 @@ const TimelineView = ({ schedule, venues, selectedDate, onEditEntry }) => {
     return {
       left: `${left}%`,
       width: `${width}%`,
-      minWidth: '120px' // Ensure minimum width for readability
+      // No minimum width - let proportions be accurate
+      // Very short films might be hard to click, but hover helps
     }
   }
 
-  // Filter schedule for selected date if provided
-  const filteredSchedule = selectedDate 
-    ? schedule.filter(entry => entry.scheduled_date === selectedDate)
-    : schedule
+  // Timeline requires a specific date - schedule should already be filtered
+  const filteredSchedule = schedule
 
   // Group entries by venue
   const entriesByVenue = {}
@@ -63,14 +64,22 @@ const TimelineView = ({ schedule, venues, selectedDate, onEditEntry }) => {
   })
 
   const timeSlots = generateTimeSlots()
-  const majorTimeSlots = timeSlots.filter((time, index) => index % 4 === 0) // Every hour
+  const majorTimeSlots = timeSlots.filter((time, index) => index % 4 === 0).slice(1) // Every hour, skip 08:00
 
   if (filteredSchedule.length === 0) {
     return (
       <div className="bg-white rounded-lg shadow-sm border p-8 text-center">
-        <p className="text-gray-500">
-          {selectedDate ? 'No programming entries for the selected date.' : 'No programming entries to display.'}
-        </p>
+        <div className="max-w-md mx-auto">
+          <div className="text-4xl mb-4">📅</div>
+          <p className="text-gray-500 text-lg">No programming entries for this date.</p>
+          <p className="text-gray-400 text-sm mt-2">
+            {selectedDate && `${new Date(selectedDate).toLocaleDateString('cs-CZ', { 
+              weekday: 'long', 
+              day: 'numeric', 
+              month: 'long' 
+            })} appears to be a free day.`}
+          </p>
+        </div>
       </div>
     )
   }
@@ -91,15 +100,29 @@ const TimelineView = ({ schedule, venues, selectedDate, onEditEntry }) => {
       </div>
       
       <div className="overflow-x-auto">
-        <div className="min-w-[800px] p-4">
+        <div className="min-w-[1200px] p-4">
           {/* Time axis */}
           <div className="relative mb-4">
-            <div className="flex justify-between text-xs text-gray-500 mb-2">
-              {majorTimeSlots.map(time => (
-                <div key={time} className="flex-1 text-center">
-                  {time}
-                </div>
-              ))}
+            <div className="relative h-6">
+              {majorTimeSlots.map((time, index) => {
+                // Calculate position based on actual time
+                const [hours] = time.split(':').map(Number)
+                const minutesSince8AM = (hours - 8) * 60
+                const position = (minutesSince8AM / (16 * 60)) * 100
+                
+                return (
+                  <div 
+                    key={time} 
+                    className="absolute text-xs text-gray-500"
+                    style={{ 
+                      left: `${position}%`,
+                      transform: 'translateX(-50%)'
+                    }}
+                  >
+                    {time}
+                  </div>
+                )
+              })}
             </div>
             <div className="h-px bg-gray-200"></div>
           </div>
@@ -122,13 +145,19 @@ const TimelineView = ({ schedule, venues, selectedDate, onEditEntry }) => {
                   {/* Timeline track */}
                   <div className="relative h-16 bg-gray-50 rounded-md border">
                     {/* Hour grid lines */}
-                    {majorTimeSlots.map((time, index) => (
-                      <div
-                        key={time}
-                        className="absolute top-0 bottom-0 w-px bg-gray-200"
-                        style={{ left: `${(index / (majorTimeSlots.length - 1)) * 100}%` }}
-                      ></div>
-                    ))}
+                    {majorTimeSlots.map((time, index) => {
+                      const [hours] = time.split(':').map(Number)
+                      const minutesSince8AM = (hours - 8) * 60
+                      const position = (minutesSince8AM / (16 * 60)) * 100
+                      
+                      return (
+                        <div
+                          key={time}
+                          className="absolute top-0 bottom-0 w-px bg-gray-200"
+                          style={{ left: `${position}%` }}
+                        ></div>
+                      )
+                    })}
 
                     {/* Programming entries */}
                     {venueEntries.map(entry => {
@@ -138,16 +167,40 @@ const TimelineView = ({ schedule, venues, selectedDate, onEditEntry }) => {
                       return (
                         <div
                           key={entry.id}
-                          className={`absolute top-1 bottom-1 ${colors.bg} ${colors.text} rounded px-2 py-1 shadow-sm cursor-pointer hover:shadow-md transition-all duration-200 hover:scale-105`}
+                          className={`absolute top-1 bottom-1 ${colors.bg} ${colors.text} rounded px-1 py-1 shadow-sm cursor-pointer hover:shadow-md transition-all duration-200 hover:scale-105 hover:z-10`}
                           style={entryStyle}
                           onClick={() => onEditEntry && onEditEntry(entry)}
-                          title={`Click to edit: ${entry.title_override_cs || entry.movie_name_cs || entry.block_name_cs} (${formatTime(entry.scheduled_time)} • ${entry.total_runtime}min)`}
+                          onMouseEnter={(e) => {
+                            setHoveredEntry(entry)
+                            const rect = e.currentTarget.getBoundingClientRect()
+                            setMousePosition({ x: rect.left + rect.width / 2, y: rect.top })
+                          }}
+                          onMouseLeave={() => setHoveredEntry(null)}
                         >
-                          <div className="text-xs font-medium truncate">
-                            {entry.title_override_cs || entry.movie_name_cs || entry.block_name_cs}
-                          </div>
-                          <div className="text-xs opacity-90">
-                            {formatTime(entry.scheduled_time)} • {entry.total_runtime}min
+                          <div className="h-full flex items-center overflow-hidden px-2">
+                            {/* For very short entries (< 20 min), just show the time */}
+                            {entry.total_runtime < 20 ? (
+                              <div className="text-xs font-bold">
+                                {formatTime(entry.scheduled_time)}
+                              </div>
+                            ) : entry.total_runtime < 45 ? (
+                              // For short entries (20-45 min), show abbreviated title
+                              <div className="text-xs font-medium truncate">
+                                {(entry.title_override_cs || entry.movie_name_cs || entry.block_name_cs).substring(0, 8)}...
+                              </div>
+                            ) : (
+                              // For longer entries, show full content
+                              <div className="flex flex-col justify-center w-full">
+                                <div className="text-xs font-medium truncate">
+                                  {entry.title_override_cs || entry.movie_name_cs || entry.block_name_cs}
+                                </div>
+                                {entry.total_runtime >= 90 && (
+                                  <div className="text-xs opacity-90">
+                                    {formatTime(entry.scheduled_time)} • {entry.total_runtime}min
+                                  </div>
+                                )}
+                              </div>
+                            )}
                           </div>
                         </div>
                       )
@@ -176,6 +229,32 @@ const TimelineView = ({ schedule, venues, selectedDate, onEditEntry }) => {
           </div>
         </div>
       </div>
+      
+      {/* Custom Tooltip */}
+      {hoveredEntry && (
+        <div
+          className="fixed z-50 bg-gray-900 text-white px-3 py-2 rounded-md shadow-lg pointer-events-none"
+          style={{
+            left: mousePosition.x < 150 ? '10px' : `${mousePosition.x}px`,
+            top: `${mousePosition.y}px`,
+            transform: mousePosition.x < 150 
+              ? 'translateY(-100%) translateY(-8px)' 
+              : 'translate(-50%, -100%) translateY(-8px)'
+          }}
+        >
+          <div className="text-sm font-medium">
+            {hoveredEntry.title_override_cs || hoveredEntry.movie_name_cs || hoveredEntry.block_name_cs}
+          </div>
+          <div className="text-xs opacity-90 mt-1">
+            {formatTime(hoveredEntry.scheduled_time)} • {hoveredEntry.total_runtime} min
+          </div>
+          {hoveredEntry.movie_director && (
+            <div className="text-xs opacity-75 mt-1">
+              Director: {hoveredEntry.movie_director}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

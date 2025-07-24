@@ -43,6 +43,20 @@ const Programming = () => {
     }
   }, [selectedEdition])
 
+  // Handle Escape key to close modal
+  useEffect(() => {
+    const handleEscape = (e) => {
+      if (e.key === 'Escape' && showForm) {
+        resetForm()
+      }
+    }
+    
+    if (showForm) {
+      document.addEventListener('keydown', handleEscape)
+      return () => document.removeEventListener('keydown', handleEscape)
+    }
+  }, [showForm])
+
   useEffect(() => {
     if (selectedEdition) {
       fetchSchedule()
@@ -411,7 +425,10 @@ const Programming = () => {
               📋 Table
             </button>
             <button
-              onClick={() => setViewMode('timeline')}
+              onClick={() => {
+                setViewMode('timeline')
+                setSelectedVenue('') // Clear venue filter when switching to timeline
+              }}
               className={`px-3 py-2 text-sm font-medium transition-colors duration-200 ${
                 viewMode === 'timeline'
                   ? 'bg-blue-600 text-white'
@@ -455,12 +472,13 @@ const Programming = () => {
             </select>
           </div>
 
-          {/* Venue Filter */}
-          <div className="flex-1">
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Filter by Venue
-            </label>
-            <div className="flex flex-wrap gap-2">
+          {/* Venue Filter - only show in table view */}
+          {viewMode === 'table' && (
+            <div className="flex-1">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Filter by Venue
+              </label>
+              <div className="flex flex-wrap gap-2">
               {/* All Venues Button */}
               <button
                 onClick={() => setSelectedVenue('')}
@@ -510,12 +528,21 @@ const Programming = () => {
               })}
             </div>
           </div>
+          )}
         </div>
       </div>
 
       {/* Programming Form Modal */}
       {showForm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+          onClick={(e) => {
+            // Close modal if clicking on backdrop (not on modal content)
+            if (e.target === e.currentTarget) {
+              resetForm()
+            }
+          }}
+        >
           <div className="bg-white p-6 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
             <h2 className="text-xl font-semibold mb-4">
               {editingEntry ? 'Edit Programming Entry' : 'Add Programming Entry'}
@@ -841,12 +868,29 @@ const Programming = () => {
 
       {/* Schedule Display */}
       {viewMode === 'timeline' ? (
-        <TimelineView 
-          schedule={schedule} 
-          venues={venues} 
-          selectedDate={selectedDate}
-          onEditEntry={handleEdit}
-        />
+        !selectedDate ? (
+          <div className="bg-white rounded-lg shadow-sm border p-8 text-center">
+            <div className="max-w-md mx-auto">
+              <div className="text-6xl mb-4">📊</div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                Select a Date for Timeline View
+              </h3>
+              <p className="text-gray-500 mb-4">
+                Timeline view shows the schedule for a specific day. Please select a date from the filter above to view the timeline.
+              </p>
+              <div className="text-sm text-gray-400">
+                Use the date filter above to choose which day you want to visualize.
+              </div>
+            </div>
+          </div>
+        ) : (
+          <TimelineView 
+            schedule={schedule} 
+            venues={venues} 
+            selectedDate={selectedDate}
+            onEditEntry={handleEdit}
+          />
+        )
       ) : (
         <div className="bg-white shadow-sm rounded-lg overflow-hidden">
           {schedule.length === 0 ? (
