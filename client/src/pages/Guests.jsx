@@ -187,6 +187,7 @@ function Guests() {
         await guestApi.delete(id)
         success(`Guest ${guest?.first_name} ${guest?.last_name} deleted successfully!`)
         await fetchGuests()
+        resetForm() // Close the modal after successful deletion
       } catch (error) {
         console.error('Error deleting guest:', error)
         showError('Failed to delete guest: ' + (error.response?.data?.error || error.message))

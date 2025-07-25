@@ -314,4 +314,266 @@ router.get('/public/editions', async (req, res) => {
   }
 });
 
+// Public programming schedule routes (READ-ONLY)
+// GET /api/public/programming - List programming schedule with optional filtering
+router.get('/public/programming', async (req, res) => {
+  try {
+    const { 
+      edition_id, 
+      venue_id, 
+      date,
+      limit = 100,
+      offset = 0
+    } = req.query;
+
+    let query = `
+      SELECT 
+        ps.id,
+        ps.scheduled_date::text as scheduled_date,
+        ps.scheduled_time,
+        ps.total_runtime,
+        ps.title_override_cs,
+        ps.title_override_en,
+        ps.notes,
+        v.name_cs as venue_name_cs,
+        v.name_en as venue_name_en,
+        v.capacity as venue_capacity,
+        -- Movie details (if single movie)
+        m.name_cs as movie_name_cs,
+        m.name_en as movie_name_en,
+        m.director as movie_director,
+        m.runtime as movie_runtime,
+        m.section as movie_section,
+        m.synopsis_cs as movie_synopsis_cs,
+        m.synopsis_en as movie_synopsis_en,
+        m.image_url as movie_image_url,
+        -- Block details (if block)
+        mb.name_cs as block_name_cs,
+        mb.name_en as block_name_en,
+        mb.description_cs as block_description_cs,
+        mb.description_en as block_description_en,
+        e.year as edition_year,
+        e.name as edition_name
+      FROM programming_schedule ps
+      JOIN venues v ON ps.venue_id = v.id
+      JOIN editions e ON ps.edition_id = e.id
+      LEFT JOIN movies m ON ps.movie_id = m.id
+      LEFT JOIN movie_blocks mb ON ps.block_id = mb.id
+      WHERE 1=1
+    `;
+    
+    const params = [];
+    let paramCount = 0;
+
+    // Add filters
+    if (edition_id) {
+      params.push(edition_id);
+      query += ` AND ps.edition_id = $${++paramCount}`;
+    }
+    
+    if (venue_id) {
+      params.push(venue_id);
+      query += ` AND ps.venue_id = $${++paramCount}`;
+    }
+    
+    if (date) {
+      params.push(date);
+      query += ` AND ps.scheduled_date = $${++paramCount}`;
+    }
+
+    // Order by date and time
+    query += ` ORDER BY ps.scheduled_date, ps.scheduled_time, v.sort_order`;
+
+    // Add pagination
+    params.push(limit);
+    query += ` LIMIT $${++paramCount}`;
+    params.push(offset);
+    query += ` OFFSET $${++paramCount}`;
+
+    const result = await pool.query(query, params);
+
+    // Get total count for pagination
+    let countQuery = `
+      SELECT COUNT(*) as total 
+      FROM programming_schedule ps
+      WHERE 1=1
+    `;
+    
+    if (edition_id) countQuery += ` AND ps.edition_id = '${edition_id}'`;
+    if (venue_id) countQuery += ` AND ps.venue_id = '${venue_id}'`;
+    if (date) countQuery += ` AND ps.scheduled_date = '${date}'`;
+    
+    const countResult = await pool.query(countQuery);
+    const total = parseInt(countResult.rows[0].total);
+
+    // Add image URLs to movies
+    const programmingWithImages = result.rows.map(entry => {
+      if (entry.movie_image_url) {
+        entry.movie_image_urls = {
+          original: imageStorage.getImageUrl(entry.movie_image_url, 'original'),
+          large: imageStorage.getImageUrl(entry.movie_image_url, 'large'),
+          medium: imageStorage.getImageUrl(entry.movie_image_url, 'medium'),
+          thumbnail: imageStorage.getImageUrl(entry.movie_image_url, 'thumbnail'),
+          small: imageStorage.getImageUrl(entry.movie_image_url, 'small')
+        };
+      }
+      return entry;
+    });
+
+    res.json({
+      programming: programmingWithImages,
+      pagination: {
+        total,
+        limit: parseInt(limit),
+        offset: parseInt(offset),
+        pages: Math.ceil(total / limit)
+      }
+    });
+
+  } catch (error) {
+    logError(error, req, { operation: 'list_public_programming' });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/public/programming/:id - Get specific programming entry details
+router.get('/public/programming/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const query = `
+      SELECT 
+        ps.id,
+        ps.scheduled_date::text as scheduled_date,
+        ps.scheduled_time,
+        ps.base_runtime,
+        ps.discussion_time,
+        ps.total_runtime,
+        ps.title_override_cs,
+        ps.title_override_en,
+        ps.notes,
+        v.name_cs as venue_name_cs,
+        v.name_en as venue_name_en,
+        v.capacity as venue_capacity,
+        -- Movie details (if single movie)
+        m.id as movie_id,
+        m.name_cs as movie_name_cs,
+        m.name_en as movie_name_en,
+        m.director as movie_director,
+        m.runtime as movie_runtime,
+        m.section as movie_section,
+        m.synopsis_cs as movie_synopsis_cs,
+        m.synopsis_en as movie_synopsis_en,
+        m.year as movie_year,
+        m.country as movie_country,
+        m.cast as movie_cast,
+        m.image_url as movie_image_url,
+        -- Block details (if block)
+        mb.id as block_id,
+        mb.name_cs as block_name_cs,
+        mb.name_en as block_name_en,
+        mb.description_cs as block_description_cs,
+        mb.description_en as block_description_en,
+        e.year as edition_year,
+        e.name as edition_name
+      FROM programming_schedule ps
+      JOIN venues v ON ps.venue_id = v.id
+      JOIN editions e ON ps.edition_id = e.id
+      LEFT JOIN movies m ON ps.movie_id = m.id
+      LEFT JOIN movie_blocks mb ON ps.block_id = mb.id
+      WHERE ps.id = $1
+    `;
+    
+    const result = await pool.query(query, [id]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Programming entry not found' });
+    }
+    
+    const entry = result.rows[0];
+    
+    // If it's a block, get the movies in the block
+    if (entry.block_id) {
+      const moviesResult = await pool.query(`
+        SELECT 
+          m.id,
+          m.name_cs,
+          m.name_en,
+          m.director,
+          m.runtime,
+          m.section,
+          m.synopsis_cs,
+          m.synopsis_en,
+          m.year,
+          m.country,
+          m.cast,
+          m.image_url,
+          bm.sort_order
+        FROM block_movies bm
+        JOIN movies m ON bm.movie_id = m.id
+        WHERE bm.block_id = $1
+        ORDER BY bm.sort_order, m.name_cs
+      `, [entry.block_id]);
+      
+      // Add image URLs to block movies
+      entry.block_movies = moviesResult.rows.map(movie => {
+        if (movie.image_url) {
+          movie.image_urls = {
+            original: imageStorage.getImageUrl(movie.image_url, 'original'),
+            large: imageStorage.getImageUrl(movie.image_url, 'large'),
+            medium: imageStorage.getImageUrl(movie.image_url, 'medium'),
+            thumbnail: imageStorage.getImageUrl(movie.image_url, 'thumbnail'),
+            small: imageStorage.getImageUrl(movie.image_url, 'small')
+          };
+        }
+        return movie;
+      });
+    }
+    
+    // Add image URLs to single movie if present
+    if (entry.movie_image_url) {
+      entry.movie_image_urls = {
+        original: imageStorage.getImageUrl(entry.movie_image_url, 'original'),
+        large: imageStorage.getImageUrl(entry.movie_image_url, 'large'),
+        medium: imageStorage.getImageUrl(entry.movie_image_url, 'medium'),
+        thumbnail: imageStorage.getImageUrl(entry.movie_image_url, 'thumbnail'),
+        small: imageStorage.getImageUrl(entry.movie_image_url, 'small')
+      };
+    }
+    
+    res.json({
+      programming: entry
+    });
+
+  } catch (error) {
+    logError(error, req, { operation: 'get_public_programming', programmingId: req.params.id });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/public/venues - List available venues
+router.get('/public/venues', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        id,
+        name_cs,
+        name_en,
+        capacity,
+        sort_order
+      FROM venues 
+      WHERE active = true
+      ORDER BY sort_order
+    `);
+    
+    res.json({
+      venues: result.rows
+    });
+
+  } catch (error) {
+    logError(error, req, { operation: 'list_public_venues' });
+    res.status(500).json({ error: error.message });
+  }
+});
+
 module.exports = router;
