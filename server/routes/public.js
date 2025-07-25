@@ -130,7 +130,6 @@ router.get('/public/movies', async (req, res) => {
         m.subtitles,
         m.is_35mm,
         m.has_delegation,
-        m.image_data,
         m.image_url,
         e.year as edition_year,
         e.name as edition_name
@@ -214,8 +213,6 @@ router.get('/public/movies', async (req, res) => {
           small: imageStorage.getImageUrl(movie.image_url, 'small')
         };
       }
-      // Remove image_data from response to reduce payload size
-      delete movie.image_data;
       return movie;
     });
 
@@ -271,9 +268,6 @@ router.get('/public/movies/:id', async (req, res) => {
         small: imageStorage.getImageUrl(movie.image_url, 'small')
       };
     }
-    
-    // Remove image_data from response to reduce payload size
-    delete movie.image_data;
     
     res.json({
       movie,
