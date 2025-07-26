@@ -76,8 +76,7 @@ router.put('/:id', async (req, res) => {
         year = COALESCE($2, year),
         name = $3,
         start_date = $4,
-        end_date = $5,
-        updated_at = CURRENT_TIMESTAMP
+        end_date = $5
       WHERE id = $1
       RETURNING *
     `, [id, year, name, start_date, end_date]);
