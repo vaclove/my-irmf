@@ -61,6 +61,41 @@ router.post('/', async (req, res) => {
   }
 });
 
+// Update edition
+router.put('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { year, name, start_date, end_date } = req.body;
+    
+    if (!name) {
+      return res.status(400).json({ error: 'Name is required' });
+    }
+    
+    const result = await pool.query(`
+      UPDATE editions SET 
+        year = COALESCE($2, year),
+        name = $3,
+        start_date = $4,
+        end_date = $5,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1
+      RETURNING *
+    `, [id, year, name, start_date, end_date]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Edition not found' });
+    }
+    
+    res.json(result.rows[0]);
+  } catch (error) {
+    if (error.code === '23505') {
+      return res.status(400).json({ error: 'Year already exists' });
+    }
+    logError(error, req, { operation: 'update_edition', editionId: req.params.id, formData: req.body });
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Get all guests assigned to an edition (based on year tags)
 router.get('/:id/guests', async (req, res) => {
   try {
