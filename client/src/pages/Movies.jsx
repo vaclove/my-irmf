@@ -54,7 +54,8 @@ function Movies() {
     language: '',
     subtitles: '',
     is_35mm: false,
-    has_delegation: false
+    has_delegation: false,
+    is_public: true
   })
 
   const [sections, setSections] = useState([])
@@ -179,7 +180,8 @@ function Movies() {
       language: movie.language || '',
       subtitles: movie.subtitles || '',
       is_35mm: movie.is_35mm || false,
-      has_delegation: movie.has_delegation || false
+      has_delegation: movie.has_delegation || false,
+      is_public: movie.is_public !== undefined ? movie.is_public : true
     })
     setShowForm(true)
   }
@@ -278,7 +280,8 @@ function Movies() {
       language: '',
       subtitles: '',
       is_35mm: false,
-      has_delegation: false
+      has_delegation: false,
+      is_public: true
     })
     setEditingMovie(null)
     setShowForm(false)
@@ -617,6 +620,15 @@ function Movies() {
                   />
                   <span className="text-sm text-gray-700">Has Delegation</span>
                 </label>
+                <label className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    checked={formData.is_public}
+                    onChange={(e) => setFormData({ ...formData, is_public: e.target.checked })}
+                    className="rounded text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-sm text-gray-700">Public in Catalogue</span>
+                </label>
               </div>
             </div>
           </div>
@@ -666,21 +678,6 @@ function Movies() {
 
 
           <div className="flex justify-between items-center pt-4 border-t">
-            <div className="flex space-x-3">
-              <button
-                type="submit"
-                className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 text-sm font-medium"
-              >
-                {editingMovie ? 'Update Movie' : 'Create Movie'}
-              </button>
-              <button
-                type="button"
-                onClick={resetForm}
-                className="bg-gray-300 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-400 text-sm font-medium"
-              >
-                Cancel
-              </button>
-            </div>
             {editingMovie && (
               <button
                 type="button"
@@ -690,6 +687,21 @@ function Movies() {
                 Delete Movie
               </button>
             )}
+            <div className="flex space-x-3 ml-auto">
+              <button
+                type="button"
+                onClick={resetForm}
+                className="bg-gray-300 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-400 text-sm font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 text-sm font-medium"
+              >
+                {editingMovie ? 'Update Movie' : 'Create Movie'}
+              </button>
+            </div>
           </div>
         </form>
       </Modal>
@@ -761,7 +773,7 @@ function Movies() {
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {getFilteredMovies().map((movie) => (
-                <tr key={movie.id} className="hover:bg-gray-50">
+                <tr key={movie.id} className={`hover:bg-gray-50 ${!movie.is_public ? 'bg-red-50' : ''}`}>
                   <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} text-sm font-medium text-gray-900`}>
                     <button
                       onClick={() => handleEdit(movie)}
@@ -777,7 +789,14 @@ function Movies() {
                           />
                         )}
                         <div>
-                          <div className="font-medium">{movie.name_cs}</div>
+                          <div className="font-medium flex items-center space-x-2">
+                            <span>{movie.name_cs}</span>
+                            {!movie.is_public && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">
+                                Hidden
+                              </span>
+                            )}
+                          </div>
                           {movie.name_en && (
                             <div className={`${condensedView ? 'text-xs' : 'text-sm'} text-gray-500`}>
                               {movie.name_en}

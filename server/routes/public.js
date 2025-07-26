@@ -135,7 +135,7 @@ router.get('/public/movies', async (req, res) => {
         e.name as edition_name
       FROM movies m
       JOIN editions e ON m.edition_id = e.id
-      WHERE 1=1
+      WHERE m.is_public = true
     `;
     
     const params = [];
@@ -191,7 +191,7 @@ router.get('/public/movies', async (req, res) => {
     let countQuery = `
       SELECT COUNT(*) as total 
       FROM movies m
-      WHERE 1=1
+      WHERE m.is_public = true
     `;
     
     if (edition_id) countQuery += ` AND m.edition_id = '${edition_id}'`;
@@ -247,7 +247,7 @@ router.get('/public/movies/:id', async (req, res) => {
         e.name as edition_name
       FROM movies m
       JOIN editions e ON m.edition_id = e.id
-      WHERE ${isUuid ? 'm.id' : 'm.mysql_id'} = $1
+      WHERE ${isUuid ? 'm.id' : 'm.mysql_id'} = $1 AND m.is_public = true
     `;
     
     const result = await pool.query(query, [id]);

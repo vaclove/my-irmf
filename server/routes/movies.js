@@ -144,7 +144,8 @@ router.post('/', async (req, res) => {
       language,
       subtitles,
       is_35mm,
-      has_delegation
+      has_delegation,
+      is_public = true // Default to public if not specified
     } = req.body;
     
     if (!edition_id || !name_cs) {
@@ -162,13 +163,13 @@ router.post('/', async (req, res) => {
       INSERT INTO movies (
         edition_id, catalogue_year, name_cs, name_en, synopsis_cs, synopsis_en,
         image, runtime, director, year, country, "cast",
-        premiere, section, language, subtitles, is_35mm, has_delegation
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+        premiere, section, language, subtitles, is_35mm, has_delegation, is_public
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
       RETURNING *
     `, [
       edition_id, catalogue_year, name_cs, name_en, synopsis_cs, synopsis_en,
       image, runtime, director, year, country, cast,
-      premiere, section, language, subtitles, is_35mm || false, has_delegation || false
+      premiere, section, language, subtitles, is_35mm || false, has_delegation || false, is_public
     ]);
     
     const movie = result.rows[0];
@@ -227,7 +228,8 @@ router.put('/:id', async (req, res) => {
       language,
       subtitles,
       is_35mm,
-      has_delegation
+      has_delegation,
+      is_public
     } = req.body;
     
     if (!name_cs) {
@@ -263,13 +265,14 @@ router.put('/:id', async (req, res) => {
         subtitles = $17,
         is_35mm = $18,
         has_delegation = $19,
+        is_public = $20,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = $1
       RETURNING *
     `, [
       id, edition_id, catalogue_year, name_cs, name_en, synopsis_cs, synopsis_en,
       image, runtime, director, year, country, cast,
-      premiere, section, language, subtitles, is_35mm || false, has_delegation || false
+      premiere, section, language, subtitles, is_35mm || false, has_delegation || false, is_public
     ]);
     
     if (result.rows.length === 0) {
