@@ -25,6 +25,7 @@ A complete management system for the International Road Movie Festival with gues
 - Node.js 22+
 - Docker & Docker Compose
 - Mailgun account (for email sending)
+- Good Will
 
 ### Setup
 
