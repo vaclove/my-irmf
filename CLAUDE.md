@@ -19,6 +19,10 @@ This repository contains a complete International Road Movie Festival Management
 
 **Important**: IRMF stands for "International Road Movie Festival" (not Roma Music Festival). Contact email: irmf@irmf.cz
 
+## Important Database Notes
+
+**CRITICAL**: This application is deployed on Azure PostgreSQL. DO NOT use the `uuid-ossp` extension as it's not available in Azure. Always use `gen_random_uuid()` for UUID generation, which is built-in to PostgreSQL and works in Azure.
+
 ## Development Setup
 
 This is a Node.js/JavaScript project with the following commands:

@@ -4,14 +4,83 @@ const { logError } = require('../utils/logger');
 const imageStorage = require('../services/imageStorage');
 const router = express.Router();
 
-// Confirm invitation - public route (no authentication required)
-router.post('/confirm/:token', async (req, res) => {
+// Get invitation details - public route (no authentication required)
+router.get('/invitation/:token', async (req, res) => {
   try {
     const { token } = req.params;
     
     // Find invitation by token
     const result = await pool.query(`
+      SELECT gi.*, 
+             g.first_name || ' ' || g.last_name as guest_name, 
+             g.email, 
+             e.name as edition_name,
+             e.start_date as edition_start_date,
+             e.end_date as edition_end_date,
+             gi.accommodation,
+             gi.covered_nights,
+             et.language,
+             COALESCE(
+               (SELECT tag_name FROM (
+                 SELECT t2.name as tag_name, 
+                        CASE t2.name 
+                          WHEN 'filmmaker' THEN 1
+                          WHEN 'press' THEN 2  
+                          WHEN 'staff' THEN 3
+                          WHEN 'guest' THEN 4
+                          ELSE 5
+                        END as priority
+                 FROM guest_tags gt2 
+                 JOIN tags t2 ON gt2.tag_id = t2.id 
+                 WHERE gt2.guest_id = g.id 
+                 AND t2.name IN ('filmmaker', 'press', 'staff', 'guest')
+                 ORDER BY priority
+                 LIMIT 1
+               ) sub),
+               'guest'
+             ) as category
+      FROM guest_invitations gi
+      JOIN guests g ON gi.guest_id = g.id
+      JOIN editions e ON gi.edition_id = e.id
+      LEFT JOIN email_templates et ON gi.template_id = et.id
+      WHERE gi.token = $1 AND gi.confirmed_at IS NULL
+    `, [token]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Invalid or already used confirmation token' });
+    }
+    
+    const invitation = result.rows[0];
+    
+    res.json({
+      guest_name: invitation.guest_name,
+      email: invitation.email,
+      edition_name: invitation.edition_name,
+      edition_start_date: invitation.edition_start_date,
+      edition_end_date: invitation.edition_end_date,
+      category: invitation.category,
+      accommodation: invitation.accommodation,
+      covered_nights: invitation.covered_nights,
+      language: invitation.language || 'english'
+    });
+    
+  } catch (error) {
+    logError(error, req, { operation: 'get_invitation_details', token: req.params.token });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Confirm invitation - public route (no authentication required)
+router.post('/confirm/:token', async (req, res) => {
+  try {
+    const { token } = req.params;
+    const { accommodation_dates = [] } = req.body;
+    
+    // Find invitation by token
+    const result = await pool.query(`
       SELECT gi.*, g.first_name || ' ' || g.last_name as name, g.email, e.name as edition_name,
+             gi.accommodation,
+             gi.covered_nights,
              COALESCE(
                (SELECT tag_name FROM (
                  SELECT t2.name as tag_name, 
@@ -41,19 +110,55 @@ router.post('/confirm/:token', async (req, res) => {
       return res.status(404).json({ error: 'Invalid or already used confirmation token' });
     }
     
-    // Update confirmation
-    await pool.query(
-      'UPDATE guest_invitations SET confirmed_at = CURRENT_TIMESTAMP WHERE token = $1',
-      [token]
-    );
-    
     const assignment = result.rows[0];
+    
+    // Start transaction for updating confirmation and accommodation dates
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      
+      // Update confirmation
+      await client.query(
+        'UPDATE guest_invitations SET confirmed_at = CURRENT_TIMESTAMP WHERE token = $1',
+        [token]
+      );
+      
+      // If accommodation dates are provided, store them
+      if (assignment.accommodation && accommodation_dates.length > 0) {
+        // Create accommodation_selections table if it doesn't exist
+        await client.query(`
+          CREATE TABLE IF NOT EXISTS accommodation_selections (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            invitation_id UUID REFERENCES guest_invitations(id) ON DELETE CASCADE,
+            selected_date DATE NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(invitation_id, selected_date)
+          )
+        `);
+        
+        // Insert selected accommodation dates
+        for (const date of accommodation_dates) {
+          await client.query(
+            'INSERT INTO accommodation_selections (invitation_id, selected_date) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+            [assignment.id, date]
+          );
+        }
+      }
+      
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
     
     res.json({
       message: 'Invitation confirmed successfully',
       guest: assignment.name,
       edition: assignment.edition_name,
       category: assignment.category,
+      accommodation_dates: accommodation_dates,
       confirmed_at: new Date().toISOString()
     });
     
