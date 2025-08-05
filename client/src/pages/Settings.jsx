@@ -112,22 +112,25 @@ const Settings = () => {
 
 
 
-        {/* Placeholder for future settings */}
-        <div className="bg-gray-50 rounded-lg shadow-sm border p-6 opacity-50">
+        {/* Accommodation Settings */}
+        <Link
+          to="/settings/accommodation"
+          className="block bg-white rounded-lg shadow-sm border hover:shadow-md transition-shadow p-6"
+        >
           <div className="flex items-center mb-4">
             <div className="flex-shrink-0">
-              <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center">
-                <span className="text-gray-400 text-lg">⚙️</span>
+              <div className="w-8 h-8 bg-yellow-100 rounded-full flex items-center justify-center">
+                <span className="text-yellow-600 text-lg">🏨</span>
               </div>
             </div>
             <div className="ml-4">
-              <h3 className="text-lg font-medium text-gray-500">General Settings</h3>
+              <h3 className="text-lg font-medium text-gray-900">Accommodation</h3>
             </div>
           </div>
-          <p className="text-sm text-gray-500">
-            System preferences and configuration options. Coming soon.
+          <p className="text-sm text-gray-600">
+            Manage hotels, room types, and availability for festival accommodation.
           </p>
-        </div>
+        </Link>
 
         <div className="bg-gray-50 rounded-lg shadow-sm border p-6 opacity-50">
           <div className="flex items-center mb-4">

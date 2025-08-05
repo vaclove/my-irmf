@@ -17,6 +17,7 @@ import AuditLogs from './pages/AuditLogs'
 import BadgeSettings from './pages/BadgeSettings'
 import Settings from './pages/Settings'
 import Sections from './pages/Sections'
+import AccommodationSettings from './pages/AccommodationSettings'
 import Confirmation from './pages/Confirmation'
 
 function App() {
@@ -46,6 +47,7 @@ function App() {
                   <Route path="/badges/:editionId" element={<BadgeSettings />} />
                   <Route path="/settings" element={<Settings />} />
                   <Route path="/settings/sections" element={<Sections />} />
+                  <Route path="/settings/accommodation" element={<AccommodationSettings />} />
                   <Route path="/audit" element={<AuditLogs />} />
                 </Routes>
               </Layout>

@@ -54,6 +54,7 @@ export const invitationApi = {
   getByEdition: (editionId) => api.get(`/invitations/edition/${editionId}`),
   getAssignedNotInvited: (editionId) => api.get(`/invitations/edition/${editionId}/assigned-not-invited`),
   getDetails: (token) => publicApi.get(`/invitation/${token}`),
+  getAccommodationOptions: (token) => publicApi.get(`/accommodation-options/${token}`),
   confirm: (token, data = {}) => publicApi.post(`/confirm/${token}`, data),
   getStatus: (guestId, editionId) => publicApi.get(`/status/${guestId}/${editionId}`),
 }
@@ -133,6 +134,29 @@ const sectionApi = {
   delete: (id) => api.delete(`/sections/${id}`),
   reorder: (editionId, data) => api.put(`/sections/edition/${editionId}/reorder`, data),
   initialize: (editionId) => api.post(`/sections/edition/${editionId}/initialize`),
+}
+
+// Accommodation API
+export const accommodationApi = {
+  // Hotels
+  getHotels: (editionId) => api.get(`/accommodation/hotels/${editionId}`),
+  createHotel: (data) => api.post('/accommodation/hotels', data),
+  updateHotel: (id, data) => api.put(`/accommodation/hotels/${id}`, data),
+  deleteHotel: (id) => api.delete(`/accommodation/hotels/${id}`),
+  
+  // Room Types
+  getRoomTypes: (hotelId) => api.get(`/accommodation/room-types/${hotelId}`),
+  createRoomType: (data) => api.post('/accommodation/room-types', data),
+  updateRoomType: (id, data) => api.put(`/accommodation/room-types/${id}`, data),
+  deleteRoomType: (id) => api.delete(`/accommodation/room-types/${id}`),
+  
+  // Availability
+  getAvailability: (roomTypeId, params = {}) => api.get(`/accommodation/availability/${roomTypeId}`, { params }),
+  updateAvailability: (id, data) => api.put(`/accommodation/availability/${id}`, data),
+  bulkUpdateAvailability: (data) => api.post('/accommodation/availability/bulk', data),
+  
+  // Overview
+  getOverview: (editionId) => api.get(`/accommodation/overview/${editionId}`)
 }
 
 // Export combined API object

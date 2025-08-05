@@ -650,6 +650,109 @@ router.get('/public/programming/:id', async (req, res) => {
   }
 });
 
+// GET /api/accommodation-options/:token - Get available accommodation for invitation
+router.get('/accommodation-options/:token', async (req, res) => {
+  try {
+    const { token } = req.params;
+    
+    // First verify the invitation exists and get edition info
+    const invitationResult = await pool.query(`
+      SELECT gi.*, e.id as edition_id, e.start_date, e.end_date
+      FROM guest_invitations gi
+      JOIN editions e ON gi.edition_id = e.id
+      WHERE gi.token = $1 AND gi.confirmed_at IS NULL
+    `, [token]);
+    
+    if (invitationResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Invalid or already used confirmation token' });
+    }
+    
+    const invitation = invitationResult.rows[0];
+    
+    // Get available accommodation options for this edition
+    const accommodationResult = await pool.query(`
+      SELECT 
+        h.id as hotel_id,
+        h.name as hotel_name,
+        h.description as hotel_description,
+        rt.id as room_type_id,
+        rt.name as room_type_name,
+        rt.description as room_type_description,
+        rt.capacity,
+        rt.price_per_night,
+        rt.currency,
+        rt.amenities,
+        ra.available_date,
+        ra.available_rooms,
+        ra.total_rooms
+      FROM hotels h
+      JOIN room_types rt ON h.id = rt.hotel_id
+      JOIN room_availability ra ON rt.id = ra.room_type_id
+      WHERE h.edition_id = $1 
+        AND h.active = true 
+        AND rt.active = true
+        AND ra.available_rooms > 0
+        AND ra.available_date >= $2 
+        AND ra.available_date <= $3
+      ORDER BY h.sort_order, h.name, rt.sort_order, rt.name, ra.available_date
+    `, [invitation.edition_id, invitation.start_date, invitation.end_date]);
+    
+    // Group by hotel and room type
+    const accommodationOptions = {};
+    
+    accommodationResult.rows.forEach(row => {
+      const hotelKey = row.hotel_id;
+      const roomTypeKey = row.room_type_id;
+      
+      if (!accommodationOptions[hotelKey]) {
+        accommodationOptions[hotelKey] = {
+          hotel_id: row.hotel_id,
+          hotel_name: row.hotel_name,
+          hotel_description: row.hotel_description,
+          room_types: {}
+        };
+      }
+      
+      if (!accommodationOptions[hotelKey].room_types[roomTypeKey]) {
+        accommodationOptions[hotelKey].room_types[roomTypeKey] = {
+          room_type_id: row.room_type_id,
+          room_type_name: row.room_type_name,
+          room_type_description: row.room_type_description,
+          capacity: row.capacity,
+          price_per_night: row.price_per_night,
+          currency: row.currency,
+          amenities: row.amenities,
+          available_dates: []
+        };
+      }
+      
+      accommodationOptions[hotelKey].room_types[roomTypeKey].available_dates.push({
+        date: row.available_date,
+        available_rooms: row.available_rooms,
+        total_rooms: row.total_rooms
+      });
+    });
+    
+    // Convert to array format
+    const hotels = Object.values(accommodationOptions).map(hotel => ({
+      ...hotel,
+      room_types: Object.values(hotel.room_types)
+    }));
+    
+    res.json({
+      hotels,
+      edition_dates: {
+        start_date: invitation.start_date,
+        end_date: invitation.end_date
+      }
+    });
+    
+  } catch (error) {
+    logError(error, req, { operation: 'get_accommodation_options', token: req.params.token });
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // GET /api/public/venues - List available venues
 router.get('/public/venues', async (req, res) => {
   try {

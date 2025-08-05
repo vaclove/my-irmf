@@ -26,6 +26,7 @@ const venueRoutes = require('./routes/venues');
 const blockRoutes = require('./routes/blocks');
 const programmingRoutes = require('./routes/programming');
 const sectionRoutes = require('./routes/sections');
+const accommodationRoutes = require('./routes/accommodation');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -122,6 +123,7 @@ app.use('/api/venues', requireIrmfDomain, venueRoutes);
 app.use('/api/blocks', requireIrmfDomain, blockRoutes);
 app.use('/api/programming', requireIrmfDomain, programmingRoutes);
 app.use('/api/sections', requireIrmfDomain, sectionRoutes);
+app.use('/api/accommodation', requireIrmfDomain, accommodationRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
