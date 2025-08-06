@@ -59,6 +59,14 @@ const AccommodationSettings = () => {
     }
   }, [selectedEdition]);
 
+  // Auto-select hotel when switching to Room Types tab if there's only one hotel
+  useEffect(() => {
+    if (activeTab === 'rooms' && hotels.length === 1 && !selectedHotel) {
+      setSelectedHotel(hotels[0]);
+      loadRoomTypes(hotels[0].id);
+    }
+  }, [activeTab, hotels, selectedHotel]);
+
   const loadData = async () => {
     setLoading(true);
     try {
@@ -66,8 +74,16 @@ const AccommodationSettings = () => {
         accommodationApi.getHotels(selectedEdition.id),
         accommodationApi.getOverview(selectedEdition.id)
       ]);
-      setHotels(hotelsRes.data.hotels);
+      const hotelsData = hotelsRes.data.hotels;
+      setHotels(hotelsData);
       setOverview(overviewRes.data.overview);
+      
+      // Auto-select hotel if there's only one and we're on rooms tab or no hotel is selected
+      if (hotelsData.length === 1 && (!selectedHotel || activeTab === 'rooms')) {
+        setSelectedHotel(hotelsData[0]);
+        // Load room types for the auto-selected hotel
+        loadRoomTypes(hotelsData[0].id);
+      }
     } catch (error) {
       setError('Failed to load accommodation data');
       console.error('Error loading accommodation data:', error);

@@ -1113,12 +1113,49 @@ function Invitations() {
                             <div className="grid grid-cols-3 gap-2 max-h-48 overflow-y-auto">
                               {(() => {
                                 // Get edition dates
-                                const startDate = new Date(selectedInvitation.edition?.start_date || selectedEdition?.start_date)
-                                const endDate = new Date(selectedInvitation.edition?.end_date || selectedEdition?.end_date)
-                                const dates = []
+                                if (!selectedEdition?.start_date || !selectedEdition?.end_date) {
+                                  return []
+                                }
                                 
-                                for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
-                                  dates.push(new Date(d).toISOString().split('T')[0])
+                                // Generate dates between start and end
+                                const startDateStr = selectedEdition.start_date
+                                const endDateStr = selectedEdition.end_date
+                                
+                                // Extract just the date part (handle both ISO datetime strings and date-only strings)
+                                const startDateOnly = startDateStr.includes('T') ? startDateStr.split('T')[0] : startDateStr
+                                const endDateOnly = endDateStr.includes('T') ? endDateStr.split('T')[0] : endDateStr
+                                
+                                // For ISO datetime strings, we need to convert from UTC to local date
+                                // The issue is that "2025-10-15T22:00:00.000Z" represents 2025-10-16 in local time (UTC+2)
+                                const adjustDateIfNeeded = (dateStr, isoStr) => {
+                                  if (isoStr.includes('T')) {
+                                    // This is an ISO string - parse it as local time and get the date
+                                    const date = new Date(isoStr)
+                                    const year = date.getFullYear()
+                                    const month = String(date.getMonth() + 1).padStart(2, '0')
+                                    const day = String(date.getDate()).padStart(2, '0')
+                                    return `${year}-${month}-${day}`
+                                  }
+                                  return dateStr
+                                }
+                                
+                                const correctedStartDate = adjustDateIfNeeded(startDateOnly, startDateStr)
+                                const correctedEndDate = adjustDateIfNeeded(endDateOnly, endDateStr)
+                                
+                                // Generate date range using corrected dates
+                                const dates = []
+                                const [startYear, startMonth, startDay] = correctedStartDate.split('-').map(Number)
+                                const [endYear, endMonth, endDay] = correctedEndDate.split('-').map(Number)
+                                
+                                const currentDate = new Date(startYear, startMonth - 1, startDay)
+                                const endDate = new Date(endYear, endMonth - 1, endDay)
+                                
+                                while (currentDate <= endDate) {
+                                  const year = currentDate.getFullYear()
+                                  const month = String(currentDate.getMonth() + 1).padStart(2, '0')
+                                  const day = String(currentDate.getDate()).padStart(2, '0')
+                                  dates.push(`${year}-${month}-${day}`)
+                                  currentDate.setDate(currentDate.getDate() + 1)
                                 }
                                 
                                 return dates.map(date => {

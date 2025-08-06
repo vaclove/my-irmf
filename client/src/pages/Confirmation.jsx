@@ -120,8 +120,29 @@ function Confirmation() {
       // Initialize all nights in the edition period if accommodation is included
       if (response.data.accommodation && response.data.covered_nights > 0) {
         const nightsArray = []
-        const startDate = new Date(response.data.edition_start_date)
-        const endDate = new Date(response.data.edition_end_date)
+        
+        // Parse dates manually to avoid timezone issues
+        const parseEditionDate = (dateStr) => {
+          if (dateStr.includes('T')) {
+            // ISO datetime string - convert to local date
+            const date = new Date(dateStr)
+            return {
+              year: date.getFullYear(),
+              month: date.getMonth() + 1,
+              day: date.getDate()
+            }
+          } else {
+            // Simple date string
+            const [year, month, day] = dateStr.split('-').map(Number)
+            return { year, month, day }
+          }
+        }
+        
+        const startDateParts = parseEditionDate(response.data.edition_start_date)
+        const endDateParts = parseEditionDate(response.data.edition_end_date)
+        
+        const startDate = new Date(startDateParts.year, startDateParts.month - 1, startDateParts.day)
+        const endDate = new Date(endDateParts.year, endDateParts.month - 1, endDateParts.day)
         
         // Generate all nights from start to end date
         let currentDate = new Date(startDate)
@@ -131,8 +152,14 @@ function Confirmation() {
           const dayNum = currentDate.getDate()
           const lang = response.data.language || 'english'
           
+          // Format date as YYYY-MM-DD without timezone conversion
+          const year = currentDate.getFullYear()
+          const month = String(currentDate.getMonth() + 1).padStart(2, '0')
+          const day = String(currentDate.getDate()).padStart(2, '0')
+          const dateStr = `${year}-${month}-${day}`
+          
           nightsArray.push({
-            date: currentDate.toISOString().split('T')[0],
+            date: dateStr,
             selected: false, // Start with none selected
             dayName: translations[lang].weekdays[dayIndex],
             dateFormatted: `${dayNum}. ${translations[lang].months[monthIndex]}`
@@ -409,7 +436,9 @@ function Confirmation() {
                 </p>
                 <ul className="text-sm text-gray-600 ml-4">
                   {confirmationData.accommodation_dates.map((date, index) => {
-                    const dateObj = new Date(date)
+                    // Parse date manually to avoid timezone issues
+                    const [year, month, day] = date.split('-')
+                    const dateObj = new Date(parseInt(year), parseInt(month) - 1, parseInt(day))
                     const dayIndex = dateObj.getDay()
                     const monthIndex = dateObj.getMonth()
                     const dayNum = dateObj.getDate()
