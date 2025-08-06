@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { useEdition } from '../contexts/EditionContext'
 import { invitationApi, badgeApi, guestApi, accommodationApi } from '../utils/api'
 import { useToast } from '../contexts/ToastContext'
@@ -6,7 +6,7 @@ import { printBadge } from '../utils/badgePrinter'
 import Avatar from '../components/Avatar'
 import InvitationDialog from '../components/InvitationDialog'
 import Modal from '../components/Modal'
-import PhotoUpload from '../components/PhotoUpload'
+import GuestModal from '../components/GuestModal'
 
 function Invitations() {
   const { selectedEdition } = useEdition()
@@ -23,24 +23,11 @@ function Invitations() {
   const [showInvitationDialog, setShowInvitationDialog] = useState(false)
   const [editingGuest, setEditingGuest] = useState(null)
   const [showGuestForm, setShowGuestForm] = useState(false)
-  const [generatingGreeting, setGeneratingGreeting] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [condensedView, setCondensedView] = useState(() => {
     return localStorage.getItem('invitationsCondensedView') === 'true'
   })
   const [showColumnSettings, setShowColumnSettings] = useState(false)
-  const [formData, setFormData] = useState({ 
-    first_name: '', 
-    last_name: '',
-    email: '', 
-    phone: '', 
-    language: 'english', 
-    company: '', 
-    notes: '',
-    greeting: '',
-    greeting_auto_generated: true,
-    photo: null
-  })
   
   // Room assignment states
   const [roomAssignments, setRoomAssignments] = useState([])
@@ -453,93 +440,13 @@ function Invitations() {
   }
 
   // Guest editing functions
-  const generateGreeting = useCallback(async (firstName, lastName, language) => {
-    if (!firstName || !lastName) return
-    
-    setGeneratingGreeting(true)
-    try {
-      const response = await guestApi.generateGreeting({ firstName, lastName, language })
-      if (response.data.primary) {
-        setFormData(prev => {
-          if (prev.greeting_auto_generated) {
-            return {
-              ...prev,
-              greeting: response.data.primary.greeting,
-              greeting_auto_generated: true
-            }
-          }
-          return prev
-        })
-      }
-    } catch (error) {
-      console.error('Error generating greeting:', error)
-    } finally {
-      setGeneratingGreeting(false)
-    }
-  }, [])
 
   const handleEditGuest = (guest) => {
     setEditingGuest(guest)
-    
-    const hasExistingGreeting = guest.greeting && guest.greeting.trim() !== ''
-    const shouldAutoGenerate = !hasExistingGreeting || guest.greeting_auto_generated !== false
-    
-    setFormData({ 
-      first_name: guest.first_name || '', 
-      last_name: guest.last_name || '',
-      email: guest.email, 
-      phone: guest.phone || '',
-      language: guest.language || 'english',
-      company: guest.company || '',
-      notes: guest.notes || '',
-      greeting: guest.greeting || '',
-      greeting_auto_generated: shouldAutoGenerate,
-      photo: guest.photo || null
-    })
     setShowGuestForm(true)
   }
 
-  const handleSubmitGuest = async (e) => {
-    e.preventDefault()
-    try {
-      await guestApi.update(editingGuest.id, formData)
-      success(`Guest ${formData.first_name} ${formData.last_name} updated successfully!`)
-      fetchInvitations()
-      fetchAssignedNotInvited()
-      resetGuestForm()
-    } catch (error) {
-      console.error('Error saving guest:', error)
-      showError('Failed to save guest: ' + (error.response?.data?.error || error.message))
-    }
-  }
 
-  const resetGuestForm = () => {
-    setFormData({ 
-      first_name: '', 
-      last_name: '',
-      email: '', 
-      phone: '', 
-      language: 'english', 
-      company: '', 
-      notes: '',
-      greeting: '',
-      greeting_auto_generated: true,
-      photo: null
-    })
-    setEditingGuest(null)
-    setShowGuestForm(false)
-  }
-
-  // Debounced greeting generation trigger
-  useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      if (formData.first_name && formData.last_name && formData.greeting_auto_generated) {
-        generateGreeting(formData.first_name, formData.last_name, formData.language)
-      }
-    }, 300)
-
-    return () => clearTimeout(timeoutId)
-  }, [formData.first_name, formData.last_name, formData.language, formData.greeting_auto_generated, generateGreeting])
 
   const handlePrintBadge = async (guestId) => {
     try {
@@ -962,8 +869,20 @@ function Invitations() {
                           size={condensedView ? "xs" : "sm"}
                         />
                         <div className={condensedView ? 'ml-2' : 'ml-4'}>
-                          <div className="text-sm font-medium text-gray-900 hover:text-blue-600 transition-colors">
+                          <div className="text-sm font-medium text-gray-900 hover:text-blue-600 transition-colors flex items-center">
                             {invitation.guest?.first_name} {invitation.guest?.last_name}
+                            {invitation.guest?.secondary_relationships && invitation.guest?.secondary_relationships.length > 0 && (
+                              <span 
+                                className="ml-2 inline-flex items-center text-xs font-medium text-blue-600"
+                                title={`Related to: ${invitation.guest?.secondary_relationships.map(rel => 
+                                  `${rel.primary_guest_name} (${rel.relationship_type} for ${rel.edition_year})`
+                                ).join(', ')}`}
+                              >
+                                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                  <path fillRule="evenodd" d="M12.586 4.586a2 2 0 112.828 2.828l-3 3a2 2 0 01-2.828 0 1 1 0 00-1.414 1.414 4 4 0 005.656 0l3-3a4 4 0 00-5.656-5.656l-1.5 1.5a1 1 0 101.414 1.414l1.5-1.5zm-5 5a2 2 0 012.828 0 1 1 0 101.414-1.414 4 4 0 00-5.656 0l-3 3a4 4 0 105.656 5.656l1.5-1.5a1 1 0 10-1.414-1.414l-1.5 1.5a2 2 0 11-2.828-2.828l3-3z" clipRule="evenodd" />
+                                </svg>
+                              </span>
+                            )}
                           </div>
                           <div className={`${condensedView ? 'text-xs' : 'text-sm'} text-gray-500`}>
                             {invitation.guest?.company}
@@ -1135,8 +1054,20 @@ function Invitations() {
                               size={condensedView ? "xs" : "sm"}
                             />
                             <div className={condensedView ? 'ml-2' : 'ml-4'}>
-                              <div className="text-sm font-medium text-gray-900 hover:text-blue-600 transition-colors">
+                              <div className="text-sm font-medium text-gray-900 hover:text-blue-600 transition-colors flex items-center">
                                 {guest.first_name} {guest.last_name}
+                                {guest.secondary_relationships && guest.secondary_relationships.length > 0 && (
+                                  <span 
+                                    className="ml-2 inline-flex items-center text-xs font-medium text-blue-600"
+                                    title={`Related to: ${guest.secondary_relationships.map(rel => 
+                                      `${rel.primary_guest_name} (${rel.relationship_type} for ${rel.edition_year})`
+                                    ).join(', ')}`}
+                                  >
+                                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                      <path fillRule="evenodd" d="M12.586 4.586a2 2 0 112.828 2.828l-3 3a2 2 0 01-2.828 0 1 1 0 00-1.414 1.414 4 4 0 005.656 0l3-3a4 4 0 00-5.656-5.656l-1.5 1.5a1 1 0 101.414 1.414l1.5-1.5zm-5 5a2 2 0 012.828 0 1 1 0 101.414-1.414 4 4 0 00-5.656 0l-3 3a4 4 0 105.656 5.656l1.5-1.5a1 1 0 10-1.414-1.414l-1.5 1.5a2 2 0 11-2.828-2.828l3-3z" clipRule="evenodd" />
+                                    </svg>
+                                  </span>
+                                )}
                               </div>
                               <div className={`${condensedView ? 'text-xs' : 'text-sm'} text-gray-500`}>
                                 {guest.company}
@@ -1728,166 +1659,28 @@ function Invitations() {
       />
 
       {/* Guest Edit Modal */}
-      <Modal
+      <GuestModal
         isOpen={showGuestForm}
-        onClose={resetGuestForm}
-        title={editingGuest ? 'Edit Guest' : 'Add New Guest'}
-        size="large"
-      >
-        <form onSubmit={handleSubmitGuest} className="space-y-3">
-          <div className="flex gap-6">
-            {/* Left Column - Photo */}
-            <div className="flex-shrink-0">
-              <PhotoUpload
-                currentPhoto={formData.photo}
-                onPhotoChange={(photo) => setFormData({ ...formData, photo })}
-                guestId={editingGuest?.id}
-                guestData={editingGuest}
-              />
-            </div>
-            
-            {/* Right Column - Form Fields */}
-            <div className="flex-1 space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">First Name</label>
-                  <input
-                    type="text"
-                    required
-                    value={formData.first_name}
-                    onChange={(e) => setFormData({ ...formData, first_name: e.target.value })}
-                    className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Last Name</label>
-                  <input
-                    type="text"
-                    required
-                    value={formData.last_name}
-                    onChange={(e) => setFormData({ ...formData, last_name: e.target.value })}
-                    className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                  />
-                </div>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-                  <input
-                    type="email"
-                    required
-                    value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
-                  <input
-                    type="tel"
-                    value={formData.phone}
-                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                    className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                  />
-                </div>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Language</label>
-                  <select
-                    value={formData.language}
-                    onChange={(e) => setFormData({ ...formData, language: e.target.value })}
-                    className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                  >
-                    <option value="english">English</option>
-                    <option value="czech">Czech</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Company</label>
-                  <input
-                    type="text"
-                    value={formData.company}
-                    onChange={(e) => setFormData({ ...formData, company: e.target.value })}
-                    className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                    placeholder="Optional"
-                  />
-                </div>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Greeting
-                  {generatingGreeting && (
-                    <span className="ml-2 text-xs text-blue-600">Generating...</span>
-                  )}
-                  {formData.greeting_auto_generated && (
-                    <span className="ml-2 text-xs text-green-600">Auto-generated</span>
-                  )}
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={formData.greeting}
-                    onChange={(e) => setFormData({ 
-                      ...formData, 
-                      greeting: e.target.value,
-                      greeting_auto_generated: false 
-                    })}
-                    className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                    placeholder="e.g., Dear Mr. Smith"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (formData.first_name && formData.last_name) {
-                        setFormData(prev => ({ ...prev, greeting_auto_generated: true }))
-                        generateGreeting(formData.first_name, formData.last_name, formData.language)
-                      }
-                    }}
-                    disabled={!formData.first_name || !formData.last_name || generatingGreeting}
-                    className="px-3 py-2 text-sm bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 disabled:opacity-50 flex-shrink-0"
-                    title="Regenerate greeting"
-                  >
-                    ↻
-                  </button>
-                </div>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-                <textarea
-                  value={formData.notes}
-                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                  rows="2"
-                  className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                  placeholder="Optional notes about the guest..."
-                />
-              </div>
-            </div>
-          </div>
-          
-          {/* Action Buttons */}
-          <div className="flex justify-end space-x-3 pt-4 border-t">
-            <button
-              type="button"
-              onClick={resetGuestForm}
-              className="bg-gray-300 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-400 text-sm font-medium"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 text-sm font-medium"
-            >
-              Update Guest
-            </button>
-          </div>
-        </form>
-      </Modal>
-
+        onClose={() => {
+          setShowGuestForm(false)
+          setEditingGuest(null)
+        }}
+        guest={editingGuest}
+        onUpdate={(updatedGuest) => {
+          // Refresh invitations data to get updated guest info
+          fetchInvitations()
+          fetchAssignedNotInvited()
+          setShowGuestForm(false)
+          setEditingGuest(null)
+        }}
+        onDelete={(guestId) => {
+          // Refresh data after guest deletion
+          fetchInvitations()
+          fetchAssignedNotInvited()
+          setShowGuestForm(false)
+          setEditingGuest(null)
+        }}
+      />
       {/* Room Assignment Modal */}
       <Modal
         isOpen={showRoomAssignmentModal}

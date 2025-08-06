@@ -7,8 +7,7 @@ import TagDeleteButton from '../components/TagDeleteButton'
 import PhotoUpload from '../components/PhotoUpload'
 import Avatar from '../components/Avatar'
 import Modal from '../components/Modal'
-import GuestRelationships from '../components/GuestRelationships'
-import MovieDelegations from '../components/MovieDelegations'
+import GuestModal from '../components/GuestModal'
 import { badgeApi } from '../utils/api'
 import { printBadge } from '../utils/badgePrinter'
 
@@ -50,7 +49,6 @@ function Guests() {
     photo: null
   })
   const [generatingGreeting, setGeneratingGreeting] = useState(false)
-  const [activeTab, setActiveTab] = useState('details')
 
   useEffect(() => {
     fetchGuests()
@@ -317,7 +315,6 @@ function Guests() {
     })
     setEditingGuest(null)
     setShowForm(false)
-    setActiveTab('details')
   }
 
   if (loading) {
@@ -508,241 +505,26 @@ function Guests() {
         </div>
       )}
 
-      <Modal
+      <GuestModal
         isOpen={showForm}
         onClose={resetForm}
-        title={editingGuest ? `${editingGuest.first_name} ${editingGuest.last_name}` : 'Add New Guest'}
-        size="large"
-      >
-        <div className="space-y-4">
-          {/* Tabs */}
-          <div className="border-b border-gray-200">
-            <nav className="-mb-px flex space-x-8">
-              <button
-                onClick={() => setActiveTab('details')}
-                className={`py-2 px-1 border-b-2 font-medium text-sm ${
-                  activeTab === 'details'
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                Details
-              </button>
-              {editingGuest && (
-                <>
-                  <button
-                    onClick={() => setActiveTab('relationships')}
-                    className={`py-2 px-1 border-b-2 font-medium text-sm ${
-                      activeTab === 'relationships'
-                        ? 'border-blue-500 text-blue-600'
-                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                    }`}
-                  >
-                    Relationships
-                  </button>
-                  <button
-                    onClick={() => setActiveTab('movies')}
-                    className={`py-2 px-1 border-b-2 font-medium text-sm ${
-                      activeTab === 'movies'
-                        ? 'border-blue-500 text-blue-600'
-                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                    }`}
-                  >
-                    Movies
-                  </button>
-                </>
-              )}
-            </nav>
-          </div>
-
-          {/* Tab Content */}
-          {activeTab === 'details' && (
-            <form onSubmit={handleSubmit} className="space-y-3">
-              <div className="flex gap-6">
-                {/* Left Column - Photo */}
-                <div className="flex-shrink-0">
-                  <PhotoUpload
-                    currentPhoto={formData.photo}
-                    onPhotoChange={(photo) => setFormData({ ...formData, photo })}
-                    guestId={editingGuest?.id}
-                    guestData={editingGuest}
-                  />
-                </div>
-                
-                {/* Right Column - Form Fields */}
-                <div className="flex-1 space-y-3">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">First Name</label>
-                      <input
-                        type="text"
-                        required
-                        value={formData.first_name}
-                        onChange={(e) => setFormData({ ...formData, first_name: e.target.value })}
-                        className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Last Name</label>
-                      <input
-                        type="text"
-                        required
-                        value={formData.last_name}
-                        onChange={(e) => setFormData({ ...formData, last_name: e.target.value })}
-                        className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                      />
-                    </div>
-                  </div>
-                  
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-                      <input
-                        type="email"
-                        required
-                        value={formData.email}
-                        onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                        className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
-                      <input
-                        type="tel"
-                        value={formData.phone}
-                        onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                        className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                      />
-                    </div>
-                  </div>
-                  
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Language</label>
-                      <select
-                        value={formData.language}
-                        onChange={(e) => setFormData({ ...formData, language: e.target.value })}
-                        className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                      >
-                        <option value="english">English</option>
-                        <option value="czech">Czech</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Company</label>
-                      <input
-                        type="text"
-                        value={formData.company}
-                        onChange={(e) => setFormData({ ...formData, company: e.target.value })}
-                        className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                        placeholder="Optional"
-                      />
-                    </div>
-                  </div>
-                  
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Greeting
-                      {generatingGreeting && (
-                        <span className="ml-2 text-xs text-blue-600">Generating...</span>
-                      )}
-                      {formData.greeting_auto_generated && (
-                        <span className="ml-2 text-xs text-green-600">Auto-generated</span>
-                      )}
-                    </label>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={formData.greeting}
-                        onChange={(e) => setFormData({ 
-                          ...formData, 
-                          greeting: e.target.value,
-                          greeting_auto_generated: false 
-                        })}
-                        className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                        placeholder="e.g., Dear Mr. Smith"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (formData.first_name && formData.last_name) {
-                            setFormData(prev => ({ ...prev, greeting_auto_generated: true }))
-                            generateGreeting(formData.first_name, formData.last_name, formData.language)
-                          }
-                        }}
-                        disabled={!formData.first_name || !formData.last_name || generatingGreeting}
-                        className="px-3 py-2 text-sm bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 disabled:opacity-50 flex-shrink-0"
-                        title="Regenerate greeting"
-                      >
-                        ↻
-                      </button>
-                    </div>
-                  </div>
-                  
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-                    <textarea
-                      value={formData.notes}
-                      onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                      rows="2"
-                      className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                      placeholder="Optional notes about the guest..."
-                    />
-                  </div>
-                </div>
-              </div>
-              
-              {/* Action Buttons */}
-              <div className="flex justify-between items-center pt-4 border-t">
-                <div className="flex space-x-3">
-                  <button
-                    type="submit"
-                    className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 text-sm font-medium"
-                  >
-                    {editingGuest ? 'Update Guest' : 'Create Guest'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={resetForm}
-                    className="bg-gray-300 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-400 text-sm font-medium"
-                  >
-                    Cancel
-                  </button>
-                </div>
-                {editingGuest && (
-                  <button
-                    type="button"
-                    onClick={() => handleDelete(editingGuest.id)}
-                    className="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700 text-sm font-medium"
-                  >
-                    Delete Guest
-                  </button>
-                )}
-              </div>
-            </form>
-          )}
-
-          {activeTab === 'relationships' && editingGuest && (
-            <GuestRelationships 
-              selectedGuest={editingGuest}
-              onUpdate={() => {
-                // Refresh guest data if needed
-                fetchGuests()
-              }}
-            />
-          )}
-
-          {activeTab === 'movies' && editingGuest && (
-            <MovieDelegations 
-              selectedGuest={editingGuest}
-              onUpdate={() => {
-                // Refresh guest data if needed
-                fetchGuests()
-              }}
-            />
-          )}
-        </div>
-      </Modal>
+        guest={editingGuest}
+        onUpdate={(updatedGuest) => {
+          // Update the guest in the local state
+          if (editingGuest) {
+            setGuests(prev => prev.map(g => g.id === updatedGuest.id ? updatedGuest : g))
+          } else {
+            setGuests(prev => [...prev, updatedGuest])
+          }
+          setShowForm(false)
+          setEditingGuest(null)
+        }}
+        onDelete={(guestId) => {
+          setGuests(prev => prev.filter(g => g.id !== guestId))
+          setShowForm(false)
+          setEditingGuest(null)
+        }}
+      />
 
       <div className="bg-white shadow rounded-lg">
         <div className="px-6 py-4 border-b border-gray-200">
@@ -812,7 +594,21 @@ function Guests() {
                         size={condensedView ? "xs" : "sm"}
                       />
                       <div>
-                        <div className="text-sm font-medium">{guest.first_name} {guest.last_name}</div>
+                        <div className="text-sm font-medium flex items-center">
+                          {guest.first_name} {guest.last_name}
+                          {guest.secondary_relationships && guest.secondary_relationships.length > 0 && (
+                            <span 
+                              className="ml-2 inline-flex items-center text-xs font-medium text-blue-600"
+                              title={`Related to: ${guest.secondary_relationships.map(rel => 
+                                `${rel.primary_guest_name} (${rel.relationship_type} for ${rel.edition_year})`
+                              ).join(', ')}`}
+                            >
+                              <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                <path fillRule="evenodd" d="M12.586 4.586a2 2 0 112.828 2.828l-3 3a2 2 0 01-2.828 0 1 1 0 00-1.414 1.414 4 4 0 005.656 0l3-3a4 4 0 00-5.656-5.656l-1.5 1.5a1 1 0 101.414 1.414l1.5-1.5zm-5 5a2 2 0 012.828 0 1 1 0 101.414-1.414 4 4 0 00-5.656 0l-3 3a4 4 0 105.656 5.656l1.5-1.5a1 1 0 10-1.414-1.414l-1.5 1.5a2 2 0 11-2.828-2.828l3-3z" clipRule="evenodd" />
+                              </svg>
+                            </span>
+                          )}
+                        </div>
                         {guest.company && (
                           <div className={`${condensedView ? 'text-xs' : 'text-sm'} text-gray-500`}>{guest.company}</div>
                         )}
