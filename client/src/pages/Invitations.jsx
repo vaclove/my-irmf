@@ -143,20 +143,54 @@ function Invitations() {
     
     setLoadingRoomingData(true)
     try {
-      // Fetch room assignments with guest details
+      // Fetch room assignments and get hotel/room type info
       const assignmentsResponse = await accommodationApi.getAssignments(selectedEdition.id)
       const assignments = assignmentsResponse.data.assignments || []
       
+      // Get unique room types from assignments to fetch availability data
+      const roomTypeIds = [...new Set(assignments.map(a => a.room_type_id))].filter(Boolean)
+      
+      // Fetch availability data for each room type during the edition period
+      const availabilityPromises = roomTypeIds.map(roomTypeId => 
+        accommodationApi.getAvailability(roomTypeId, {
+          start_date: selectedEdition.start_date,
+          end_date: selectedEdition.end_date
+        })
+      )
+      
+      const availabilityResponses = await Promise.all(availabilityPromises)
+      
+      // Create availability lookup map
+      const availabilityMap = new Map()
+      availabilityResponses.forEach(response => {
+        const availData = response.data.availability || []
+        availData.forEach(avail => {
+          const key = `${avail.hotel_name}-${avail.room_type_name}`
+          if (!availabilityMap.has(key)) {
+            availabilityMap.set(key, {})
+          }
+          // Store by date
+          availabilityMap.get(key)[avail.available_date] = {
+            total_rooms: avail.total_rooms || 0,
+            reserved_rooms: avail.reserved_rooms || 0,
+            available_rooms: avail.available_rooms || 0
+          }
+        })
+      })
+
       // Group by hotel and room type
       const roomingMap = new Map()
       
       assignments.forEach(assignment => {
         const key = `${assignment.hotel_name}-${assignment.room_type_name}`
         if (!roomingMap.has(key)) {
+          const availInfo = availabilityMap.get(key) || {}
           roomingMap.set(key, {
             hotel_name: assignment.hotel_name,
             room_type_name: assignment.room_type_name,
-            guests: []
+            guests: [],
+            room_capacity: assignment.capacity || 1,
+            availability_by_date: availInfo  // Store date-specific availability
           })
         }
         // Generate accommodation dates from check-in and check-out dates
@@ -175,11 +209,17 @@ function Invitations() {
           }
         }
         
-        roomingMap.get(key).guests.push({
+        const roomGroup = roomingMap.get(key)
+        roomGroup.guests.push({
           guest_name: assignment.guest_name,
           accommodation_dates: accommodationDates,
           room_number: assignment.room_number || 'TBD'
         })
+        
+        // Store room capacity info (assuming all assignments of same room type have same capacity)
+        if (!roomGroup.room_capacity) {
+          roomGroup.room_capacity = assignment.capacity || 1
+        }
       })
       
       setRoomingData(Array.from(roomingMap.values()))
@@ -1243,6 +1283,31 @@ function Invitations() {
                             </tr>
                           ))}
                         </tbody>
+                        <tfoot className="bg-gray-50 border-t border-gray-200">
+                          <tr>
+                            <td className="px-4 py-2 text-sm font-medium text-gray-700" colSpan="2">
+                              Occupancy
+                            </td>
+                            {sortedDates.map(date => {
+                              const occupiedCount = roomGroup.guests.filter(guest => 
+                                guest.accommodation_dates && Array.isArray(guest.accommodation_dates) && 
+                                guest.accommodation_dates.includes(date)
+                              ).length
+                              
+                              // Get total rooms for this specific date
+                              const dateAvailability = roomGroup.availability_by_date[date]
+                              const totalRooms = dateAvailability ? dateAvailability.total_rooms : 0
+                              const freeCount = totalRooms - occupiedCount
+                              
+                              return (
+                                <td key={date} className="px-1 py-2 text-center text-xs text-gray-600">
+                                  <span className="text-green-600 font-medium">{occupiedCount}</span>
+                                  <span className="text-gray-400"> / {totalRooms}</span>
+                                </td>
+                              )
+                            })}
+                          </tr>
+                        </tfoot>
                       </table>
                     </div>
                   </div>
