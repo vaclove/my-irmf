@@ -54,6 +54,11 @@ function Invitations() {
   const [editingAccommodationDates, setEditingAccommodationDates] = useState(false)
   const [selectedAccommodationDates, setSelectedAccommodationDates] = useState([])
   const [savingDates, setSavingDates] = useState(false)
+  
+  // Tab and rooming list states
+  const [activeTab, setActiveTab] = useState('invitations')
+  const [roomingData, setRoomingData] = useState([])
+  const [loadingRoomingData, setLoadingRoomingData] = useState(false)
 
   useEffect(() => {
     if (selectedEdition) {
@@ -130,6 +135,60 @@ function Invitations() {
     } catch (error) {
       console.error('Error fetching room assignments:', error)
       setRoomAssignments([])
+    }
+  }
+
+  const fetchRoomingData = async () => {
+    if (!selectedEdition) return
+    
+    setLoadingRoomingData(true)
+    try {
+      // Fetch room assignments with guest details
+      const assignmentsResponse = await accommodationApi.getAssignments(selectedEdition.id)
+      const assignments = assignmentsResponse.data.assignments || []
+      
+      // Group by hotel and room type
+      const roomingMap = new Map()
+      
+      assignments.forEach(assignment => {
+        const key = `${assignment.hotel_name}-${assignment.room_type_name}`
+        if (!roomingMap.has(key)) {
+          roomingMap.set(key, {
+            hotel_name: assignment.hotel_name,
+            room_type_name: assignment.room_type_name,
+            guests: []
+          })
+        }
+        // Generate accommodation dates from check-in and check-out dates
+        const accommodationDates = []
+        if (assignment.check_in_date && assignment.check_out_date) {
+          const checkIn = new Date(assignment.check_in_date + 'T12:00:00')
+          const checkOut = new Date(assignment.check_out_date + 'T12:00:00')
+          
+          const currentDate = new Date(checkIn)
+          while (currentDate < checkOut) { // Note: < not <= because checkout day is not included
+            const year = currentDate.getFullYear()
+            const month = String(currentDate.getMonth() + 1).padStart(2, '0')
+            const day = String(currentDate.getDate()).padStart(2, '0')
+            accommodationDates.push(`${year}-${month}-${day}`)
+            currentDate.setDate(currentDate.getDate() + 1)
+          }
+        }
+        
+        roomingMap.get(key).guests.push({
+          guest_name: assignment.guest_name,
+          accommodation_dates: accommodationDates,
+          room_number: assignment.room_number || 'TBD'
+        })
+      })
+      
+      setRoomingData(Array.from(roomingMap.values()))
+    } catch (error) {
+      console.error('Error fetching rooming data:', error)
+      showError('Failed to load rooming data')
+      setRoomingData([])
+    } finally {
+      setLoadingRoomingData(false)
     }
   }
 
@@ -322,7 +381,8 @@ function Invitations() {
         if (dateIndex === 0 || dateIndex === sorted.length - 1) {
           return prev.filter(d => d !== date)
         } else {
-          showError('You can only remove dates from the beginning or end of the range')
+          // Schedule error to be shown after render
+          setTimeout(() => showError('You can only remove dates from the beginning or end of the range'), 0)
           return prev
         }
       } else {
@@ -341,7 +401,8 @@ function Invitations() {
           const dayDiff = (currDate - prevDate) / (1000 * 60 * 60 * 24)
           
           if (dayDiff !== 1) {
-            showError('Please select continuous dates only')
+            // Schedule error to be shown after render
+            setTimeout(() => showError('Please select continuous dates only'), 0)
             return prev
           }
         }
@@ -659,27 +720,61 @@ function Invitations() {
     <div>
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Invitations</h1>
+          <h1 className="text-2xl font-bold text-gray-900">Invitations & Rooming</h1>
           <p className="text-sm text-gray-500 mt-1">
             Guests are automatically assigned by adding the year tag "{selectedEdition.year}" to them
           </p>
         </div>
       </div>
 
-      {/* Search and Filter Controls */}
-      <div className="bg-white shadow rounded-lg p-4 mb-6">
+      {/* Tab Navigation */}
+      <div className="mb-6">
+        <nav className="flex space-x-8 border-b border-gray-200">
+          <button
+            onClick={() => setActiveTab('invitations')}
+            className={`py-2 px-1 border-b-2 font-medium text-sm ${
+              activeTab === 'invitations'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            Invitations
+          </button>
+          <button
+            onClick={() => {
+              setActiveTab('rooming')
+              if (roomingData.length === 0) {
+                fetchRoomingData()
+              }
+            }}
+            className={`py-2 px-1 border-b-2 font-medium text-sm ${
+              activeTab === 'rooming'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            Rooming
+          </button>
+        </nav>
+      </div>
+
+      {/* Invitations Tab Content */}
+      {activeTab === 'invitations' && (
+        <>
+          {/* Search and Filter Controls */}
+          <div className="bg-white shadow rounded-lg p-4 mb-6">
         <div className="flex justify-between items-center mb-3">
           <h3 className="text-sm font-medium text-gray-700">Search & Filters</h3>
           <div className="relative column-settings-container">
-            <button
-              onClick={() => setShowColumnSettings(!showColumnSettings)}
-              className="bg-gray-600 text-white px-4 py-2 rounded-md hover:bg-gray-700 flex items-center space-x-2"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 002 2m0 0v10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2z" />
-              </svg>
-              <span>Settings</span>
-            </button>
+              <button
+                onClick={() => setShowColumnSettings(!showColumnSettings)}
+                className="bg-gray-600 text-white px-4 py-2 rounded-md hover:bg-gray-700 flex items-center space-x-2"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 002 2m0 0v10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2z" />
+                </svg>
+                <span>Settings</span>
+              </button>
             {showColumnSettings && (
               <div className="absolute right-0 mt-2 w-56 bg-white rounded-md shadow-lg border border-gray-200 z-10">
                 <div className="p-3">
@@ -1033,6 +1128,126 @@ function Invitations() {
                   </tbody>
                 </table>
               </div>
+            </div>
+          )}
+        </div>
+      )}
+        </>
+      )}
+
+      {/* Rooming Tab Content */}
+      {activeTab === 'rooming' && (
+        <div className="bg-white shadow rounded-lg p-6 mb-6">
+          <div className="mb-4">
+            <h3 className="text-lg font-medium text-gray-900">Rooming List</h3>
+          </div>
+
+          {loadingRoomingData ? (
+            <div className="text-center py-8">
+              <div className="text-gray-600">Loading rooming data...</div>
+            </div>
+          ) : roomingData.length === 0 ? (
+            <div className="text-center py-8">
+              <div className="text-gray-600">No room assignments found</div>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {roomingData.map((roomGroup, groupIndex) => {
+                // Get all dates from the edition period
+                const editionDates = []
+                if (selectedEdition?.start_date && selectedEdition?.end_date) {
+                  const adjustDateIfNeeded = (dateStr, isoStr) => {
+                    if (isoStr && isoStr.includes('T')) {
+                      const date = new Date(isoStr)
+                      const year = date.getFullYear()
+                      const month = String(date.getMonth() + 1).padStart(2, '0')
+                      const day = String(date.getDate()).padStart(2, '0')
+                      return `${year}-${month}-${day}`
+                    }
+                    return dateStr
+                  }
+                  
+                  const startDateStr = adjustDateIfNeeded(selectedEdition.start_date, selectedEdition.start_date)
+                  const endDateStr = adjustDateIfNeeded(selectedEdition.end_date, selectedEdition.end_date)
+                  
+                  const [startYear, startMonth, startDay] = startDateStr.split('-').map(Number)
+                  const [endYear, endMonth, endDay] = endDateStr.split('-').map(Number)
+                  
+                  const currentDate = new Date(startYear, startMonth - 1, startDay)
+                  const endDate = new Date(endYear, endMonth - 1, endDay)
+                  
+                  while (currentDate <= endDate) {
+                    const year = currentDate.getFullYear()
+                    const month = String(currentDate.getMonth() + 1).padStart(2, '0')
+                    const day = String(currentDate.getDate()).padStart(2, '0')
+                    editionDates.push(`${year}-${month}-${day}`)
+                    currentDate.setDate(currentDate.getDate() + 1)
+                  }
+                }
+                
+                const sortedDates = editionDates
+
+                return (
+                  <div key={groupIndex} className="border border-gray-200 rounded-lg p-4">
+                    <h4 className="text-md font-medium text-gray-900 mb-3">
+                      {roomGroup.hotel_name} - {roomGroup.room_type_name}
+                    </h4>
+                    
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Guest
+                            </th>
+                            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Room
+                            </th>
+                            {sortedDates.map(date => {
+                              const dateObj = new Date(date + 'T12:00:00')
+                              return (
+                                <th key={date} className="px-1 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider min-w-16">
+                                  <div className="flex flex-col">
+                                    <div>{dateObj.toLocaleDateString('en-US', { weekday: 'short' })}</div>
+                                    <div>{dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</div>
+                                  </div>
+                                </th>
+                              )
+                            })}
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                          {roomGroup.guests.map((guest, guestIndex) => (
+                            <tr key={guestIndex} className="hover:bg-gray-50">
+                              <td className="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900">
+                                {guest.guest_name}
+                              </td>
+                              <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-500">
+                                {guest.room_number}
+                              </td>
+                              {sortedDates.map(date => {
+                                const hasDate = guest.accommodation_dates && Array.isArray(guest.accommodation_dates) ? guest.accommodation_dates.includes(date) : false
+                                
+                                return (
+                                  <td key={date} className="px-1 py-2 text-center">
+                                    {hasDate ? (
+                                      <div className="w-8 h-8 bg-green-500 rounded-md mx-auto flex items-center justify-center" title={`${guest.guest_name} staying on ${date}`}>
+                                        <div className="w-4 h-4 bg-white rounded-full"></div>
+                                      </div>
+                                    ) : (
+                                      <div className="w-8 h-8 bg-gray-100 rounded-md mx-auto border border-gray-300"></div>
+                                    )}
+                                  </td>
+                                )
+                              })}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>
