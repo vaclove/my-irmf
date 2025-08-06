@@ -138,10 +138,15 @@ function Invitations() {
       const roomTypeIds = [...new Set(assignments.map(a => a.room_type_id))].filter(Boolean)
       
       // Fetch availability data for each room type during the edition period
+      // Extend end_date by 1 day to include the full last day
+      const endDate = new Date(selectedEdition.end_date)
+      endDate.setDate(endDate.getDate() + 1)
+      const extendedEndDate = endDate.toISOString()
+      
       const availabilityPromises = roomTypeIds.map(roomTypeId => 
         accommodationApi.getAvailability(roomTypeId, {
           start_date: selectedEdition.start_date,
-          end_date: selectedEdition.end_date
+          end_date: extendedEndDate
         })
       )
       
