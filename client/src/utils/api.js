@@ -155,6 +155,12 @@ export const accommodationApi = {
   updateAvailability: (id, data) => api.put(`/accommodation/availability/${id}`, data),
   bulkUpdateAvailability: (data) => api.post('/accommodation/availability/bulk', data),
   
+  // Room Assignments
+  assignRoom: (data) => api.post('/accommodation/assign', data),
+  getAssignments: (editionId) => api.get(`/accommodation/assignments/${editionId}`),
+  cancelAssignment: (assignmentId) => api.delete(`/accommodation/assignments/${assignmentId}`),
+  getAvailableRooms: (editionId, params) => api.get(`/accommodation/available-rooms/${editionId}`, { params }),
+  
   // Overview
   getOverview: (editionId) => api.get(`/accommodation/overview/${editionId}`)
 }

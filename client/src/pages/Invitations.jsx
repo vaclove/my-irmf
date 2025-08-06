@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useEdition } from '../contexts/EditionContext'
-import { invitationApi, badgeApi, guestApi } from '../utils/api'
+import { invitationApi, badgeApi, guestApi, accommodationApi } from '../utils/api'
 import { useToast } from '../contexts/ToastContext'
 import { printBadge } from '../utils/badgePrinter'
 import Avatar from '../components/Avatar'
@@ -41,11 +41,20 @@ function Invitations() {
     greeting_auto_generated: true,
     photo: null
   })
+  
+  // Room assignment states
+  const [roomAssignments, setRoomAssignments] = useState([])
+  const [showRoomAssignmentModal, setShowRoomAssignmentModal] = useState(false)
+  const [selectedInvitationForRoom, setSelectedInvitationForRoom] = useState(null)
+  const [availableRooms, setAvailableRooms] = useState([])
+  const [loadingRooms, setLoadingRooms] = useState(false)
+  const [assigningRoom, setAssigningRoom] = useState(false)
 
   useEffect(() => {
     if (selectedEdition) {
       fetchInvitations()
       fetchAssignedNotInvited()
+      fetchRoomAssignments()
     } else {
       setLoading(false)
       setLoadingAssigned(false)
@@ -109,6 +118,16 @@ function Invitations() {
     }
   }
 
+  const fetchRoomAssignments = async () => {
+    try {
+      const response = await accommodationApi.getAssignments(selectedEdition.id)
+      setRoomAssignments(response.data.assignments || [])
+    } catch (error) {
+      console.error('Error fetching room assignments:', error)
+      setRoomAssignments([])
+    }
+  }
+
   const handleResendInvitation = async (invitationId) => {
     try {
       await invitationApi.resend(invitationId)
@@ -128,6 +147,125 @@ function Invitations() {
   const handleInvitationSent = () => {
     fetchInvitations()
     fetchAssignedNotInvited()
+  }
+
+  // Room assignment functions
+  const handleAssignRoom = (invitation) => {
+    setSelectedInvitationForRoom(invitation)
+    setShowRoomAssignmentModal(true)
+    fetchAvailableRooms(invitation)
+  }
+
+  const fetchAvailableRooms = async (invitation) => {
+    if (!invitation.accommodation_dates || invitation.accommodation_dates.length === 0) {
+      showError('No accommodation dates selected for this guest')
+      return
+    }
+
+    setLoadingRooms(true)
+    try {
+      // Convert dates to proper format and sort
+      const dates = invitation.accommodation_dates
+        .map(date => {
+          // Handle different date formats (Date objects, ISO strings, date strings)
+          if (date instanceof Date) {
+            return date.toISOString().split('T')[0]
+          } else if (typeof date === 'string') {
+            // Remove any time component and ensure it's just YYYY-MM-DD
+            return date.split('T')[0]
+          }
+          return date
+        })
+        .sort()
+      
+      const checkInDate = dates[0]
+      
+      // Calculate checkout date by adding one day to the last accommodation date
+      const lastDateStr = dates[dates.length - 1]
+      const lastDate = new Date(lastDateStr + 'T12:00:00') // Use noon to avoid timezone issues
+      lastDate.setDate(lastDate.getDate() + 1)
+      const checkOutDate = lastDate.toISOString().split('T')[0]
+      
+      console.log('Fetching rooms for dates:', { checkInDate, checkOutDate, originalDates: invitation.accommodation_dates })
+      
+      const response = await accommodationApi.getAvailableRooms(selectedEdition.id, {
+        check_in_date: checkInDate,
+        check_out_date: checkOutDate
+      })
+      setAvailableRooms(response.data.hotels || [])
+    } catch (error) {
+      console.error('Error fetching available rooms:', error)
+      showError('Failed to load available rooms')
+      setAvailableRooms([])
+    } finally {
+      setLoadingRooms(false)
+    }
+  }
+
+  const handleRoomAssignment = async (roomTypeId) => {
+    if (!selectedInvitationForRoom || !roomTypeId) return
+
+    setAssigningRoom(true)
+    try {
+      // Convert dates to proper format and sort
+      const dates = selectedInvitationForRoom.accommodation_dates
+        .map(date => {
+          // Handle different date formats (Date objects, ISO strings, date strings)
+          if (date instanceof Date) {
+            return date.toISOString().split('T')[0]
+          } else if (typeof date === 'string') {
+            // Remove any time component and ensure it's just YYYY-MM-DD
+            return date.split('T')[0]
+          }
+          return date
+        })
+        .sort()
+      
+      const checkInDate = dates[0]
+      
+      // Calculate checkout date by adding one day to the last accommodation date
+      const lastDateStr = dates[dates.length - 1]
+      const lastDate = new Date(lastDateStr + 'T12:00:00') // Use noon to avoid timezone issues
+      lastDate.setDate(lastDate.getDate() + 1)
+      const checkOutDate = lastDate.toISOString().split('T')[0]
+
+      console.log('Assigning room for dates:', { checkInDate, checkOutDate, originalDates: selectedInvitationForRoom.accommodation_dates })
+
+      await accommodationApi.assignRoom({
+        invitation_id: selectedInvitationForRoom.id,
+        room_type_id: roomTypeId,
+        check_in_date: checkInDate,
+        check_out_date: checkOutDate,
+        guests_count: 1
+      })
+
+      success('Room assigned successfully!')
+      setShowRoomAssignmentModal(false)
+      setSelectedInvitationForRoom(null)
+      fetchRoomAssignments()
+    } catch (error) {
+      console.error('Error assigning room:', error)
+      showError(error.response?.data?.error || 'Failed to assign room')
+    } finally {
+      setAssigningRoom(false)
+    }
+  }
+
+  const handleCancelRoomAssignment = async (assignmentId) => {
+    if (!confirm('Are you sure you want to cancel this room assignment?')) return
+
+    try {
+      await accommodationApi.cancelAssignment(assignmentId)
+      success('Room assignment cancelled successfully!')
+      fetchRoomAssignments()
+    } catch (error) {
+      console.error('Error cancelling room assignment:', error)
+      showError('Failed to cancel room assignment')
+    }
+  }
+
+  const getRoomAssignmentForInvitation = (invitationId) => {
+    return roomAssignments.find(assignment => assignment.invitation_id === invitationId)
   }
 
   // Guest editing functions
@@ -268,7 +406,17 @@ function Invitations() {
   }
 
   const formatDate = (dateString) => {
-    return new Date(dateString).toLocaleDateString()
+    if (!dateString) return ''
+    
+    // Handle timezone-safe date formatting
+    if (dateString.includes('T')) {
+      // Already has time component (timestamp)
+      return new Date(dateString).toLocaleDateString()
+    } else {
+      // Date only string, add noon time to avoid timezone shift
+      const date = new Date(dateString + 'T12:00:00');
+      return date.toLocaleDateString()
+    }
   }
 
   const categories = ['filmmaker', 'press', 'guest', 'staff'] // For filtering only
@@ -614,11 +762,76 @@ function Invitations() {
                     <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'}`}>
                       {getStatusBadge(invitation)}
                     </td>
-                    <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} whitespace-nowrap text-sm text-gray-500`}>
+                    <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} text-sm text-gray-500`}>
                       {invitation.accommodation ? (
-                        <span className="text-green-600">
-                          {invitation.covered_nights} {invitation.covered_nights === 1 ? 'night' : 'nights'}
-                        </span>
+                        <div className="space-y-1">
+                          {(() => {
+                            const assignment = getRoomAssignmentForInvitation(invitation.id)
+                            
+                            // Format assigned dates
+                            const formatDateRange = (checkIn, checkOut) => {
+                              const startDate = new Date(checkIn + 'T12:00:00')
+                              const endDate = new Date(checkOut + 'T12:00:00')
+                              endDate.setDate(endDate.getDate() - 1) // Checkout is morning, so last night is day before
+                              
+                              const formatShort = (date) => {
+                                return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                              }
+                              
+                              if (startDate.getMonth() === endDate.getMonth()) {
+                                // Same month: "Oct 16-17"
+                                return `${formatShort(startDate)}-${endDate.getDate()}`
+                              } else {
+                                // Different months: "Oct 31 - Nov 2"
+                                return `${formatShort(startDate)} - ${formatShort(endDate)}`
+                              }
+                            }
+                            
+                            if (assignment) {
+                              return (
+                                <>
+                                  <div className="text-green-600">
+                                    {invitation.covered_nights} {invitation.covered_nights === 1 ? 'night' : 'nights'} • {formatDateRange(assignment.check_in_date, assignment.check_out_date)}
+                                  </div>
+                                  <div className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded inline-block">
+                                    {assignment.hotel_name} - {assignment.room_type_name}
+                                  </div>
+                                </>
+                              )
+                            } else if (invitation.status === 'confirmed' && invitation.accommodation_dates?.length > 0) {
+                              return (
+                                <>
+                                  <div className="text-green-600">
+                                    {invitation.covered_nights} {invitation.covered_nights === 1 ? 'night' : 'nights'}
+                                  </div>
+                                  <button
+                                    onClick={() => handleAssignRoom(invitation)}
+                                    className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded hover:bg-green-200 transition-colors"
+                                  >
+                                    Assign Room
+                                  </button>
+                                </>
+                              )
+                            } else if (invitation.status === 'confirmed') {
+                              return (
+                                <>
+                                  <div className="text-green-600">
+                                    {invitation.covered_nights} {invitation.covered_nights === 1 ? 'night' : 'nights'}
+                                  </div>
+                                  <div className="text-xs text-amber-600">
+                                    No dates selected
+                                  </div>
+                                </>
+                              )
+                            } else {
+                              return (
+                                <div className="text-green-600">
+                                  {invitation.covered_nights} {invitation.covered_nights === 1 ? 'night' : 'nights'}
+                                </div>
+                              )
+                            }
+                          })()}
+                        </div>
                       ) : (
                         <span className="text-gray-400">-</span>
                       )}
@@ -795,17 +1008,77 @@ function Invitations() {
                     <label className="block text-sm font-medium text-gray-700">Status</label>
                     {getStatusBadge(selectedInvitation)}
                   </div>
-                  <div>
+                  <div className="col-span-2">
                     <label className="block text-sm font-medium text-gray-700">Accommodation</label>
-                    <p className="text-sm text-gray-900">
-                      {selectedInvitation.accommodation ? (
-                        <span className="text-green-600">
+                    {selectedInvitation.accommodation ? (
+                      <div className="mt-1 space-y-2">
+                        <p className="text-sm text-green-600">
                           {selectedInvitation.covered_nights} {selectedInvitation.covered_nights === 1 ? 'night' : 'nights'} covered
-                        </span>
-                      ) : (
-                        <span className="text-gray-500">Not provided</span>
-                      )}
-                    </p>
+                        </p>
+                        {selectedInvitation.accommodation_dates?.length > 0 && (
+                          <p className="text-sm text-gray-600">
+                            Selected dates: {selectedInvitation.accommodation_dates.join(', ')}
+                          </p>
+                        )}
+                        {(() => {
+                          const assignment = getRoomAssignmentForInvitation(selectedInvitation.id)
+                          if (assignment) {
+                            const formatDateRange = (checkIn, checkOut) => {
+                              const startDate = new Date(checkIn + 'T12:00:00')
+                              const endDate = new Date(checkOut + 'T12:00:00')
+                              endDate.setDate(endDate.getDate() - 1)
+                              
+                              const formatLong = (date) => {
+                                return date.toLocaleDateString('en-US', { 
+                                  weekday: 'short',
+                                  month: 'short', 
+                                  day: 'numeric',
+                                  year: 'numeric'
+                                })
+                              }
+                              
+                              return `${formatLong(startDate)} - ${formatLong(endDate)}`
+                            }
+                            
+                            return (
+                              <div className="mt-3 p-3 bg-blue-50 rounded-md">
+                                <h5 className="text-sm font-medium text-gray-900 mb-2">Room Assignment</h5>
+                                <p className="text-sm text-gray-700">
+                                  <strong>Hotel:</strong> {assignment.hotel_name}
+                                </p>
+                                <p className="text-sm text-gray-700">
+                                  <strong>Room Type:</strong> {assignment.room_type_name}
+                                </p>
+                                <p className="text-sm text-gray-700">
+                                  <strong>Dates:</strong> {formatDateRange(assignment.check_in_date, assignment.check_out_date)}
+                                </p>
+                                <button
+                                  onClick={() => handleCancelRoomAssignment(assignment.id)}
+                                  className="mt-3 text-sm text-red-600 hover:text-red-800 font-medium"
+                                >
+                                  Cancel Room Assignment
+                                </button>
+                              </div>
+                            )
+                          } else if (selectedInvitation.status === 'confirmed' && selectedInvitation.accommodation_dates?.length > 0) {
+                            return (
+                              <button
+                                onClick={() => {
+                                  setShowDetails(false)
+                                  handleAssignRoom(selectedInvitation)
+                                }}
+                                className="mt-2 text-sm bg-green-100 text-green-800 px-3 py-1 rounded hover:bg-green-200"
+                              >
+                                Assign Room
+                              </button>
+                            )
+                          }
+                          return null
+                        })()}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-500 mt-1">Not provided</p>
+                    )}
                   </div>
                   {selectedInvitation.opened_at && (
                     <div>
@@ -1046,6 +1319,91 @@ function Invitations() {
             </button>
           </div>
         </form>
+      </Modal>
+
+      {/* Room Assignment Modal */}
+      <Modal
+        isOpen={showRoomAssignmentModal}
+        onClose={() => {
+          setShowRoomAssignmentModal(false)
+          setSelectedInvitationForRoom(null)
+          setAvailableRooms([])
+        }}
+        title="Assign Room"
+        size="large"
+      >
+        {selectedInvitationForRoom && (
+          <div className="space-y-4">
+            <div className="bg-gray-50 p-4 rounded-md">
+              <h4 className="font-medium text-gray-900 mb-2">Guest Information</h4>
+              <div className="text-sm text-gray-600">
+                <p><strong>Name:</strong> {selectedInvitationForRoom.guest?.first_name} {selectedInvitationForRoom.guest?.last_name}</p>
+                <p><strong>Email:</strong> {selectedInvitationForRoom.guest?.email}</p>
+                <p><strong>Accommodation Dates:</strong> {selectedInvitationForRoom.accommodation_dates?.join(', ')}</p>
+                <p><strong>Nights:</strong> {selectedInvitationForRoom.covered_nights}</p>
+              </div>
+            </div>
+
+            {loadingRooms ? (
+              <div className="text-center py-8">
+                <div className="text-gray-600">Loading available rooms...</div>
+              </div>
+            ) : availableRooms.length === 0 ? (
+              <div className="text-center py-8">
+                <div className="text-gray-600">No rooms available for the selected dates</div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <h4 className="font-medium text-gray-900">Available Rooms</h4>
+                {availableRooms.map(hotel => (
+                  <div key={hotel.hotel_id} className="border border-gray-200 rounded-md p-4">
+                    <h5 className="font-medium text-gray-800 mb-3">{hotel.hotel_name}</h5>
+                    <div className="space-y-2">
+                      {hotel.room_types.map(roomType => (
+                        <div key={roomType.room_type_id} className="flex items-center justify-between p-3 bg-gray-50 rounded-md">
+                          <div className="flex-1">
+                            <div className="font-medium text-gray-900">{roomType.room_type_name}</div>
+                            <div className="text-sm text-gray-600">
+                              Capacity: {roomType.capacity} guests • Available rooms: {roomType.available_rooms}
+                              {roomType.price_per_night && (
+                                <span> • {roomType.price_per_night} {roomType.currency}/night</span>
+                              )}
+                            </div>
+                            {roomType.amenities && roomType.amenities.length > 0 && (
+                              <div className="text-xs text-gray-500 mt-1">
+                                {roomType.amenities.join(', ')}
+                              </div>
+                            )}
+                          </div>
+                          <button
+                            onClick={() => handleRoomAssignment(roomType.room_type_id)}
+                            disabled={assigningRoom}
+                            className="ml-4 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {assigningRoom ? 'Assigning...' : 'Assign'}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="flex justify-end space-x-3 pt-4 border-t">
+              <button
+                onClick={() => {
+                  setShowRoomAssignmentModal(false)
+                  setSelectedInvitationForRoom(null)
+                  setAvailableRooms([])
+                }}
+                className="bg-gray-300 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-400"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   )

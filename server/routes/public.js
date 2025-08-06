@@ -139,7 +139,7 @@ router.post('/confirm/:token', async (req, res) => {
         // Insert selected accommodation dates
         for (const date of accommodation_dates) {
           await client.query(
-            'INSERT INTO accommodation_selections (invitation_id, selected_date) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+            'INSERT INTO accommodation_selections (invitation_id, selected_date) VALUES ($1, $2::date) ON CONFLICT DO NOTHING',
             [assignment.id, date]
           );
         }

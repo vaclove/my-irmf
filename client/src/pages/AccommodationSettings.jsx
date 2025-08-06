@@ -1121,7 +1121,13 @@ const AvailabilityRow = ({ availability, onUpdate }) => {
   };
 
   const formatDate = (dateString) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
+    if (!dateString) return ''
+    
+    // Parse date string manually to avoid timezone issues
+    // Backend returns date as text "YYYY-MM-DD"
+    const [year, month, day] = dateString.split('-')
+    const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day)) // Month is 0-based
+    return date.toLocaleDateString('en-US', {
       weekday: 'short',
       month: 'short',
       day: 'numeric'

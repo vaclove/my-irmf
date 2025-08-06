@@ -481,7 +481,13 @@ router.get('/edition/:editionId', async (req, res) => {
             LIMIT 1
           ) sub),
           'guest'
-        ) as category
+        ) as category,
+        COALESCE(
+          (SELECT ARRAY_AGG(TO_CHAR(acs.selected_date, 'YYYY-MM-DD') ORDER BY acs.selected_date)
+           FROM accommodation_selections acs 
+           WHERE acs.invitation_id = gi.id),
+          ARRAY[]::text[]
+        ) as accommodation_dates
       FROM guest_invitations gi
       JOIN guests g ON gi.guest_id = g.id
       JOIN editions e ON gi.edition_id = e.id
@@ -502,6 +508,7 @@ router.get('/edition/:editionId', async (req, res) => {
       status: row.status,
       accommodation: row.accommodation,
       covered_nights: row.covered_nights,
+      accommodation_dates: row.accommodation_dates || [],
       guest: {
         first_name: row.first_name,
         last_name: row.last_name,
