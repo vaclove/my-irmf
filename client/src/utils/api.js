@@ -166,6 +166,23 @@ export const accommodationApi = {
   getOverview: (editionId) => api.get(`/accommodation/overview/${editionId}`)
 }
 
+// Associations API
+export const associationApi = {
+  // Guest Relationships
+  getRelationships: (editionId) => api.get(`/associations/relationships/${editionId}`),
+  getGuestRelationships: (guestId, editionId) => api.get(`/associations/relationships/guest/${guestId}/${editionId}`),
+  createRelationship: (data) => api.post('/associations/relationships', data),
+  deleteRelationship: (id) => api.delete(`/associations/relationships/${id}`),
+  
+  // Movie Delegations
+  getDelegations: (editionId) => api.get(`/associations/delegations/${editionId}`),
+  getGuestDelegations: (guestId) => api.get(`/associations/delegations/guest/${guestId}`),
+  getMovieDelegations: (movieId) => api.get(`/associations/delegations/movie/${movieId}`),
+  createDelegation: (data) => api.post('/associations/delegations', data),
+  updateDelegation: (id, data) => api.put(`/associations/delegations/${id}`, data),
+  deleteDelegation: (id) => api.delete(`/associations/delegations/${id}`)
+}
+
 // Export combined API object
 const combinedApi = {
   ...api,
