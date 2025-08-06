@@ -1106,11 +1106,11 @@ function Invitations() {
                         </p>
                         
                         {editingAccommodationDates ? (
-                          <div className="space-y-3">
-                            <div className="text-sm text-gray-600">
+                          <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-4 space-y-3">
+                            <div className="text-sm text-blue-700 font-medium">
                               Select continuous accommodation dates (max {selectedInvitation.covered_nights} nights):
                             </div>
-                            <div className="grid grid-cols-3 gap-2 max-h-48 overflow-y-auto">
+                            <div className="grid grid-cols-4 gap-2 max-h-48 overflow-y-auto">
                               {(() => {
                                 // Get edition dates
                                 if (!selectedEdition?.start_date || !selectedEdition?.end_date) {
@@ -1187,13 +1187,23 @@ function Invitations() {
                                 })
                               })()}
                             </div>
-                            <div className="flex gap-2">
+                            <div className="flex justify-end gap-2 pt-3 border-t border-blue-300">
                               <button
                                 onClick={() => handleSaveAccommodationDates(selectedInvitation.id)}
                                 disabled={savingDates || selectedAccommodationDates.length === 0}
                                 className="text-sm bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 disabled:opacity-50"
                               >
-                                {savingDates ? 'Saving...' : 'Save Dates'}
+                                {savingDates ? (
+                                  <span className="flex items-center justify-center">
+                                    <svg className="animate-spin h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24">
+                                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                    </svg>
+                                    Saving...
+                                  </span>
+                                ) : (
+                                  'Save Dates'
+                                )}
                               </button>
                               <button
                                 onClick={() => {
@@ -1208,17 +1218,81 @@ function Invitations() {
                           </div>
                         ) : (
                           <>
-                            {selectedInvitation.accommodation_dates?.length > 0 ? (
-                              <div className="flex items-center justify-between">
-                                <p className="text-sm text-gray-600">
-                                  Selected dates: {selectedInvitation.accommodation_dates.join(', ')}
-                                </p>
-                                <button
-                                  onClick={() => handleEditAccommodationDates(selectedInvitation)}
-                                  className="text-sm text-blue-600 hover:text-blue-800"
-                                >
-                                  Edit Dates
-                                </button>
+                            {selectedEdition?.start_date && selectedEdition?.end_date ? (
+                              <div className="space-y-2">
+                                <div className="flex items-center justify-between">
+                                  <p className="text-sm text-gray-600">
+                                    Accommodation dates ({selectedInvitation.accommodation_dates?.length || 0} selected):
+                                  </p>
+                                  <button
+                                    onClick={() => handleEditAccommodationDates(selectedInvitation)}
+                                    className="text-sm text-blue-600 hover:text-blue-800"
+                                  >
+                                    Edit Dates
+                                  </button>
+                                </div>
+                                <div className="grid grid-cols-4 gap-2 max-h-32 overflow-y-auto">
+                                  {(() => {
+                                    // Generate all edition dates (same logic as editing mode)
+                                    if (!selectedEdition?.start_date || !selectedEdition?.end_date) {
+                                      return []
+                                    }
+                                    
+                                    const startDateStr = selectedEdition.start_date
+                                    const endDateStr = selectedEdition.end_date
+                                    
+                                    const startDateOnly = startDateStr.includes('T') ? startDateStr.split('T')[0] : startDateStr
+                                    const endDateOnly = endDateStr.includes('T') ? endDateStr.split('T')[0] : endDateStr
+                                    
+                                    const adjustDateIfNeeded = (dateStr, isoStr) => {
+                                      if (isoStr.includes('T')) {
+                                        const date = new Date(isoStr)
+                                        const year = date.getFullYear()
+                                        const month = String(date.getMonth() + 1).padStart(2, '0')
+                                        const day = String(date.getDate()).padStart(2, '0')
+                                        return `${year}-${month}-${day}`
+                                      }
+                                      return dateStr
+                                    }
+                                    
+                                    const correctedStartDate = adjustDateIfNeeded(startDateOnly, startDateStr)
+                                    const correctedEndDate = adjustDateIfNeeded(endDateOnly, endDateStr)
+                                    
+                                    const dates = []
+                                    const [startYear, startMonth, startDay] = correctedStartDate.split('-').map(Number)
+                                    const [endYear, endMonth, endDay] = correctedEndDate.split('-').map(Number)
+                                    
+                                    const currentDate = new Date(startYear, startMonth - 1, startDay)
+                                    const endDate = new Date(endYear, endMonth - 1, endDay)
+                                    
+                                    while (currentDate <= endDate) {
+                                      const year = currentDate.getFullYear()
+                                      const month = String(currentDate.getMonth() + 1).padStart(2, '0')
+                                      const day = String(currentDate.getDate()).padStart(2, '0')
+                                      dates.push(`${year}-${month}-${day}`)
+                                      currentDate.setDate(currentDate.getDate() + 1)
+                                    }
+                                    
+                                    return dates.map(date => {
+                                      const isSelected = selectedInvitation.accommodation_dates?.includes(date)
+                                      return (
+                                        <div
+                                          key={date}
+                                          className={`px-2 py-1 rounded text-xs text-center ${
+                                            isSelected 
+                                              ? 'bg-green-100 text-green-800 font-medium' 
+                                              : 'bg-gray-100 text-gray-500'
+                                          }`}
+                                        >
+                                          {new Date(date + 'T12:00:00').toLocaleDateString('en-US', { 
+                                            month: 'short', 
+                                            day: 'numeric' 
+                                          })}
+                                        </div>
+                                      )
+                                    })
+                                  })()}
+                                </div>
                               </div>
                             ) : (
                               <div className="flex items-center justify-between">
