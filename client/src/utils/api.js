@@ -57,6 +57,7 @@ export const invitationApi = {
   getAccommodationOptions: (token) => publicApi.get(`/accommodation-options/${token}`),
   confirm: (token, data = {}) => publicApi.post(`/confirm/${token}`, data),
   getStatus: (guestId, editionId) => publicApi.get(`/status/${guestId}/${editionId}`),
+  updateAccommodationDates: (invitationId, dates) => api.put(`/invitations/${invitationId}/accommodation-dates`, { accommodation_dates: dates }),
 }
 
 // Templates API

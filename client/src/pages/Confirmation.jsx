@@ -21,12 +21,14 @@ const translations = {
     
     accommodation: 'Accommodation',
     accommodationDesc: (nights) => `The festival is offering accommodation for up to ${nights} night${nights > 1 ? 's' : ''}.`,
-    selectNights: 'Please select the nights you will need accommodation:',
+    selectNights: 'Please select continuous nights you will need accommodation:',
     selected: 'Selected',
     of: 'of',
     nights: 'nights',
     maximumSelected: 'Maximum nights selected',
     selectAtLeastOne: 'Please select at least one night if you need accommodation, or contact the organizers if you don\'t need it.',
+    continuousOnlyFeedback: 'Please select continuous nights only',
+    canOnlyRemoveEnds: 'Can only remove first or last night',
     
     confirmButton: 'Confirm Attendance',
     confirming: 'Confirming...',
@@ -62,7 +64,7 @@ const translations = {
       if (nights >= 2 && nights <= 4) return `Festival nabízí ubytování až na ${nights} noci.`;
       return `Festival nabízí ubytování až na ${nights} nocí.`;
     },
-    selectNights: 'Vyberte prosím noci, kdy budete potřebovat ubytování:',
+    selectNights: 'Vyberte prosím souvislé noci, kdy budete potřebovat ubytování:',
     selected: 'Vybráno',
     of: 'z',
     nights: nights => {
@@ -72,6 +74,8 @@ const translations = {
     },
     maximumSelected: 'Maximální počet nocí vybrán',
     selectAtLeastOne: 'Prosím vyberte alespoň jednu noc, pokud potřebujete ubytování, nebo kontaktujte organizátory, pokud ubytování nepotřebujete.',
+    continuousOnlyFeedback: 'Vyberte prosím pouze souvislé noci',
+    canOnlyRemoveEnds: 'Pouze první nebo poslední noc',
     
     confirmButton: 'Potvrdit účast',
     confirming: 'Potvrzování...',
@@ -97,6 +101,8 @@ function Confirmation() {
   const [selectedNights, setSelectedNights] = useState([])
   const [isConfirming, setIsConfirming] = useState(false)
   const [language, setLanguage] = useState('english')
+  const [feedbackMessage, setFeedbackMessage] = useState('')
+  const [invalidAttemptIndex, setInvalidAttemptIndex] = useState(null)
   
   // Get translations for current language
   const t = translations[language] || translations.english
@@ -167,6 +173,15 @@ function Confirmation() {
     }
   }
 
+  const showFeedback = (message, index = null) => {
+    setFeedbackMessage(message)
+    if (index !== null) {
+      setInvalidAttemptIndex(index)
+      setTimeout(() => setInvalidAttemptIndex(null), 500) // Clear flash after 500ms
+    }
+    setTimeout(() => setFeedbackMessage(''), 3000) // Clear message after 3 seconds
+  }
+
   const toggleNight = (index) => {
     const newNights = [...selectedNights]
     const currentlySelected = newNights.filter(n => n.selected).length
@@ -176,6 +191,35 @@ function Confirmation() {
       return
     }
     
+    if (newNights[index].selected) {
+      // Removing a date - only allow if it's at the start or end of the range
+      const selectedIndices = newNights.map((n, i) => n.selected ? i : -1).filter(i => i !== -1)
+      
+      // Allow removal only if it's the first or last selected date
+      if (selectedIndices.length > 1 && index !== selectedIndices[0] && index !== selectedIndices[selectedIndices.length - 1]) {
+        showFeedback(t.canOnlyRemoveEnds, index)
+        return // Don't allow removing middle dates
+      }
+    } else {
+      // Adding a date - check if it maintains continuity
+      const selectedIndices = newNights.map((n, i) => n.selected ? i : -1).filter(i => i !== -1)
+      
+      if (selectedIndices.length > 0) {
+        // Check if the new index would create a continuous range
+        const newSelectedIndices = [...selectedIndices, index].sort((a, b) => a - b)
+        
+        // Check if all indices are continuous
+        for (let i = 1; i < newSelectedIndices.length; i++) {
+          if (newSelectedIndices[i] !== newSelectedIndices[i - 1] + 1) {
+            showFeedback(t.continuousOnlyFeedback, index)
+            return // Don't allow non-continuous selection
+          }
+        }
+      }
+    }
+    
+    // Clear any existing feedback on successful selection
+    setFeedbackMessage('')
     newNights[index].selected = !newNights[index].selected
     setSelectedNights(newNights)
   }
@@ -250,11 +294,16 @@ function Confirmation() {
               <div className="space-y-2">
                 {selectedNights.map((night, index) => {
                   const isDisabled = !night.selected && selectedNights.filter(n => n.selected).length >= invitationData.covered_nights
+                  const isFlashing = invalidAttemptIndex === index
                   return (
                     <label 
                       key={index} 
-                      className={`flex items-center p-3 bg-white rounded border ${
-                        isDisabled ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-50 cursor-pointer'
+                      className={`flex items-center p-3 bg-white rounded border transition-all duration-200 ${
+                        isFlashing 
+                          ? 'border-red-300 bg-red-50 animate-pulse'
+                          : isDisabled 
+                            ? 'opacity-50 cursor-not-allowed border-gray-200' 
+                            : 'hover:bg-gray-50 cursor-pointer border-gray-200'
                       }`}
                     >
                       <input
@@ -279,11 +328,18 @@ function Confirmation() {
                 }`}>
                   {t.selected}: {selectedNights.filter(n => n.selected).length} {t.of} {invitationData.covered_nights} {typeof t.nights === 'function' ? t.nights(invitationData.covered_nights) : t.nights}
                 </p>
-                {selectedNights.filter(n => n.selected).length === invitationData.covered_nights && (
+                {feedbackMessage ? (
+                  <p className="text-sm text-orange-600 flex items-center">
+                    <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                    </svg>
+                    {feedbackMessage}
+                  </p>
+                ) : selectedNights.filter(n => n.selected).length === invitationData.covered_nights ? (
                   <p className="text-sm text-amber-600">
                     {t.maximumSelected}
                   </p>
-                )}
+                ) : null}
               </div>
             </div>
           )}

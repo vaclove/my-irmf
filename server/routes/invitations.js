@@ -530,6 +530,74 @@ router.get('/edition/:editionId', async (req, res) => {
   }
 });
 
+// Update accommodation dates for an invitation
+router.put('/:invitationId/accommodation-dates', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { invitationId } = req.params;
+    const { accommodation_dates } = req.body;
+
+    if (!accommodation_dates || !Array.isArray(accommodation_dates)) {
+      return res.status(400).json({ error: 'accommodation_dates array is required' });
+    }
+
+    await client.query('BEGIN');
+
+    // Check if invitation exists and has accommodation
+    const invitationResult = await client.query(
+      'SELECT id, accommodation, covered_nights FROM guest_invitations WHERE id = $1',
+      [invitationId]
+    );
+
+    if (invitationResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Invitation not found' });
+    }
+
+    const invitation = invitationResult.rows[0];
+    if (!invitation.accommodation) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'This invitation does not include accommodation' });
+    }
+
+    // Validate that the number of dates doesn't exceed covered_nights
+    if (accommodation_dates.length > invitation.covered_nights) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ 
+        error: `Cannot select more than ${invitation.covered_nights} nights` 
+      });
+    }
+
+    // Delete existing accommodation selections
+    await client.query(
+      'DELETE FROM accommodation_selections WHERE invitation_id = $1',
+      [invitationId]
+    );
+
+    // Insert new accommodation dates
+    for (const date of accommodation_dates) {
+      await client.query(
+        'INSERT INTO accommodation_selections (invitation_id, selected_date) VALUES ($1, $2::date)',
+        [invitationId, date]
+      );
+    }
+
+    await client.query('COMMIT');
+
+    res.json({ 
+      message: 'Accommodation dates updated successfully',
+      accommodation_dates 
+    });
+
+  } catch (error) {
+    await client.query('ROLLBACK');
+    logError(error, req, { operation: 'update_accommodation_dates', invitationId: req.params.invitationId });
+    res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
 // Get guests assigned to edition but not invited
 router.get('/edition/:editionId/assigned-not-invited', async (req, res) => {
   try {

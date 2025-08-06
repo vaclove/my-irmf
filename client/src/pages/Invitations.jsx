@@ -49,6 +49,11 @@ function Invitations() {
   const [availableRooms, setAvailableRooms] = useState([])
   const [loadingRooms, setLoadingRooms] = useState(false)
   const [assigningRoom, setAssigningRoom] = useState(false)
+  
+  // Accommodation date editing states
+  const [editingAccommodationDates, setEditingAccommodationDates] = useState(false)
+  const [selectedAccommodationDates, setSelectedAccommodationDates] = useState([])
+  const [savingDates, setSavingDates] = useState(false)
 
   useEffect(() => {
     if (selectedEdition) {
@@ -266,6 +271,84 @@ function Invitations() {
 
   const getRoomAssignmentForInvitation = (invitationId) => {
     return roomAssignments.find(assignment => assignment.invitation_id === invitationId)
+  }
+
+  // Accommodation date editing functions
+  const handleEditAccommodationDates = (invitation) => {
+    setEditingAccommodationDates(true)
+    setSelectedAccommodationDates(invitation.accommodation_dates || [])
+  }
+
+  const handleSaveAccommodationDates = async (invitationId) => {
+    setSavingDates(true)
+    try {
+      await invitationApi.updateAccommodationDates(invitationId, selectedAccommodationDates)
+      success('Accommodation dates updated successfully!')
+      
+      // Refresh the invitations to get updated dates
+      await fetchInvitations()
+      
+      // Update the selectedInvitation if it's the one being edited
+      if (selectedInvitation && selectedInvitation.id === invitationId) {
+        setSelectedInvitation(prev => ({
+          ...prev,
+          accommodation_dates: selectedAccommodationDates
+        }))
+      }
+      
+      // Cancel any existing room assignment since dates changed
+      const assignment = getRoomAssignmentForInvitation(invitationId)
+      if (assignment) {
+        await handleCancelRoomAssignment(assignment.id)
+      }
+      
+      setEditingAccommodationDates(false)
+    } catch (error) {
+      console.error('Error updating accommodation dates:', error)
+      showError(error.response?.data?.error || 'Failed to update accommodation dates')
+    } finally {
+      setSavingDates(false)
+    }
+  }
+
+  const toggleAccommodationDate = (date) => {
+    setSelectedAccommodationDates(prev => {
+      if (prev.includes(date)) {
+        // Removing a date - only allow if it's at the start or end of the range
+        const sorted = [...prev].sort()
+        const dateIndex = sorted.indexOf(date)
+        
+        // Allow removal only if it's the first or last date
+        if (dateIndex === 0 || dateIndex === sorted.length - 1) {
+          return prev.filter(d => d !== date)
+        } else {
+          showError('You can only remove dates from the beginning or end of the range')
+          return prev
+        }
+      } else {
+        // Adding a date - check if it maintains continuity
+        if (prev.length === 0) {
+          return [date]
+        }
+        
+        const sorted = [...prev].sort()
+        const newDates = [...sorted, date].sort()
+        
+        // Check if the new dates form a continuous range
+        for (let i = 1; i < newDates.length; i++) {
+          const prevDate = new Date(newDates[i - 1] + 'T12:00:00')
+          const currDate = new Date(newDates[i] + 'T12:00:00')
+          const dayDiff = (currDate - prevDate) / (1000 * 60 * 60 * 24)
+          
+          if (dayDiff !== 1) {
+            showError('Please select continuous dates only')
+            return prev
+          }
+        }
+        
+        return newDates
+      }
+    })
   }
 
   // Guest editing functions
@@ -793,7 +876,7 @@ function Invitations() {
                                   <div className="text-green-600">
                                     {invitation.covered_nights} {invitation.covered_nights === 1 ? 'night' : 'nights'} • {formatDateRange(assignment.check_in_date, assignment.check_out_date)}
                                   </div>
-                                  <div className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded inline-block">
+                                  <div className="text-xs text-gray-500">
                                     {assignment.hotel_name} - {assignment.room_type_name}
                                   </div>
                                 </>
@@ -806,7 +889,7 @@ function Invitations() {
                                   </div>
                                   <button
                                     onClick={() => handleAssignRoom(invitation)}
-                                    className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded hover:bg-green-200 transition-colors"
+                                    className="text-xs bg-red-700 text-white px-3 py-1 rounded hover:bg-red-800 transition-colors font-medium"
                                   >
                                     Assign Room
                                   </button>
@@ -959,7 +1042,10 @@ function Invitations() {
       {showDetails && selectedInvitation && (
         <div 
           className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50"
-          onClick={() => setShowDetails(false)}
+          onClick={() => {
+            setShowDetails(false)
+            setEditingAccommodationDates(false)
+          }}
         >
           <div 
             className="relative top-20 mx-auto p-5 border w-11/12 md:w-1/2 shadow-lg rounded-md bg-white"
@@ -971,7 +1057,10 @@ function Invitations() {
                   Invitation Details
                 </h3>
                 <button
-                  onClick={() => setShowDetails(false)}
+                  onClick={() => {
+                    setShowDetails(false)
+                    setEditingAccommodationDates(false)
+                  }}
                   className="text-gray-400 hover:text-gray-600"
                 >
                   <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1015,10 +1104,97 @@ function Invitations() {
                         <p className="text-sm text-green-600">
                           {selectedInvitation.covered_nights} {selectedInvitation.covered_nights === 1 ? 'night' : 'nights'} covered
                         </p>
-                        {selectedInvitation.accommodation_dates?.length > 0 && (
-                          <p className="text-sm text-gray-600">
-                            Selected dates: {selectedInvitation.accommodation_dates.join(', ')}
-                          </p>
+                        
+                        {editingAccommodationDates ? (
+                          <div className="space-y-3">
+                            <div className="text-sm text-gray-600">
+                              Select continuous accommodation dates (max {selectedInvitation.covered_nights} nights):
+                            </div>
+                            <div className="grid grid-cols-3 gap-2 max-h-48 overflow-y-auto">
+                              {(() => {
+                                // Get edition dates
+                                const startDate = new Date(selectedInvitation.edition?.start_date || selectedEdition?.start_date)
+                                const endDate = new Date(selectedInvitation.edition?.end_date || selectedEdition?.end_date)
+                                const dates = []
+                                
+                                for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+                                  dates.push(new Date(d).toISOString().split('T')[0])
+                                }
+                                
+                                return dates.map(date => {
+                                  const isSelected = selectedAccommodationDates.includes(date)
+                                  const isDisabled = !isSelected && selectedAccommodationDates.length >= selectedInvitation.covered_nights
+                                  
+                                  return (
+                                    <button
+                                      key={date}
+                                      type="button"
+                                      onClick={() => !isDisabled && toggleAccommodationDate(date)}
+                                      disabled={isDisabled}
+                                      className={`
+                                        px-2 py-1 rounded text-xs
+                                        ${isSelected 
+                                          ? 'bg-blue-600 text-white' 
+                                          : isDisabled
+                                            ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                        }
+                                      `}
+                                    >
+                                      {new Date(date + 'T12:00:00').toLocaleDateString('en-US', { 
+                                        month: 'short', 
+                                        day: 'numeric' 
+                                      })}
+                                    </button>
+                                  )
+                                })
+                              })()}
+                            </div>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => handleSaveAccommodationDates(selectedInvitation.id)}
+                                disabled={savingDates || selectedAccommodationDates.length === 0}
+                                className="text-sm bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 disabled:opacity-50"
+                              >
+                                {savingDates ? 'Saving...' : 'Save Dates'}
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setEditingAccommodationDates(false)
+                                  setSelectedAccommodationDates(selectedInvitation.accommodation_dates || [])
+                                }}
+                                className="text-sm bg-gray-300 text-gray-700 px-3 py-1 rounded hover:bg-gray-400"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            {selectedInvitation.accommodation_dates?.length > 0 ? (
+                              <div className="flex items-center justify-between">
+                                <p className="text-sm text-gray-600">
+                                  Selected dates: {selectedInvitation.accommodation_dates.join(', ')}
+                                </p>
+                                <button
+                                  onClick={() => handleEditAccommodationDates(selectedInvitation)}
+                                  className="text-sm text-blue-600 hover:text-blue-800"
+                                >
+                                  Edit Dates
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center justify-between">
+                                <p className="text-sm text-amber-600">No dates selected</p>
+                                <button
+                                  onClick={() => handleEditAccommodationDates(selectedInvitation)}
+                                  className="text-sm text-blue-600 hover:text-blue-800"
+                                >
+                                  Select Dates
+                                </button>
+                              </div>
+                            )}
+                          </>
                         )}
                         {(() => {
                           const assignment = getRoomAssignmentForInvitation(selectedInvitation.id)
@@ -1067,7 +1243,7 @@ function Invitations() {
                                   setShowDetails(false)
                                   handleAssignRoom(selectedInvitation)
                                 }}
-                                className="mt-2 text-sm bg-green-100 text-green-800 px-3 py-1 rounded hover:bg-green-200"
+                                className="mt-2 text-sm bg-red-700 text-white px-4 py-2 rounded hover:bg-red-800 font-medium"
                               >
                                 Assign Room
                               </button>
