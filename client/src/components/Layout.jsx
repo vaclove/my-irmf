@@ -49,7 +49,7 @@ function Layout({ children }) {
   const isDevelopment = process.env.NODE_ENV === 'development'
 
   return (
-    <div className="min-h-screen bg-gray-50 grid grid-rows-[auto_1fr_auto]">
+    <div className="min-h-screen bg-gray-50">
       <nav className={`shadow-lg ${isDevelopment ? 'bg-blue-50 border-b border-blue-100' : 'bg-white'}`}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16">
@@ -292,7 +292,7 @@ function Layout({ children }) {
         {children}
       </main>
       
-      <Footer />
+      {/* <Footer /> */}
     </div>
   )
 }
