@@ -856,11 +856,12 @@ router.post('/add-to-room', async (req, res) => {
   try {
     const {
       invitation_id,
-      room_group_id
+      room_group_id,
+      existing_assignment_id
     } = req.body;
 
-    if (!invitation_id || !room_group_id) {
-      return res.status(400).json({ error: 'Invitation ID and room group ID are required' });
+    if (!invitation_id || (!room_group_id && !existing_assignment_id)) {
+      return res.status(400).json({ error: 'Invitation ID and either room group ID or existing assignment ID are required' });
     }
 
     const client = await pool.connect();
@@ -878,25 +879,65 @@ router.post('/add-to-room', async (req, res) => {
         return res.status(409).json({ error: 'Guest already has a room assignment' });
       }
 
-      // Get the room group details
-      const roomGroupResult = await client.query(`
-        SELECT grr.room_type_id, grr.check_in_date, grr.check_out_date, grr.notes,
-               rt.capacity, rt.name as room_type_name, h.name as hotel_name,
-               COUNT(*) as current_guests
-        FROM guest_room_reservations grr
-        JOIN room_types rt ON grr.room_type_id = rt.id
-        JOIN hotels h ON rt.hotel_id = h.id
-        WHERE grr.room_group_id = $1 AND grr.status != 'cancelled'
-        GROUP BY grr.room_type_id, grr.check_in_date, grr.check_out_date, grr.notes,
-                 rt.capacity, rt.name, h.name
-      `, [room_group_id]);
+      let roomGroup;
+      let newRoomGroupId = room_group_id;
 
-      if (roomGroupResult.rows.length === 0) {
-        await client.query('ROLLBACK');
-        return res.status(404).json({ error: 'Room group not found' });
+      if (room_group_id) {
+        // Adding to existing shared room
+        const roomGroupResult = await client.query(`
+          SELECT grr.room_type_id, grr.check_in_date, grr.check_out_date, grr.notes,
+                 rt.capacity, rt.name as room_type_name, h.name as hotel_name,
+                 COUNT(*) as current_guests
+          FROM guest_room_reservations grr
+          JOIN room_types rt ON grr.room_type_id = rt.id
+          JOIN hotels h ON rt.hotel_id = h.id
+          WHERE grr.room_group_id = $1 AND grr.status != 'cancelled'
+          GROUP BY grr.room_type_id, grr.check_in_date, grr.check_out_date, grr.notes,
+                   rt.capacity, rt.name, h.name
+        `, [room_group_id]);
+
+        if (roomGroupResult.rows.length === 0) {
+          await client.query('ROLLBACK');
+          return res.status(404).json({ error: 'Room group not found' });
+        }
+        roomGroup = roomGroupResult.rows[0];
+      } else {
+        // Converting individual room to shared room
+        const existingAssignmentResult = await client.query(`
+          SELECT grr.*, rt.capacity, rt.name as room_type_name, h.name as hotel_name
+          FROM guest_room_reservations grr
+          JOIN room_types rt ON grr.room_type_id = rt.id
+          JOIN hotels h ON rt.hotel_id = h.id
+          WHERE grr.id = $1 AND grr.status != 'cancelled'
+        `, [existing_assignment_id]);
+
+        if (existingAssignmentResult.rows.length === 0) {
+          await client.query('ROLLBACK');
+          return res.status(404).json({ error: 'Existing assignment not found' });
+        }
+
+        const existingAssignment = existingAssignmentResult.rows[0];
+        
+        // Create a new room group ID and update the existing assignment
+        newRoomGroupId = require('crypto').randomUUID();
+        
+        await client.query(`
+          UPDATE guest_room_reservations 
+          SET room_group_id = $1, is_primary_booking = true 
+          WHERE id = $2
+        `, [newRoomGroupId, existing_assignment_id]);
+
+        roomGroup = {
+          room_type_id: existingAssignment.room_type_id,
+          check_in_date: existingAssignment.check_in_date,
+          check_out_date: existingAssignment.check_out_date,
+          notes: existingAssignment.notes,
+          capacity: existingAssignment.capacity,
+          room_type_name: existingAssignment.room_type_name,
+          hotel_name: existingAssignment.hotel_name,
+          current_guests: 1 // The existing guest
+        };
       }
-
-      const roomGroup = roomGroupResult.rows[0];
       
       // Check room capacity
       if (roomGroup.current_guests >= roomGroup.capacity) {
@@ -915,7 +956,7 @@ router.post('/add-to-room', async (req, res) => {
         VALUES ($1, $2, $3, $4, 1, $5, 'confirmed', $6, false)
         RETURNING *
       `, [invitation_id, roomGroup.room_type_id, roomGroup.check_in_date, 
-          roomGroup.check_out_date, roomGroup.notes, room_group_id]);
+          roomGroup.check_out_date, roomGroup.notes, newRoomGroupId]);
 
       await client.query('COMMIT');
 

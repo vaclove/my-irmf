@@ -42,6 +42,7 @@ function Invitations() {
   const [selectedGuestsForRoom, setSelectedGuestsForRoom] = useState([])
   const [primaryGuestId, setPrimaryGuestId] = useState(null)
   
+  
   // Accommodation date editing states
   const [editingAccommodationDates, setEditingAccommodationDates] = useState(false)
   const [selectedAccommodationDates, setSelectedAccommodationDates] = useState([])
@@ -55,6 +56,26 @@ function Invitations() {
   // Room number editing states
   const [editingRoomNumber, setEditingRoomNumber] = useState(null)
   const [tempRoomNumber, setTempRoomNumber] = useState('')
+  
+  // Add guest to existing room states
+  const [showAddToRoomModal, setShowAddToRoomModal] = useState(false)
+  const [selectedRoomForGuest, setSelectedRoomForGuest] = useState(null)
+  const [selectedGuestToAdd, setSelectedGuestToAdd] = useState(null)
+
+  // Utility function to format date ranges
+  const formatDateRange = (checkIn, checkOut) => {
+    const startDate = new Date(checkIn + 'T12:00:00')
+    const endDate = new Date(checkOut + 'T12:00:00')
+    endDate.setDate(endDate.getDate() - 1) // Checkout is morning, so last night is day before
+    
+    return `${startDate.toLocaleDateString('en-US', { 
+      month: 'short', 
+      day: 'numeric' 
+    })} - ${endDate.toLocaleDateString('en-US', { 
+      month: 'short', 
+      day: 'numeric' 
+    })}`
+  }
 
   useEffect(() => {
     if (selectedEdition) {
@@ -509,6 +530,74 @@ function Invitations() {
     return roomAssignments.find(assignment => assignment.invitation_id === invitationId)
   }
 
+  const handleAddGuestToRoom = async () => {
+    if (!selectedGuestToAdd || !selectedRoomForGuest) return
+
+    setAssigningRoom(true)
+    try {
+      // Get the guest's accommodation dates
+      const guestToAdd = invitations.find(inv => inv.id === selectedGuestToAdd)
+      if (!guestToAdd?.accommodation_dates?.length) {
+        throw new Error('Selected guest must have accommodation dates')
+      }
+
+      // Convert dates to proper format and sort
+      const dates = guestToAdd.accommodation_dates
+        .map(date => {
+          if (date instanceof Date) {
+            return date.toISOString().split('T')[0]
+          } else if (typeof date === 'string') {
+            return date.split('T')[0]
+          }
+          return date
+        })
+        .sort()
+      
+      const checkInDate = dates[0]
+      const lastDateStr = dates[dates.length - 1]
+      const lastDate = new Date(lastDateStr + 'T12:00:00')
+      lastDate.setDate(lastDate.getDate() + 1)
+      const checkOutDate = lastDate.toISOString().split('T')[0]
+
+      // Handle both shared rooms (with room_group_id) and individual rooms (without room_group_id)
+      if (selectedRoomForGuest.room_group_id) {
+        // Existing shared room - add guest to room group
+        await accommodationApi.addGuestToRoom({
+          invitation_id: selectedGuestToAdd,
+          room_group_id: selectedRoomForGuest.room_group_id,
+          check_in_date: checkInDate,
+          check_out_date: checkOutDate
+        })
+      } else {
+        // Individual room - convert to shared room by using assignment ID
+        await accommodationApi.addGuestToRoom({
+          invitation_id: selectedGuestToAdd,
+          existing_assignment_id: selectedRoomForGuest.assignment_id,
+          check_in_date: checkInDate,
+          check_out_date: checkOutDate
+        })
+      }
+
+      success('Guest successfully added to existing room!')
+      setShowAddToRoomModal(false)
+      setSelectedRoomForGuest(null)
+      setSelectedGuestToAdd(null)
+      fetchRoomAssignments()
+      fetchRoomingData()
+    } catch (error) {
+      console.error('Error adding guest to room:', error)
+      showError(error.response?.data?.error || 'Failed to add guest to room')
+    } finally {
+      setAssigningRoom(false)
+    }
+  }
+
+  const openAddToRoomModal = (roomAssignment) => {
+    setSelectedRoomForGuest(roomAssignment)
+    setSelectedGuestToAdd(null)
+    setShowAddToRoomModal(true)
+  }
+
   // Accommodation date editing functions
   const handleEditAccommodationDates = (invitation) => {
     setEditingAccommodationDates(true)
@@ -822,14 +911,14 @@ function Invitations() {
             Guests are automatically assigned by adding the year tag "{selectedEdition.year}" to them
           </p>
         </div>
-        <div className="flex space-x-3">
+        {/* <div className="flex space-x-3">
           <button
             onClick={openMultiGuestRoomModal}
             className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 font-medium text-sm"
           >
             Assign Multiple Guests to Room
           </button>
-        </div>
+        </div> */}
       </div>
 
       {/* Tab Navigation */}
@@ -848,9 +937,7 @@ function Invitations() {
           <button
             onClick={() => {
               setActiveTab('rooming')
-              if (roomingData.length === 0) {
-                fetchRoomingData()
-              }
+              fetchRoomingData() // Always fetch fresh data when opening rooming tab
             }}
             className={`py-2 px-1 border-b-2 font-medium text-sm ${
               activeTab === 'rooming'
@@ -1064,23 +1151,6 @@ function Invitations() {
                             const assignment = getRoomAssignmentForInvitation(invitation.id)
                             
                             // Format assigned dates
-                            const formatDateRange = (checkIn, checkOut) => {
-                              const startDate = new Date(checkIn + 'T12:00:00')
-                              const endDate = new Date(checkOut + 'T12:00:00')
-                              endDate.setDate(endDate.getDate() - 1) // Checkout is morning, so last night is day before
-                              
-                              const formatShort = (date) => {
-                                return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-                              }
-                              
-                              if (startDate.getMonth() === endDate.getMonth()) {
-                                // Same month: "Oct 16-17"
-                                return `${formatShort(startDate)}-${endDate.getDate()}`
-                              } else {
-                                // Different months: "Oct 31 - Nov 2"
-                                return `${formatShort(startDate)} - ${formatShort(endDate)}`
-                              }
-                            }
                             
                             if (assignment) {
                               return (
@@ -1353,8 +1423,8 @@ function Invitations() {
                                   {subRoomGroup.guests.map((guest, guestIndex) => (
                                     <div key={guestIndex} className="flex items-center space-x-2">
                                       <span>{guest.guest_name}</span>
-                                      {guest.is_primary && subRoomGroup.is_shared_room && (
-                                        <span className="text-xs bg-blue-600 text-white px-2 py-0.5 rounded-full">
+                                      {guest.is_primary && subRoomGroup.is_shared_room && subRoomGroup.guests.length > 1 && (
+                                        <span className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full">
                                           Primary
                                         </span>
                                       )}
@@ -1770,22 +1840,6 @@ function Invitations() {
                         {(() => {
                           const assignment = getRoomAssignmentForInvitation(selectedInvitation.id)
                           if (assignment) {
-                            const formatDateRange = (checkIn, checkOut) => {
-                              const startDate = new Date(checkIn + 'T12:00:00')
-                              const endDate = new Date(checkOut + 'T12:00:00')
-                              endDate.setDate(endDate.getDate() - 1)
-                              
-                              const formatLong = (date) => {
-                                return date.toLocaleDateString('en-US', { 
-                                  weekday: 'short',
-                                  month: 'short', 
-                                  day: 'numeric',
-                                  year: 'numeric'
-                                })
-                              }
-                              
-                              return `${formatLong(startDate)} - ${formatLong(endDate)}`
-                            }
                             
                             return (
                               <div className="mt-3 p-3 bg-blue-50 rounded-md">
@@ -1807,19 +1861,27 @@ function Invitations() {
                                 {assignment.total_guests_in_room > 1 && (
                                   <p className="text-sm text-gray-700">
                                     <strong>Total guests in room:</strong> {assignment.total_guests_in_room}
-                                    {assignment.is_primary_booking && (
-                                      <span className="ml-2 text-xs bg-blue-600 text-white px-2 py-0.5 rounded-full">
+                                    {assignment.is_primary_booking && assignment.total_guests_in_room > 1 && (
+                                      <span className="ml-2 text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full">
                                         Primary Booking
                                       </span>
                                     )}
                                   </p>
                                 )}
-                                <button
-                                  onClick={() => handleCancelRoomAssignment(assignment.id)}
-                                  className="mt-3 text-sm text-red-600 hover:text-red-800 font-medium"
-                                >
-                                  Cancel Room Assignment
-                                </button>
+                                <div className="mt-3 space-x-3">
+                                  <button
+                                    onClick={() => openAddToRoomModal(assignment)}
+                                    className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+                                  >
+                                    Add Guest to Room
+                                  </button>
+                                  <button
+                                    onClick={() => handleCancelRoomAssignment(assignment.id)}
+                                    className="text-sm text-red-600 hover:text-red-800 font-medium"
+                                  >
+                                    Cancel Room Assignment
+                                  </button>
+                                </div>
                               </div>
                             )
                           } else if (selectedInvitation.status === 'confirmed' && selectedInvitation.accommodation_dates?.length > 0) {
@@ -1977,8 +2039,78 @@ function Invitations() {
                 <div className="text-gray-600">No rooms available for the selected dates</div>
               </div>
             ) : (
-              <div className="space-y-4">
-                <h4 className="font-medium text-gray-900">Available Rooms</h4>
+              <div className="space-y-6">
+                {/* Existing Rooms with Space */}
+                {(() => {
+                  // Get existing room assignments that have capacity for more guests
+                  const existingRooms = roomAssignments.filter(assignment => 
+                    assignment.capacity > 1 && // Room can accommodate multiple guests
+                    (assignment.total_guests_in_room || 1) < assignment.capacity && // Has space (default to 1 if not set)
+                    assignment.invitation_id !== selectedInvitationForRoom.id // Not the same guest
+                  )
+                  
+                  // Remove duplicates (same room group or same individual assignment)
+                  const uniqueRooms = existingRooms.filter((room, index, arr) => {
+                    if (room.room_group_id) {
+                      // For shared rooms, deduplicate by room_group_id
+                      return arr.findIndex(r => r.room_group_id === room.room_group_id) === index
+                    } else {
+                      // For individual rooms, each assignment is unique (no deduplication needed)
+                      return true
+                    }
+                  })
+                  
+                  if (uniqueRooms.length > 0) {
+                    return (
+                      <div>
+                        <h4 className="font-medium text-gray-900 mb-3">Join Existing Rooms</h4>
+                        <div className="space-y-2">
+                          {uniqueRooms.map(room => (
+                            <div key={room.room_group_id} className="flex items-center justify-between p-3 bg-green-50 border border-green-200 rounded-md">
+                              <div className="flex-1">
+                                <div className="font-medium text-gray-900">{room.hotel_name} - {room.room_type_name}</div>
+                                <div className="text-sm text-gray-600">
+                                  {formatDateRange(room.check_in_date, room.check_out_date)} • 
+                                  {room.total_guests_in_room}/{room.capacity} guests • 
+                                  Room #{room.room_number || 'TBD'}
+                                </div>
+                                <div className="text-sm text-green-700">
+                                  <strong>Current guests:</strong> {room.guest_name}{room.roommates ? `, ${room.roommates}` : ''}
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => {
+                                  const roomToJoin = { 
+                                    room_group_id: room.room_group_id,
+                                    assignment_id: room.id, // Include assignment ID for individual rooms
+                                    hotel_name: room.hotel_name,
+                                    room_type_name: room.room_type_name,
+                                    capacity: room.capacity,
+                                    check_in_date: room.check_in_date,
+                                    check_out_date: room.check_out_date,
+                                    guest_name: room.guest_name,
+                                    roommates: room.roommates
+                                  }
+                                  setSelectedRoomForGuest(roomToJoin)
+                                  setSelectedGuestToAdd(selectedInvitationForRoom.id)
+                                  setShowRoomAssignmentModal(false)
+                                  setShowAddToRoomModal(true)
+                                }}
+                                disabled={assigningRoom}
+                                className="ml-4 bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                Join Room
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )
+                  }
+                  return null
+                })()}
+                
+                <h4 className="font-medium text-gray-900">New Room Assignment</h4>
                 {availableRooms.map(hotel => (
                   <div key={hotel.hotel_id} className="border border-gray-200 rounded-md p-4">
                     <h5 className="font-medium text-gray-800 mb-3">{hotel.hotel_name}</h5>
@@ -2208,7 +2340,7 @@ function Invitations() {
                                 disabled={assigningRoom || !canFit}
                                 className="ml-4 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
                               >
-                                {assigningRoom ? 'Assigning...' : 'Assign Room'}
+                                {assigningRoom ? 'Assigning...' : `Assign ${selectedGuestsForRoom.length} Guests`}
                               </button>
                             </div>
                           )
@@ -2221,7 +2353,6 @@ function Invitations() {
             </div>
           )}
 
-          {/* Footer */}
           <div className="flex justify-end space-x-3 pt-4 border-t">
             <button
               onClick={() => {
@@ -2235,6 +2366,121 @@ function Invitations() {
               Cancel
             </button>
           </div>
+        </div>
+      </Modal>
+
+      {/* Add Guest to Existing Room Modal */}
+      <Modal
+        isOpen={showAddToRoomModal}
+        onClose={() => {
+          setShowAddToRoomModal(false)
+          setSelectedRoomForGuest(null)
+          setSelectedGuestToAdd(null)
+        }}
+        title="Add Guest to Existing Room"
+        size="medium"
+      >
+        <div className="space-y-6">
+          {selectedRoomForGuest && (
+            <>
+              {/* Room Information */}
+              <div className="bg-gray-50 p-4 rounded-md">
+                <h4 className="font-medium text-gray-900 mb-2">Room Details</h4>
+                <p className="text-sm text-gray-600">
+                  <strong>Hotel:</strong> {selectedRoomForGuest.hotel_name}
+                </p>
+                <p className="text-sm text-gray-600">
+                  <strong>Room Type:</strong> {selectedRoomForGuest.room_type_name}
+                </p>
+                <p className="text-sm text-gray-600">
+                  <strong>Dates:</strong> {formatDateRange(selectedRoomForGuest.check_in_date, selectedRoomForGuest.check_out_date)}
+                </p>
+                {selectedRoomForGuest.roommates && (
+                  <p className="text-sm text-gray-600">
+                    <strong>Current Guests:</strong> {selectedRoomForGuest.guest_name}{selectedRoomForGuest.roommates ? `, ${selectedRoomForGuest.roommates}` : ''}
+                  </p>
+                )}
+                <p className="text-sm text-gray-600">
+                  <strong>Room Capacity:</strong> {selectedRoomForGuest.capacity} guests
+                </p>
+              </div>
+
+              {/* Guest Selection */}
+              <div>
+                <h4 className="font-medium text-gray-900 mb-3">Select Guest to Add</h4>
+                <div className="space-y-2 max-h-60 overflow-y-auto">
+                  {invitations
+                    .filter(inv => 
+                      inv.accommodation && 
+                      inv.accommodation_dates?.length > 0 &&
+                      !roomAssignments.some(assignment => assignment.invitation_id === inv.id)
+                    )
+                    .map(guest => (
+                      <div
+                        key={guest.id}
+                        className={`flex items-center justify-between p-3 rounded-md cursor-pointer ${
+                          selectedGuestToAdd === guest.id
+                            ? 'bg-blue-100 border-2 border-blue-500' 
+                            : 'bg-white border border-gray-200 hover:bg-gray-50'
+                        }`}
+                        onClick={() => setSelectedGuestToAdd(guest.id)}
+                      >
+                        <div className="flex items-center space-x-3">
+                          <input
+                            type="radio"
+                            checked={selectedGuestToAdd === guest.id}
+                            onChange={() => {}}
+                            className="h-4 w-4 text-blue-600"
+                          />
+                          <div>
+                            <div className="font-medium text-gray-900">
+                              {guest.guest.first_name} {guest.guest.last_name}
+                            </div>
+                            <div className="text-sm text-gray-600">
+                              {guest.guest.email} • {guest.accommodation_dates?.length} nights
+                            </div>
+                            <div className="text-xs text-gray-500">
+                              Dates: {guest.accommodation_dates?.join(', ')}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                </div>
+                
+                {invitations.filter(inv => 
+                  inv.accommodation && 
+                  inv.accommodation_dates?.length > 0 &&
+                  !roomAssignments.some(assignment => assignment.invitation_id === inv.id)
+                ).length === 0 && (
+                  <p className="text-sm text-gray-500 text-center py-4">
+                    No available guests with accommodation to add to this room.
+                  </p>
+                )}
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
+                <button
+                  onClick={() => {
+                    setShowAddToRoomModal(false)
+                    setSelectedRoomForGuest(null)
+                    setSelectedGuestToAdd(null)
+                  }}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleAddGuestToRoom}
+                  disabled={!selectedGuestToAdd || assigningRoom}
+                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {assigningRoom ? 'Adding Guest...' : 'Add Guest to Room'}
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </Modal>
     </div>
