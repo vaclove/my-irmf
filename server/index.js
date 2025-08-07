@@ -28,6 +28,7 @@ const programmingRoutes = require('./routes/programming');
 const sectionRoutes = require('./routes/sections');
 const accommodationRoutes = require('./routes/accommodation');
 const associationRoutes = require('./routes/associations');
+const mailgunService = require('./utils/mailgun');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -137,6 +138,33 @@ app.get('/api/version', (req, res) => {
     res.json({ version: packageJson.version });
   } catch (error) {
     res.json({ version: 'unknown' });
+  }
+});
+
+app.get('/api/mailgun/stats', requireIrmfDomain, async (req, res) => {
+  try {
+    if (!mailgunService.isConfigured()) {
+      return res.json({ 
+        configured: false,
+        totalSent: 0,
+        dailyLimit: 100,
+        remaining: 100,
+        percentageUsed: 0
+      });
+    }
+    
+    const stats = await mailgunService.getStats();
+    res.json({ configured: true, ...stats });
+  } catch (error) {
+    console.error('Error fetching Mailgun stats:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch Mailgun stats',
+      configured: mailgunService.isConfigured(),
+      totalSent: 0,
+      dailyLimit: 100,
+      remaining: 100,
+      percentageUsed: 0
+    });
   }
 });
 

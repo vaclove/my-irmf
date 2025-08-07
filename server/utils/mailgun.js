@@ -54,6 +54,51 @@ class MailgunService {
     return html.replace(/<[^>]*>/g, '');
   }
 
+  async getStats() {
+    if (!this.mg) {
+      throw new Error('Mailgun not configured');
+    }
+
+    try {
+      console.log('Fetching Mailgun stats for domain:', this.domain);
+      
+      // Use the correct Mailgun stats API
+      const response = await this.mg.stats.getDomain(this.domain, {
+        event: 'accepted',
+        duration: '1d',
+        resolution: 'day'
+      });
+      
+      console.log('Mailgun stats response:', JSON.stringify(response, null, 2));
+      
+      // Parse the response correctly
+      let totalSent = 0;
+      
+      if (response && response.stats && Array.isArray(response.stats)) {
+        // Sum all accepted emails from stats
+        totalSent = response.stats.reduce((sum, stat) => {
+          // accepted is an object with outgoing, incoming, total properties
+          if (stat.accepted && typeof stat.accepted === 'object') {
+            return sum + (stat.accepted.outgoing || 0);
+          }
+          return sum;
+        }, 0);
+      }
+
+      const dailyLimit = 100;
+
+      return {
+        totalSent,
+        dailyLimit,
+        remaining: Math.max(0, dailyLimit - totalSent),
+        percentageUsed: Math.min(100, (totalSent / dailyLimit) * 100)
+      };
+    } catch (error) {
+      console.error('Mailgun stats error:', error);
+      throw error;
+    }
+  }
+
   isConfigured() {
     return !!(this.mg && this.domain && this.fromEmail);
   }
