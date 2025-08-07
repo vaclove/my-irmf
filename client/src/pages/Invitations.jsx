@@ -37,6 +37,11 @@ function Invitations() {
   const [loadingRooms, setLoadingRooms] = useState(false)
   const [assigningRoom, setAssigningRoom] = useState(false)
   
+  // Multi-guest room assignment states
+  const [showMultiRoomModal, setShowMultiRoomModal] = useState(false)
+  const [selectedGuestsForRoom, setSelectedGuestsForRoom] = useState([])
+  const [primaryGuestId, setPrimaryGuestId] = useState(null)
+  
   // Accommodation date editing states
   const [editingAccommodationDates, setEditingAccommodationDates] = useState(false)
   const [selectedAccommodationDates, setSelectedAccommodationDates] = useState([])
@@ -46,6 +51,10 @@ function Invitations() {
   const [activeTab, setActiveTab] = useState('invitations')
   const [roomingData, setRoomingData] = useState([])
   const [loadingRoomingData, setLoadingRoomingData] = useState(false)
+  
+  // Room number editing states
+  const [editingRoomNumber, setEditingRoomNumber] = useState(null)
+  const [tempRoomNumber, setTempRoomNumber] = useState('')
 
   useEffect(() => {
     if (selectedEdition) {
@@ -170,21 +179,38 @@ function Invitations() {
         })
       })
 
-      // Group by hotel and room type
+      // Group by hotel and room type (original logic)
       const roomingMap = new Map()
       
       assignments.forEach(assignment => {
         const key = `${assignment.hotel_name}-${assignment.room_type_name}`
+        
         if (!roomingMap.has(key)) {
           const availInfo = availabilityMap.get(key) || {}
           roomingMap.set(key, {
             hotel_name: assignment.hotel_name,
             room_type_name: assignment.room_type_name,
-            guests: [],
             room_capacity: assignment.capacity || 1,
-            availability_by_date: availInfo  // Store date-specific availability
+            availability_by_date: availInfo,
+            room_groups: [] // Array of room groups (individual or shared)
           })
         }
+        
+        const roomTypeGroup = roomingMap.get(key)
+        
+        // Find existing room group or create new one
+        const roomGroupId = assignment.room_group_id || `individual_${assignment.id}`
+        let roomGroup = roomTypeGroup.room_groups.find(rg => rg.group_id === roomGroupId)
+        
+        if (!roomGroup) {
+          roomGroup = {
+            group_id: roomGroupId,
+            is_shared_room: !!assignment.room_group_id,
+            guests: []
+          }
+          roomTypeGroup.room_groups.push(roomGroup)
+        }
+        
         // Generate accommodation dates from check-in and check-out dates
         const accommodationDates = []
         if (assignment.check_in_date && assignment.check_out_date) {
@@ -201,17 +227,21 @@ function Invitations() {
           }
         }
         
-        const roomGroup = roomingMap.get(key)
         roomGroup.guests.push({
           guest_name: assignment.guest_name,
           accommodation_dates: accommodationDates,
-          room_number: assignment.room_number || 'TBD'
+          room_number: assignment.room_number || '',
+          is_primary: assignment.is_primary_booking || false,
+          email: assignment.email,
+          assignment_id: assignment.id
         })
         
-        // Store room capacity info (assuming all assignments of same room type have same capacity)
-        if (!roomGroup.room_capacity) {
-          roomGroup.room_capacity = assignment.capacity || 1
-        }
+        // Sort guests so primary guest comes first
+        roomGroup.guests.sort((a, b) => {
+          if (a.is_primary && !b.is_primary) return -1
+          if (!a.is_primary && b.is_primary) return 1
+          return 0
+        })
       })
       
       setRoomingData(Array.from(roomingMap.values()))
@@ -344,6 +374,121 @@ function Invitations() {
       showError(error.response?.data?.error || 'Failed to assign room')
     } finally {
       setAssigningRoom(false)
+    }
+  }
+
+  const handleMultiGuestRoomAssignment = async (roomTypeId) => {
+    if (!selectedGuestsForRoom.length || !roomTypeId || !primaryGuestId) return
+
+    setAssigningRoom(true)
+    try {
+      // Get the primary guest's accommodation dates to use for all guests
+      const primaryGuest = selectedGuestsForRoom.find(guest => guest.id === primaryGuestId)
+      if (!primaryGuest || !primaryGuest.accommodation_dates?.length) {
+        throw new Error('Primary guest must have accommodation dates selected')
+      }
+
+      // Convert dates to proper format and sort
+      const dates = primaryGuest.accommodation_dates
+        .map(date => {
+          if (date instanceof Date) {
+            return date.toISOString().split('T')[0]
+          } else if (typeof date === 'string') {
+            return date.split('T')[0]
+          }
+          return date
+        })
+        .sort()
+      
+      const checkInDate = dates[0]
+      const lastDateStr = dates[dates.length - 1]
+      const lastDate = new Date(lastDateStr + 'T12:00:00')
+      lastDate.setDate(lastDate.getDate() + 1)
+      const checkOutDate = lastDate.toISOString().split('T')[0]
+
+      await accommodationApi.assignMultipleGuests({
+        invitation_ids: selectedGuestsForRoom.map(guest => guest.id),
+        room_type_id: roomTypeId,
+        check_in_date: checkInDate,
+        check_out_date: checkOutDate,
+        primary_invitation_id: primaryGuestId
+      })
+
+      success(`Successfully assigned ${selectedGuestsForRoom.length} guests to shared room!`)
+      setShowMultiRoomModal(false)
+      setSelectedGuestsForRoom([])
+      setPrimaryGuestId(null)
+      fetchRoomAssignments()
+    } catch (error) {
+      console.error('Error assigning multiple guests to room:', error)
+      showError(error.response?.data?.error || 'Failed to assign guests to room')
+    } finally {
+      setAssigningRoom(false)
+    }
+  }
+
+  const openMultiGuestRoomModal = () => {
+    // Get guests with accommodation who don't have room assignments
+    const availableGuests = invitations.filter(inv => 
+      inv.accommodation && 
+      inv.accommodation_dates?.length > 0 &&
+      !roomAssignments.some(assignment => assignment.invitation_id === inv.id)
+    )
+    
+    if (availableGuests.length === 0) {
+      showError('No guests with accommodation are available for room assignment')
+      return
+    }
+
+    setSelectedGuestsForRoom([])
+    setPrimaryGuestId(null)
+    setShowMultiRoomModal(true)
+  }
+
+  const toggleGuestSelection = (guest) => {
+    setSelectedGuestsForRoom(prev => {
+      const isSelected = prev.some(g => g.id === guest.id)
+      if (isSelected) {
+        const newSelection = prev.filter(g => g.id !== guest.id)
+        // If we're removing the primary guest, reset primary selection
+        if (guest.id === primaryGuestId) {
+          setPrimaryGuestId(newSelection.length > 0 ? newSelection[0].id : null)
+        }
+        return newSelection
+      } else {
+        const newSelection = [...prev, guest]
+        // If this is the first guest selected, make them primary
+        if (newSelection.length === 1) {
+          setPrimaryGuestId(guest.id)
+        }
+        return newSelection
+      }
+    })
+  }
+
+  const handleRoomNumberUpdate = async (assignmentId, newRoomNumber) => {
+    try {
+      await accommodationApi.updateRoomNumber(assignmentId, newRoomNumber)
+      
+      // Update the local state
+      setRoomingData(prevData => 
+        prevData.map(roomGroup => ({
+          ...roomGroup,
+          room_groups: roomGroup.room_groups.map(subGroup => ({
+            ...subGroup,
+            guests: subGroup.guests.map(guest =>
+              guest.assignment_id === assignmentId
+                ? { ...guest, room_number: newRoomNumber }
+                : guest
+            )
+          }))
+        }))
+      )
+      
+      success('Room number updated successfully!')
+    } catch (error) {
+      console.error('Error updating room number:', error)
+      showError('Failed to update room number')
     }
   }
 
@@ -676,6 +821,14 @@ function Invitations() {
           <p className="text-sm text-gray-500 mt-1">
             Guests are automatically assigned by adding the year tag "{selectedEdition.year}" to them
           </p>
+        </div>
+        <div className="flex space-x-3">
+          <button
+            onClick={openMultiGuestRoomModal}
+            className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 font-medium text-sm"
+          >
+            Assign Multiple Guests to Room
+          </button>
         </div>
       </div>
 
@@ -1166,7 +1319,7 @@ function Invitations() {
                 return (
                   <div key={groupIndex} className="border border-gray-200 rounded-lg p-4">
                     <h4 className="text-md font-medium text-gray-900 mb-3">
-                      {roomGroup.hotel_name} - {roomGroup.room_type_name}
+                      <span>{roomGroup.hotel_name} - {roomGroup.room_type_name}</span>
                     </h4>
                     
                     <div className="overflow-x-auto">
@@ -1174,7 +1327,7 @@ function Invitations() {
                         <thead className="bg-gray-50">
                           <tr>
                             <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                              Guest
+                              Guest(s)
                             </th>
                             <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                               Room
@@ -1193,21 +1346,102 @@ function Invitations() {
                           </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-gray-200">
-                          {roomGroup.guests.map((guest, guestIndex) => (
-                            <tr key={guestIndex} className="hover:bg-gray-50">
+                          {roomGroup.room_groups.map((subRoomGroup, subGroupIndex) => (
+                            <tr key={subGroupIndex} className="hover:bg-gray-50">
                               <td className="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900">
-                                {guest.guest_name}
+                                <div className="space-y-1">
+                                  {subRoomGroup.guests.map((guest, guestIndex) => (
+                                    <div key={guestIndex} className="flex items-center space-x-2">
+                                      <span>{guest.guest_name}</span>
+                                      {guest.is_primary && subRoomGroup.is_shared_room && (
+                                        <span className="text-xs bg-blue-600 text-white px-2 py-0.5 rounded-full">
+                                          Primary
+                                        </span>
+                                      )}
+                                    </div>
+                                  ))}
+                                  {subRoomGroup.is_shared_room && subRoomGroup.guests.length > 1 && (
+                                    <div className="text-xs text-gray-500 italic">
+                                      Shared room ({subRoomGroup.guests.length} guests)
+                                    </div>
+                                  )}
+                                </div>
                               </td>
                               <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-500">
-                                {guest.room_number}
+                                {editingRoomNumber === `${groupIndex}-${subGroupIndex}` ? (
+                                  <input
+                                    type="text"
+                                    value={tempRoomNumber}
+                                    onChange={(e) => setTempRoomNumber(e.target.value)}
+                                    onBlur={async () => {
+                                      if (tempRoomNumber !== (subRoomGroup.guests[0]?.room_number || '')) {
+                                        try {
+                                          // Update all guests in the room group (for shared rooms)
+                                          const updatePromises = subRoomGroup.guests.map(guest =>
+                                            handleRoomNumberUpdate(guest.assignment_id, tempRoomNumber)
+                                          )
+                                          
+                                          await Promise.all(updatePromises)
+                                        } catch (error) {
+                                          // Error handling is done in handleRoomNumberUpdate
+                                        }
+                                      }
+                                      setEditingRoomNumber(null)
+                                      setTempRoomNumber('')
+                                    }}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        e.target.blur()
+                                      }
+                                      if (e.key === 'Escape') {
+                                        setEditingRoomNumber(null)
+                                        setTempRoomNumber('')
+                                      }
+                                    }}
+                                    className="w-20 px-2 py-1 text-sm border border-blue-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    placeholder="Room #"
+                                    autoFocus
+                                  />
+                                ) : (
+                                  <div
+                                    onClick={() => {
+                                      setEditingRoomNumber(`${groupIndex}-${subGroupIndex}`)
+                                      setTempRoomNumber(subRoomGroup.guests[0]?.room_number || '')
+                                    }}
+                                    className="cursor-pointer hover:bg-gray-100 px-2 py-1 rounded min-w-16 text-center"
+                                    title="Click to edit room number"
+                                  >
+                                    {subRoomGroup.guests[0]?.room_number || (
+                                      <span className="text-gray-400 italic">Room #</span>
+                                    )}
+                                  </div>
+                                )}
                               </td>
                               {sortedDates.map(date => {
-                                const hasDate = guest.accommodation_dates && Array.isArray(guest.accommodation_dates) ? guest.accommodation_dates.includes(date) : false
+                                // For shared rooms, show occupied if any guest is staying
+                                // For individual rooms, show based on the specific guest
+                                let hasOccupancy = false
+                                
+                                if (subRoomGroup.is_shared_room) {
+                                  // Show green if any guest in the shared room is staying this date
+                                  hasOccupancy = subRoomGroup.guests.some(guest => 
+                                    guest.accommodation_dates && Array.isArray(guest.accommodation_dates) && 
+                                    guest.accommodation_dates.includes(date)
+                                  )
+                                } else {
+                                  // For individual rooms, show if this specific guest is staying
+                                  hasOccupancy = subRoomGroup.guests[0]?.accommodation_dates && 
+                                    Array.isArray(subRoomGroup.guests[0].accommodation_dates) && 
+                                    subRoomGroup.guests[0].accommodation_dates.includes(date)
+                                }
                                 
                                 return (
                                   <td key={date} className="px-1 py-2 text-center">
-                                    {hasDate ? (
-                                      <div className="w-8 h-8 bg-green-500 rounded-md mx-auto flex items-center justify-center" title={`${guest.guest_name} staying on ${date}`}>
+                                    {hasOccupancy ? (
+                                      <div className="w-8 h-8 bg-green-500 rounded-md mx-auto flex items-center justify-center" 
+                                           title={subRoomGroup.is_shared_room ? 
+                                             `Shared room occupied on ${date}` : 
+                                             `${subRoomGroup.guests[0]?.guest_name} staying on ${date}`}>
                                         <div className="w-4 h-4 bg-white rounded-full"></div>
                                       </div>
                                     ) : (
@@ -1225,15 +1459,25 @@ function Invitations() {
                               Occupancy
                             </td>
                             {sortedDates.map(date => {
-                              const occupiedCount = roomGroup.guests.filter(guest => 
-                                guest.accommodation_dates && Array.isArray(guest.accommodation_dates) && 
-                                guest.accommodation_dates.includes(date)
-                              ).length
+                              // Count total occupied rooms for this date
+                              const occupiedCount = roomGroup.room_groups.filter(subGroup => {
+                                if (subGroup.is_shared_room) {
+                                  // For shared rooms, count as 1 if any guest is staying
+                                  return subGroup.guests.some(guest => 
+                                    guest.accommodation_dates && Array.isArray(guest.accommodation_dates) && 
+                                    guest.accommodation_dates.includes(date)
+                                  )
+                                } else {
+                                  // For individual rooms, count if the guest is staying
+                                  return subGroup.guests[0]?.accommodation_dates && 
+                                    Array.isArray(subGroup.guests[0].accommodation_dates) && 
+                                    subGroup.guests[0].accommodation_dates.includes(date)
+                                }
+                              }).length
                               
                               // Get total rooms for this specific date
                               const dateAvailability = roomGroup.availability_by_date[date]
                               const totalRooms = dateAvailability ? dateAvailability.total_rooms : 0
-                              const freeCount = totalRooms - occupiedCount
                               
                               return (
                                 <td key={date} className="px-1 py-2 text-center text-xs text-gray-600">
@@ -1555,6 +1799,21 @@ function Invitations() {
                                 <p className="text-sm text-gray-700">
                                   <strong>Dates:</strong> {formatDateRange(assignment.check_in_date, assignment.check_out_date)}
                                 </p>
+                                {assignment.roommates && (
+                                  <p className="text-sm text-gray-700">
+                                    <strong>Sharing with:</strong> {assignment.roommates}
+                                  </p>
+                                )}
+                                {assignment.total_guests_in_room > 1 && (
+                                  <p className="text-sm text-gray-700">
+                                    <strong>Total guests in room:</strong> {assignment.total_guests_in_room}
+                                    {assignment.is_primary_booking && (
+                                      <span className="ml-2 text-xs bg-blue-600 text-white px-2 py-0.5 rounded-full">
+                                        Primary Booking
+                                      </span>
+                                    )}
+                                  </p>
+                                )}
                                 <button
                                   onClick={() => handleCancelRoomAssignment(assignment.id)}
                                   className="mt-3 text-sm text-red-600 hover:text-red-800 font-medium"
@@ -1769,6 +2028,214 @@ function Invitations() {
             </div>
           </div>
         )}
+      </Modal>
+
+      {/* Multi-Guest Room Assignment Modal */}
+      <Modal
+        isOpen={showMultiRoomModal}
+        onClose={() => {
+          setShowMultiRoomModal(false)
+          setSelectedGuestsForRoom([])
+          setPrimaryGuestId(null)
+          setAvailableRooms([])
+        }}
+        title="Assign Multiple Guests to Room"
+        size="large"
+      >
+        <div className="space-y-6">
+          {/* Step 1: Select Guests */}
+          <div>
+            <h4 className="font-medium text-gray-900 mb-3">Step 1: Select Guests to Share Room</h4>
+            <div className="bg-gray-50 p-4 rounded-md">
+              <p className="text-sm text-gray-600 mb-4">
+                Select guests with accommodation who don't have room assignments yet.
+              </p>
+              
+              {/* Guest Selection List */}
+              <div className="space-y-2 max-h-60 overflow-y-auto">
+                {invitations
+                  .filter(inv => 
+                    inv.accommodation && 
+                    inv.accommodation_dates?.length > 0 &&
+                    !roomAssignments.some(assignment => assignment.invitation_id === inv.id)
+                  )
+                  .map(guest => {
+                    const isSelected = selectedGuestsForRoom.some(g => g.id === guest.id)
+                    const isPrimary = guest.id === primaryGuestId
+                    
+                    return (
+                      <div
+                        key={guest.id}
+                        className={`flex items-center justify-between p-3 rounded-md cursor-pointer ${
+                          isSelected
+                            ? isPrimary 
+                              ? 'bg-blue-100 border-2 border-blue-500' 
+                              : 'bg-blue-50 border border-blue-200'
+                            : 'bg-white border border-gray-200 hover:bg-gray-50'
+                        }`}
+                        onClick={() => toggleGuestSelection(guest)}
+                      >
+                        <div className="flex items-center space-x-3">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => {}}
+                            className="h-4 w-4 text-blue-600"
+                          />
+                          <div>
+                            <div className="font-medium text-gray-900">
+                              {guest.guest.first_name} {guest.guest.last_name}
+                              {isPrimary && (
+                                <span className="ml-2 text-xs bg-blue-600 text-white px-2 py-0.5 rounded-full">
+                                  Primary
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-sm text-gray-600">
+                              {guest.guest.email} • {guest.accommodation_dates?.length} nights
+                            </div>
+                          </div>
+                        </div>
+                        {isSelected && !isPrimary && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setPrimaryGuestId(guest.id)
+                            }}
+                            className="text-xs text-blue-600 hover:text-blue-800"
+                          >
+                            Make Primary
+                          </button>
+                        )}
+                      </div>
+                    )
+                  })}
+              </div>
+              
+              {selectedGuestsForRoom.length > 0 && (
+                <div className="mt-4 p-3 bg-blue-50 rounded-md">
+                  <p className="text-sm text-blue-800">
+                    Selected {selectedGuestsForRoom.length} guests. 
+                    Room dates will be based on the primary guest's accommodation dates.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Step 2: Select Room (shown when guests are selected) */}
+          {selectedGuestsForRoom.length > 0 && (
+            <div>
+              <h4 className="font-medium text-gray-900 mb-3">Step 2: Select Room</h4>
+              
+              {selectedGuestsForRoom.length > 0 && !availableRooms.length && (
+                <button
+                  onClick={async () => {
+                    if (!primaryGuestId) return
+                    
+                    const primaryGuest = selectedGuestsForRoom.find(g => g.id === primaryGuestId)
+                    if (!primaryGuest?.accommodation_dates?.length) return
+                    
+                    const dates = primaryGuest.accommodation_dates
+                      .map(date => typeof date === 'string' ? date.split('T')[0] : date)
+                      .sort()
+                    
+                    const checkInDate = dates[0]
+                    const lastDate = new Date(dates[dates.length - 1] + 'T12:00:00')
+                    lastDate.setDate(lastDate.getDate() + 1)
+                    const checkOutDate = lastDate.toISOString().split('T')[0]
+                    
+                    try {
+                      setLoadingRooms(true)
+                      const response = await accommodationApi.getAvailableRooms(selectedEdition.id, {
+                        check_in_date: checkInDate,
+                        check_out_date: checkOutDate
+                      })
+                      setAvailableRooms(response.data.hotels)
+                    } catch (error) {
+                      console.error('Error loading available rooms:', error)
+                      showError('Failed to load available rooms')
+                    } finally {
+                      setLoadingRooms(false)
+                    }
+                  }}
+                  className="w-full bg-gray-100 border-2 border-dashed border-gray-300 rounded-md p-4 text-center hover:bg-gray-50"
+                >
+                  <div className="text-gray-600">
+                    Click to Load Available Rooms
+                    <div className="text-sm text-gray-500 mt-1">
+                      Based on primary guest's dates
+                    </div>
+                  </div>
+                </button>
+              )}
+              
+              {loadingRooms && (
+                <div className="text-center py-8">
+                  <div className="text-gray-600">Loading available rooms...</div>
+                </div>
+              )}
+              
+              {availableRooms.length > 0 && (
+                <div className="space-y-4">
+                  {availableRooms.map(hotel => (
+                    <div key={hotel.hotel_id} className="border border-gray-200 rounded-md p-4">
+                      <h5 className="font-medium text-gray-800 mb-3">{hotel.hotel_name}</h5>
+                      <div className="space-y-2">
+                        {hotel.room_types.map(roomType => {
+                          const canFit = roomType.capacity >= selectedGuestsForRoom.length
+                          
+                          return (
+                            <div key={roomType.room_type_id} className={`flex items-center justify-between p-3 rounded-md ${
+                              canFit ? 'bg-gray-50' : 'bg-red-50 opacity-60'
+                            }`}>
+                              <div className="flex-1">
+                                <div className="font-medium text-gray-900">{roomType.room_type_name}</div>
+                                <div className="text-sm text-gray-600">
+                                  Capacity: {roomType.capacity} guests • Available rooms: {roomType.available_rooms}
+                                  {!canFit && (
+                                    <span className="text-red-600 ml-2">
+                                      (Too small for {selectedGuestsForRoom.length} guests)
+                                    </span>
+                                  )}
+                                  {roomType.price_per_night && (
+                                    <span> • {roomType.price_per_night} {roomType.currency}/night</span>
+                                  )}
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => handleMultiGuestRoomAssignment(roomType.room_type_id)}
+                                disabled={assigningRoom || !canFit}
+                                className="ml-4 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                {assigningRoom ? 'Assigning...' : 'Assign Room'}
+                              </button>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Footer */}
+          <div className="flex justify-end space-x-3 pt-4 border-t">
+            <button
+              onClick={() => {
+                setShowMultiRoomModal(false)
+                setSelectedGuestsForRoom([])
+                setPrimaryGuestId(null)
+                setAvailableRooms([])
+              }}
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
       </Modal>
     </div>
   )

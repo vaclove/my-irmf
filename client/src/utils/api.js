@@ -158,9 +158,13 @@ export const accommodationApi = {
   
   // Room Assignments
   assignRoom: (data) => api.post('/accommodation/assign', data),
+  assignMultipleGuests: (data) => api.post('/accommodation/assign-multiple', data),
+  addGuestToRoom: (data) => api.post('/accommodation/add-to-room', data),
   getAssignments: (editionId) => api.get(`/accommodation/assignments/${editionId}`),
   cancelAssignment: (assignmentId) => api.delete(`/accommodation/assignments/${assignmentId}`),
+  updateRoomNumber: (assignmentId, roomNumber) => api.put(`/accommodation/assignments/${assignmentId}/room-number`, { room_number: roomNumber }),
   getAvailableRooms: (editionId, params) => api.get(`/accommodation/available-rooms/${editionId}`, { params }),
+  getRoomGroups: (editionId) => api.get(`/accommodation/room-groups/${editionId}`),
   
   // Overview
   getOverview: (editionId) => api.get(`/accommodation/overview/${editionId}`)
