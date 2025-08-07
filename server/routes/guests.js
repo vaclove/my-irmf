@@ -24,7 +24,23 @@ router.get('/', async (req, res) => {
                  ) ORDER BY t.name
                ) FILTER (WHERE t.id IS NOT NULL),
                '[]'::json
-             ) as tags
+             ) as tags,
+             COALESCE(
+               (SELECT JSON_AGG(
+                 JSON_BUILD_OBJECT(
+                   'primary_guest_id', gr.primary_guest_id,
+                   'primary_guest_name', pg.first_name || ' ' || pg.last_name,
+                   'relationship_type', gr.relationship_type,
+                   'edition_id', gr.edition_id,
+                   'edition_year', e.year
+                 )
+               )
+               FROM guest_relationships gr
+               JOIN guests pg ON gr.primary_guest_id = pg.id
+               JOIN editions e ON gr.edition_id = e.id
+               WHERE gr.related_guest_id = g.id),
+               '[]'::json
+             ) as secondary_relationships
       FROM guests g
       LEFT JOIN guest_tags gt ON g.id = gt.guest_id
       LEFT JOIN tags t ON gt.tag_id = t.id

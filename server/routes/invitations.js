@@ -487,7 +487,23 @@ router.get('/edition/:editionId', async (req, res) => {
            FROM accommodation_selections acs 
            WHERE acs.invitation_id = gi.id),
           ARRAY[]::text[]
-        ) as accommodation_dates
+        ) as accommodation_dates,
+        COALESCE(
+          (SELECT JSON_AGG(
+            JSON_BUILD_OBJECT(
+              'primary_guest_id', gr.primary_guest_id,
+              'primary_guest_name', pg.first_name || ' ' || pg.last_name,
+              'relationship_type', gr.relationship_type,
+              'edition_id', gr.edition_id,
+              'edition_year', re.year
+            )
+          )
+          FROM guest_relationships gr
+          JOIN guests pg ON gr.primary_guest_id = pg.id
+          JOIN editions re ON gr.edition_id = re.id
+          WHERE gr.related_guest_id = g.id),
+          '[]'::json
+        ) as secondary_relationships
       FROM guest_invitations gi
       JOIN guests g ON gi.guest_id = g.id
       JOIN editions e ON gi.edition_id = e.id
@@ -510,12 +526,14 @@ router.get('/edition/:editionId', async (req, res) => {
       covered_nights: row.covered_nights,
       accommodation_dates: row.accommodation_dates || [],
       guest: {
+        id: row.guest_id,
         first_name: row.first_name,
         last_name: row.last_name,
         email: row.email,
         company: row.company,
         photo: row.photo,
-        category: row.category
+        category: row.category,
+        secondary_relationships: row.secondary_relationships || []
       },
       edition: {
         name: row.edition_name,
@@ -632,7 +650,23 @@ router.get('/edition/:editionId/assigned-not-invited', async (req, res) => {
             LIMIT 1
           ) sub),
           'guest'
-        ) as category
+        ) as category,
+        COALESCE(
+          (SELECT JSON_AGG(
+            JSON_BUILD_OBJECT(
+              'primary_guest_id', gr.primary_guest_id,
+              'primary_guest_name', pg.first_name || ' ' || pg.last_name,
+              'relationship_type', gr.relationship_type,
+              'edition_id', gr.edition_id,
+              'edition_year', re.year
+            )
+          )
+          FROM guest_relationships gr
+          JOIN guests pg ON gr.primary_guest_id = pg.id
+          JOIN editions re ON gr.edition_id = re.id
+          WHERE gr.related_guest_id = g.id),
+          '[]'::json
+        ) as secondary_relationships
       FROM guests g
       JOIN guest_tags gt ON g.id = gt.guest_id
       JOIN tags year_tag ON gt.tag_id = year_tag.id
@@ -655,6 +689,7 @@ router.get('/edition/:editionId/assigned-not-invited', async (req, res) => {
       photo: row.photo,
       language: row.language,
       category: row.category,
+      secondary_relationships: row.secondary_relationships || [],
       edition: {
         name: row.edition_name,
         year: row.edition_year
