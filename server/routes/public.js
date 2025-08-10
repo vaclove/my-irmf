@@ -2,7 +2,48 @@ const express = require('express');
 const { pool } = require('../models/database');
 const { logError } = require('../utils/logger');
 const imageStorage = require('../services/imageStorage');
+const mailgunService = require('../utils/mailgun');
+const { processTemplate } = require('../utils/templateEngine');
+const nodemailer = require('nodemailer');
 const router = express.Router();
+
+// Email transporter setup (fallback for SMTP)
+const createTransporter = () => {
+  return nodemailer.createTransporter({
+    host: process.env.SMTP_HOST,
+    port: process.env.SMTP_PORT,
+    secure: false,
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+    },
+  });
+};
+
+// Send email using Mailgun API or SMTP fallback
+const sendEmail = async (emailData) => {
+  if (mailgunService.isConfigured()) {
+    console.log('Sending email via Mailgun API...');
+    return await mailgunService.sendEmail(emailData);
+  } else if (process.env.SMTP_HOST && process.env.SMTP_USER) {
+    console.log('Sending email via SMTP...');
+    const transporter = createTransporter();
+    const mailOptions = {
+      from: process.env.SMTP_USER,
+      to: emailData.to,
+      subject: emailData.subject,
+      html: emailData.html,
+    };
+    
+    // Add CC if provided
+    if (emailData.cc) {
+      mailOptions.cc = emailData.cc;
+    }
+    return await transporter.sendMail(mailOptions);
+  } else {
+    throw new Error('No email service configured. Please set up Mailgun or SMTP settings.');
+  }
+};
 
 // Get invitation details - public route (no authentication required)
 router.get('/invitation/:token', async (req, res) => {
@@ -78,9 +119,9 @@ router.post('/confirm/:token', async (req, res) => {
     
     // Find invitation by token
     const result = await pool.query(`
-      SELECT gi.*, g.first_name || ' ' || g.last_name as name, g.email, e.name as edition_name,
-             gi.accommodation,
-             gi.covered_nights,
+      SELECT gi.*, g.first_name || ' ' || g.last_name as name, g.email, g.language as guest_language, 
+             g.company, g.greeting, e.name as edition_name, e.id as edition_id,
+             gi.accommodation, gi.covered_nights,
              COALESCE(
                (SELECT tag_name FROM (
                  SELECT t2.name as tag_name, 
@@ -151,6 +192,99 @@ router.post('/confirm/:token', async (req, res) => {
       throw error;
     } finally {
       client.release();
+    }
+    
+    // Send confirmation email
+    try {
+      const emailLanguage = assignment.guest_language || 'english';
+      
+      // Get confirmation email template for the guest's language
+      const templateResult = await pool.query(`
+        SELECT * FROM email_templates 
+        WHERE edition_id = $1 AND language = $2 AND template_type = 'confirmation'
+        ORDER BY created_at DESC
+        LIMIT 1
+      `, [assignment.edition_id, emailLanguage]);
+      
+      if (templateResult.rows.length > 0) {
+        const template = templateResult.rows[0];
+        const confirmedAt = new Date();
+        
+        // Format accommodation dates for display
+        let formattedAccommodationDates = '';
+        if (accommodation_dates.length > 0) {
+          const dateFormatter = new Intl.DateTimeFormat(emailLanguage === 'czech' ? 'cs-CZ' : 'en-US', {
+            weekday: 'long',
+            day: 'numeric',
+            month: 'long'
+          });
+          formattedAccommodationDates = accommodation_dates.map(date => 
+            dateFormatter.format(new Date(date + 'T00:00:00'))
+          ).join(', ');
+        }
+        
+        // Prepare template variables
+        const templateData = {
+          greeting: assignment.greeting || '',
+          guest_name: assignment.name,
+          edition_name: assignment.edition_name,
+          category: assignment.category,
+          confirmed_at: confirmedAt.toLocaleString(emailLanguage === 'czech' ? 'cs-CZ' : 'en-US'),
+          company: assignment.company || '',
+          language: emailLanguage,
+          accommodation_dates: formattedAccommodationDates || false, // Use false when no dates
+          has_accommodation_dates: accommodation_dates.length > 0
+        };
+        
+        // Process template content and add accommodation info if needed
+        let templateContent = template.markdown_content || template.body || '';
+        
+        // If there are accommodation dates, add them to the template content
+        if (accommodation_dates.length > 0) {
+          const accommodationSection = emailLanguage === 'czech' 
+            ? `- **Ubytování potvrzeno pro:** ${formattedAccommodationDates}`
+            : `- **Accommodation confirmed for:** ${formattedAccommodationDates}`;
+          
+          // Insert accommodation info after the "Confirmed at:" line
+          const confirmationLinePattern = emailLanguage === 'czech' 
+            ? /(\*\*Potvrzeno:\*\* \{\{confirmed_at\}\})/
+            : /(\*\*Confirmed at:\*\* \{\{confirmed_at\}\})/;
+          
+          templateContent = templateContent.replace(confirmationLinePattern, `$1\n${accommodationSection}`);
+        }
+        
+        const processed = processTemplate(templateContent, templateData, { isPreview: false });
+        
+        // Replace variables in subject
+        let emailSubject = template.subject;
+        Object.keys(templateData).forEach(key => {
+          const placeholder = `{{${key}}}`;
+          emailSubject = emailSubject.replace(new RegExp(placeholder, 'g'), templateData[key] || '');
+        });
+        
+        const emailHtml = processed.html;
+        
+        // Send the confirmation email with CC to guest@irmf.cz
+        const emailData = {
+          to: assignment.email,
+          cc: 'guest@irmf.cz',
+          subject: emailSubject,
+          html: emailHtml,
+        };
+        
+        await sendEmail(emailData);
+        console.log(`Confirmation email sent to ${assignment.email} for ${assignment.name}`);
+      } else {
+        console.warn(`No confirmation email template found for language: ${emailLanguage}`);
+      }
+    } catch (emailError) {
+      // Log email error but don't fail the confirmation
+      console.error('Failed to send confirmation email:', emailError.message);
+      logError(emailError, req, { 
+        operation: 'send_confirmation_email', 
+        token: req.params.token, 
+        email: assignment.email 
+      });
     }
     
     res.json({

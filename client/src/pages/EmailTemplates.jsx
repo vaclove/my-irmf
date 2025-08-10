@@ -10,6 +10,7 @@ function EmailTemplates() {
   const [editions, setEditions] = useState([])
   const [selectedEdition, setSelectedEdition] = useState(null)
   const [currentLanguage, setCurrentLanguage] = useState('english')
+  const [currentTemplateType, setCurrentTemplateType] = useState('invitation')
   const [templates, setTemplates] = useState({ english: null, czech: null })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -56,7 +57,7 @@ function EmailTemplates() {
     if (selectedEdition) {
       fetchTemplates()
     }
-  }, [selectedEdition])
+  }, [selectedEdition, currentTemplateType])
 
   useEffect(() => {
     // Update form data when switching languages
@@ -110,10 +111,10 @@ function EmailTemplates() {
     try {
       setLoading(true)
       
-      // Fetch both language templates
+      // Fetch both language templates for current template type
       const [englishResponse, czechResponse] = await Promise.allSettled([
-        templateApi.getByLanguage(selectedEdition.id, 'english'),
-        templateApi.getByLanguage(selectedEdition.id, 'czech')
+        templateApi.getByLanguageAndType(selectedEdition.id, 'english', currentTemplateType),
+        templateApi.getByLanguageAndType(selectedEdition.id, 'czech', currentTemplateType)
       ])
       
       setTemplates({
@@ -132,7 +133,7 @@ function EmailTemplates() {
     
     setSaving(true)
     try {
-      await templateApi.createOrUpdate(selectedEdition.id, currentLanguage, {
+      await templateApi.createOrUpdateWithType(selectedEdition.id, currentLanguage, currentTemplateType, {
         subject: formData.subject,
         markdown_content: formData.content,
         accommodation_content: formData.accommodationContent
@@ -161,11 +162,11 @@ function EmailTemplates() {
     
     try {
       // Generate preview using current form data instead of saved template
-      const response = await templateApi.previewWithContent(selectedEdition.id, currentLanguage, {
+      const response = await templateApi.previewWithContentAndType(selectedEdition.id, currentLanguage, {
         subject: formData.subject,
         markdown_content: formData.content,
         accommodation_content: formData.accommodationContent
-      })
+      }, currentTemplateType)
       setPreviewData(response.data)
       setShowPreview(true)
     } catch (error) {
@@ -196,23 +197,37 @@ function EmailTemplates() {
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-bold text-gray-900">Email Templates</h1>
         
-        {/* Edition Selector */}
-        <div className="flex items-center space-x-4">
-          <label className="text-sm font-medium text-gray-700">Edition:</label>
-          <select
-            value={selectedEdition?.id || ''}
-            onChange={(e) => {
-              const edition = editions.find(ed => ed.id === e.target.value)
-              setSelectedEdition(edition)
-            }}
-            className="border border-gray-300 rounded-md px-3 py-2"
-          >
-            {editions.map(edition => (
-              <option key={edition.id} value={edition.id}>
-                {edition.name} ({edition.year})
-              </option>
-            ))}
-          </select>
+        {/* Edition and Template Type Selectors */}
+        <div className="flex items-center space-x-6">
+          <div className="flex items-center space-x-2">
+            <label className="text-sm font-medium text-gray-700">Edition:</label>
+            <select
+              value={selectedEdition?.id || ''}
+              onChange={(e) => {
+                const edition = editions.find(ed => ed.id === e.target.value)
+                setSelectedEdition(edition)
+              }}
+              className="border border-gray-300 rounded-md px-3 py-2"
+            >
+              {editions.map(edition => (
+                <option key={edition.id} value={edition.id}>
+                  {edition.name} ({edition.year})
+                </option>
+              ))}
+            </select>
+          </div>
+          
+          <div className="flex items-center space-x-2">
+            <label className="text-sm font-medium text-gray-700">Type:</label>
+            <select
+              value={currentTemplateType}
+              onChange={(e) => setCurrentTemplateType(e.target.value)}
+              className="border border-gray-300 rounded-md px-3 py-2"
+            >
+              <option value="invitation">Invitation</option>
+              <option value="confirmation">Confirmation</option>
+            </select>
+          </div>
         </div>
       </div>
 

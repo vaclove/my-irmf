@@ -17,7 +17,7 @@ class MailgunService {
     }
   }
 
-  async sendEmail({ to, subject, html, text }) {
+  async sendEmail({ to, cc, subject, html, text }) {
     if (!this.mg) {
       throw new Error('Mailgun not configured. Please set MAILGUN_API_KEY and MAILGUN_DOMAIN');
     }
@@ -40,6 +40,11 @@ class MailgunService {
         html: html,
         text: text || this.stripHtml(html)
       };
+
+      // Add CC if provided (only in production, in dev all emails go to vaclav@irmf.cz anyway)
+      if (cc && process.env.NODE_ENV === 'production') {
+        messageData.cc = cc;
+      }
 
       console.log(`Sending email: ${actualTo} (original: ${to}) - ${actualSubject}`);
       const response = await this.mg.messages.create(this.domain, messageData);

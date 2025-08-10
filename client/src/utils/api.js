@@ -64,10 +64,13 @@ export const invitationApi = {
 export const templateApi = {
   getByEdition: (editionId) => api.get(`/templates/edition/${editionId}`),
   getByLanguage: (editionId, language) => api.get(`/templates/edition/${editionId}/language/${language}`),
+  getByLanguageAndType: (editionId, language, type) => api.get(`/templates/edition/${editionId}/language/${language}?type=${type}`),
   createOrUpdate: (editionId, language, data) => api.put(`/templates/edition/${editionId}/language/${language}`, data),
+  createOrUpdateWithType: (editionId, language, type, data) => api.put(`/templates/edition/${editionId}/language/${language}`, { ...data, template_type: type }),
   getVariables: () => api.get('/templates/variables'),
   preview: (editionId, language) => api.get(`/templates/preview/edition/${editionId}/language/${language}`),
   previewWithContent: (editionId, language, templateData) => api.post(`/templates/preview/edition/${editionId}/language/${language}`, templateData),
+  previewWithContentAndType: (editionId, language, templateData, type) => api.post(`/templates/preview/edition/${editionId}/language/${language}`, { ...templateData, template_type: type }),
 }
 
 // Tags API

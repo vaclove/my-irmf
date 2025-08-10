@@ -32,14 +32,14 @@ router.get('/edition/:editionId', async (req, res) => {
 router.get('/edition/:editionId/language/:language', async (req, res) => {
   try {
     const { editionId, language } = req.params;
-    
-    // Use existing name-based template lookup
-    const templateName = `invitation_${language}`;
+    const { type = 'invitation' } = req.query; // Default to invitation for backward compatibility
     
     const result = await pool.query(`
       SELECT * FROM email_templates 
-      WHERE name = $1 AND language = $2
-    `, [templateName, language]);
+      WHERE edition_id = $1 AND language = $2 AND template_type = $3
+      ORDER BY created_at DESC
+      LIMIT 1
+    `, [editionId, language, type]);
     
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Template not found' });
@@ -56,7 +56,7 @@ router.get('/edition/:editionId/language/:language', async (req, res) => {
 router.put('/edition/:editionId/language/:language', async (req, res) => {
   try {
     const { editionId, language } = req.params;
-    const { subject, markdown_content, html_content, accommodation_content } = req.body;
+    const { subject, markdown_content, html_content, accommodation_content, template_type = 'invitation' } = req.body;
     
     if (!subject || (!markdown_content && !html_content)) {
       return res.status(400).json({ error: 'Subject and either markdown_content or html_content are required' });
@@ -67,21 +67,22 @@ router.put('/edition/:editionId/language/:language', async (req, res) => {
     const finalHtmlContent = html_content || markdown_content || '';
     const finalAccommodationContent = accommodation_content || null;
     
-    // Generate a template name based on language
-    const templateName = `invitation_${language}`;
+    // Generate a template name based on type and language
+    const templateName = `${template_type}_${language}`;
     
     const result = await pool.query(`
-      INSERT INTO email_templates (name, edition_id, language, subject, body, markdown_content, accommodation_content, updated_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
-      ON CONFLICT (edition_id, language) 
+      INSERT INTO email_templates (name, edition_id, language, subject, body, markdown_content, accommodation_content, template_type, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)
+      ON CONFLICT (edition_id, language, template_type) 
       DO UPDATE SET 
+        name = EXCLUDED.name,
         subject = EXCLUDED.subject,
         body = EXCLUDED.body,
         markdown_content = EXCLUDED.markdown_content,
         accommodation_content = EXCLUDED.accommodation_content,
         updated_at = CURRENT_TIMESTAMP
       RETURNING *
-    `, [templateName, editionId, language, subject, finalHtmlContent, finalMarkdownContent, finalAccommodationContent]);
+    `, [templateName, editionId, language, subject, finalHtmlContent, finalMarkdownContent, finalAccommodationContent, template_type]);
     
     res.json(result.rows[0]);
   } catch (error) {
@@ -109,7 +110,7 @@ router.get('/variables', async (req, res) => {
 router.post('/preview/edition/:editionId/language/:language', async (req, res) => {
   try {
     const { editionId, language } = req.params;
-    const { subject, markdown_content, accommodation_content } = req.body;
+    const { subject, markdown_content, accommodation_content, template_type = 'invitation' } = req.body;
     const { withAccommodation = 'true', accommodationNights = '2' } = req.query;
     
     if (!markdown_content) {

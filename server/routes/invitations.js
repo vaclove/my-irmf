@@ -99,17 +99,17 @@ router.post('/send', async (req, res) => {
     // Use guest's preferred language if not specified
     const emailLanguage = language || assignment.guest_language || 'english';
     
-    // Get email template for the specified language
+    // Get email template for the specified language (invitation type)
     const templateResult = await pool.query(`
       SELECT * FROM email_templates 
-      WHERE language = $1
+      WHERE language = $1 AND template_type = 'invitation'
       ORDER BY created_at DESC
       LIMIT 1
     `, [emailLanguage]);
     
     if (templateResult.rows.length === 0) {
       return res.status(404).json({ 
-        error: `Email template not found for language: ${emailLanguage}` 
+        error: `Invitation email template not found for language: ${emailLanguage}` 
       });
     }
     
@@ -316,17 +316,17 @@ router.post('/resend', async (req, res) => {
     // Use guest's preferred language from previous invitation or default
     const emailLanguage = assignment.guest_language || 'english';
     
-    // Get email template for the specified language
+    // Get email template for the specified language (invitation type)
     const templateResult = await pool.query(`
       SELECT * FROM email_templates 
-      WHERE language = $1
+      WHERE language = $1 AND template_type = 'invitation'
       ORDER BY created_at DESC
       LIMIT 1
     `, [emailLanguage]);
     
     if (templateResult.rows.length === 0) {
       return res.status(404).json({ 
-        error: `Email template not found for language: ${emailLanguage}` 
+        error: `Invitation email template not found for language: ${emailLanguage}` 
       });
     }
     
