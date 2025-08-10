@@ -42,6 +42,15 @@ function Invitations() {
   const [selectedGuestsForRoom, setSelectedGuestsForRoom] = useState([])
   const [primaryGuestId, setPrimaryGuestId] = useState(null)
   
+  // Mass mailer states
+  const [selectedInvitationsForEmail, setSelectedInvitationsForEmail] = useState([])
+  const [showMassMailer, setShowMassMailer] = useState(false)
+  const [massEmailContent, setMassEmailContent] = useState({ czech: '', english: '' })
+  const [massEmailSubject, setMassEmailSubject] = useState({ czech: '', english: '' })
+  const [sendingMassEmail, setSendingMassEmail] = useState(false)
+  const [showEmailPreview, setShowEmailPreview] = useState(false)
+  const [previewData, setPreviewData] = useState({ czech: null, english: null })
+  
   
   // Accommodation date editing states
   const [editingAccommodationDates, setEditingAccommodationDates] = useState(false)
@@ -771,6 +780,168 @@ function Invitations() {
     localStorage.setItem('invitationsCondensedView', newValue.toString())
   }
 
+  // Mass mailer helper functions
+  const handleSelectAllInvitations = (checked) => {
+    if (checked) {
+      const filteredInvitations = getFilteredAndSortedInvitations()
+      setSelectedInvitationsForEmail(filteredInvitations.map(inv => inv.id))
+    } else {
+      setSelectedInvitationsForEmail([])
+    }
+  }
+
+  const handleSelectInvitation = (invitationId, checked) => {
+    if (checked) {
+      setSelectedInvitationsForEmail(prev => [...prev, invitationId])
+    } else {
+      setSelectedInvitationsForEmail(prev => prev.filter(id => id !== invitationId))
+    }
+  }
+
+  const getLanguageRequirements = () => {
+    const selectedInvitations = invitations.filter(inv => 
+      selectedInvitationsForEmail.includes(inv.id)
+    )
+    
+    const czechGuests = selectedInvitations.filter(inv => 
+      inv.guest?.language === 'czech'
+    ).length
+    
+    const englishGuests = selectedInvitations.filter(inv => 
+      inv.guest?.language === 'english' || !inv.guest?.language
+    ).length
+    
+    return {
+      czech: czechGuests,
+      english: englishGuests,
+      total: selectedInvitations.length,
+      needsBoth: czechGuests > 0 && englishGuests > 0
+    }
+  }
+
+  const handleOpenMassMailer = () => {
+    if (selectedInvitationsForEmail.length === 0) {
+      showError('Please select at least one guest to send email to')
+      return
+    }
+    setShowMassMailer(true)
+  }
+
+  const canSendMassEmail = () => {
+    const langReq = getLanguageRequirements()
+    
+    if (langReq.czech > 0 && (!massEmailSubject.czech.trim() || !massEmailContent.czech.trim())) {
+      return false
+    }
+    
+    if (langReq.english > 0 && (!massEmailSubject.english.trim() || !massEmailContent.english.trim())) {
+      return false
+    }
+    
+    return true
+  }
+
+  const handlePreviewMassEmail = () => {
+    if (!canSendMassEmail()) return
+    
+    // Generate preview data for both languages
+    const langReq = getLanguageRequirements()
+    const selectedInvitations = invitations.filter(inv => 
+      selectedInvitationsForEmail.includes(inv.id)
+    )
+    
+    const preview = {}
+    
+    if (langReq.czech > 0) {
+      const czechGuests = selectedInvitations.filter(inv => inv.guest?.language === 'czech')
+      const sampleGuest = czechGuests[0]
+      
+      // Format the full email HTML like the backend does
+      const emailHtml = massEmailContent.czech.replace(/\n/g, '<br>')
+      const fullEmailHtml = `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="margin-bottom: 20px;">
+          ${sampleGuest?.guest?.greeting ? `<p>${sampleGuest.guest.greeting}</p>` : ''}
+          ${emailHtml}
+        </div>
+        <hr style="margin: 20px 0; border: none; border-top: 1px solid #eee;">
+        <div style="color: #666; font-size: 12px;">
+          <p>This email was sent to: ${sampleGuest ? `${sampleGuest.guest.first_name} ${sampleGuest.guest.last_name}` : 'Sample Guest'}</p>
+          <p>Event: ${selectedEdition?.name || 'Event Name'}</p>
+          <p>Category: ${sampleGuest?.guest?.category || 'guest'}</p>
+        </div>
+      </div>`
+      
+      preview.czech = {
+        subject: massEmailSubject.czech,
+        content: massEmailContent.czech,
+        fullEmailHtml: fullEmailHtml,
+        recipients: czechGuests.length,
+        sampleRecipient: sampleGuest ? `${sampleGuest.guest.first_name} ${sampleGuest.guest.last_name}` : 'N/A'
+      }
+    }
+    
+    if (langReq.english > 0) {
+      const englishGuests = selectedInvitations.filter(inv => 
+        inv.guest?.language === 'english' || !inv.guest?.language
+      )
+      const sampleGuest = englishGuests[0]
+      
+      // Format the full email HTML like the backend does
+      const emailHtml = massEmailContent.english.replace(/\n/g, '<br>')
+      const fullEmailHtml = `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="margin-bottom: 20px;">
+          ${sampleGuest?.guest?.greeting ? `<p>${sampleGuest.guest.greeting}</p>` : ''}
+          ${emailHtml}
+        </div>
+        <hr style="margin: 20px 0; border: none; border-top: 1px solid #eee;">
+        <div style="color: #666; font-size: 12px;">
+          <p>This email was sent to: ${sampleGuest ? `${sampleGuest.guest.first_name} ${sampleGuest.guest.last_name}` : 'Sample Guest'}</p>
+          <p>Event: ${selectedEdition?.name || 'Event Name'}</p>
+          <p>Category: ${sampleGuest?.guest?.category || 'guest'}</p>
+        </div>
+      </div>`
+      
+      preview.english = {
+        subject: massEmailSubject.english,
+        content: massEmailContent.english,
+        fullEmailHtml: fullEmailHtml,
+        recipients: englishGuests.length,
+        sampleRecipient: sampleGuest ? `${sampleGuest.guest.first_name} ${sampleGuest.guest.last_name}` : 'N/A'
+      }
+    }
+    
+    setPreviewData(preview)
+    setShowEmailPreview(true)
+  }
+
+  const handleSendMassEmail = async () => {
+    setSendingMassEmail(true)
+    try {
+      const selectedInvitations = invitations.filter(inv => 
+        selectedInvitationsForEmail.includes(inv.id)
+      )
+      
+      const response = await invitationApi.sendMassEmail({
+        invitation_ids: selectedInvitationsForEmail,
+        subjects: massEmailSubject,
+        contents: massEmailContent
+      })
+      
+      success(`Mass email sent successfully to ${selectedInvitations.length} guests`)
+      setShowMassMailer(false)
+      setShowEmailPreview(false)
+      setSelectedInvitationsForEmail([])
+      setMassEmailContent({ czech: '', english: '' })
+      setMassEmailSubject({ czech: '', english: '' })
+      setPreviewData({ czech: null, english: null })
+    } catch (error) {
+      console.error('Error sending mass email:', error)
+      showError('Failed to send mass email: ' + (error.response?.data?.error || error.message))
+    } finally {
+      setSendingMassEmail(false)
+    }
+  }
+
   const getFilteredAndSortedInvitations = () => {
     return invitations
       .filter(invitation => {
@@ -1069,15 +1240,41 @@ function Invitations() {
         </div>
       ) : (
         <div className="bg-white shadow rounded-lg overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-200">
+          <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
             <h3 className="text-lg font-medium">
               {(searchQuery.trim() || filterCategory || filterStatus) ? `Filtered Invitations (${getFilteredAndSortedInvitations().length}/${invitations.length})` : `All Invitations (${invitations.length})`}
             </h3>
+            <div className="flex items-center space-x-4">
+              {selectedInvitationsForEmail.length > 0 && (
+                <div className="flex items-center space-x-2">
+                  <span className="text-sm text-gray-600">
+                    {selectedInvitationsForEmail.length} selected
+                  </span>
+                  <button
+                    onClick={handleOpenMassMailer}
+                    className="bg-purple-600 text-white px-4 py-2 rounded-md hover:bg-purple-700 flex items-center space-x-2"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 4.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                    </svg>
+                    <span>Mass Email</span>
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
+                  <th className={`${condensedView ? 'px-2 py-2' : 'px-4 py-3'} text-left`}>
+                    <input
+                      type="checkbox"
+                      checked={selectedInvitationsForEmail.length > 0 && selectedInvitationsForEmail.length === getFilteredAndSortedInvitations().length}
+                      onChange={(e) => handleSelectAllInvitations(e.target.checked)}
+                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                    />
+                  </th>
                   <th className={`${condensedView ? 'px-3 py-2' : 'px-6 py-3'} text-left text-xs font-medium text-gray-500 uppercase ${condensedView ? '' : 'tracking-wider'}`}>
                     Guest
                   </th>
@@ -1101,6 +1298,14 @@ function Invitations() {
               <tbody className="bg-white divide-y divide-gray-200">
                 {Array.isArray(invitations) && getFilteredAndSortedInvitations().map((invitation) => (
                   <tr key={invitation.id} className="hover:bg-gray-50">
+                    <td className={`${condensedView ? 'px-2 py-2' : 'px-4 py-4'} whitespace-nowrap`}>
+                      <input
+                        type="checkbox"
+                        checked={selectedInvitationsForEmail.includes(invitation.id)}
+                        onChange={(e) => handleSelectInvitation(invitation.id, e.target.checked)}
+                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                      />
+                    </td>
                     <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} whitespace-nowrap`}>
                       <button
                         onClick={() => handleEditGuest(invitation.guest)}
@@ -1618,7 +1823,7 @@ function Invitations() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-3 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700">Category</label>
                     {getCategoryBadge(selectedInvitation.guest?.category || 'guest')}
@@ -1627,7 +1832,17 @@ function Invitations() {
                     <label className="block text-sm font-medium text-gray-700">Status</label>
                     {getStatusBadge(selectedInvitation)}
                   </div>
-                  <div className="col-span-2">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Language</label>
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                      selectedInvitation.guest?.language === 'czech' 
+                        ? 'bg-blue-100 text-blue-800' 
+                        : 'bg-green-100 text-green-800'
+                    }`}>
+                      {selectedInvitation.guest?.language === 'czech' ? 'Czech' : 'English'}
+                    </span>
+                  </div>
+                  <div className="col-span-3">
                     <label className="block text-sm font-medium text-gray-700">Accommodation</label>
                     {selectedInvitation.accommodation ? (
                       <div className="mt-1 space-y-2">
@@ -2481,6 +2696,282 @@ function Invitations() {
               </div>
             </>
           )}
+        </div>
+      </Modal>
+
+      {/* Mass Mailer Modal */}
+      <Modal
+        isOpen={showMassMailer}
+        onClose={() => {
+          setShowMassMailer(false)
+          setShowEmailPreview(false)
+          setMassEmailContent({ czech: '', english: '' })
+          setMassEmailSubject({ czech: '', english: '' })
+          setPreviewData({ czech: null, english: null })
+        }}
+        title="Mass Email"
+      >
+        <div className="max-w-4xl">
+          {(() => {
+            const langReq = getLanguageRequirements()
+            return (
+              <div className="mb-6">
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <h4 className="text-sm font-medium text-blue-800 mb-2">Recipients Summary</h4>
+                  <div className="text-sm text-blue-700">
+                    <p><strong>Total selected:</strong> {langReq.total} guests</p>
+                    <p><strong>Czech guests:</strong> {langReq.czech}</p>
+                    <p><strong>English guests:</strong> {langReq.english}</p>
+                    {langReq.needsBoth && (
+                      <p className="text-orange-700 mt-2">
+                        ⚠️ You need to provide both Czech and English versions of the email
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )
+          })()}
+
+          <div className="space-y-6">
+            {/* Czech Version */}
+            {getLanguageRequirements().czech > 0 && (
+              <div className="border border-gray-200 rounded-lg p-4">
+                <h4 className="text-lg font-medium text-gray-900 mb-4">
+                  Czech Version ({getLanguageRequirements().czech} recipients)
+                </h4>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Subject (Czech)
+                    </label>
+                    <input
+                      type="text"
+                      value={massEmailSubject.czech}
+                      onChange={(e) => setMassEmailSubject(prev => ({ ...prev, czech: e.target.value }))}
+                      className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      placeholder="Enter Czech subject..."
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Message (Czech)
+                    </label>
+                    <textarea
+                      value={massEmailContent.czech}
+                      onChange={(e) => setMassEmailContent(prev => ({ ...prev, czech: e.target.value }))}
+                      rows={8}
+                      className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      placeholder="Enter Czech message..."
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* English Version */}
+            {getLanguageRequirements().english > 0 && (
+              <div className="border border-gray-200 rounded-lg p-4">
+                <h4 className="text-lg font-medium text-gray-900 mb-4">
+                  English Version ({getLanguageRequirements().english} recipients)
+                </h4>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Subject (English)
+                    </label>
+                    <input
+                      type="text"
+                      value={massEmailSubject.english}
+                      onChange={(e) => setMassEmailSubject(prev => ({ ...prev, english: e.target.value }))}
+                      className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      placeholder="Enter English subject..."
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Message (English)
+                    </label>
+                    <textarea
+                      value={massEmailContent.english}
+                      onChange={(e) => setMassEmailContent(prev => ({ ...prev, english: e.target.value }))}
+                      rows={8}
+                      className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      placeholder="Enter English message..."
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
+              <button
+                onClick={() => {
+                  setShowMassMailer(false)
+                  setShowEmailPreview(false)
+                  setMassEmailContent({ czech: '', english: '' })
+                  setMassEmailSubject({ czech: '', english: '' })
+                  setPreviewData({ czech: null, english: null })
+                }}
+                className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
+                disabled={sendingMassEmail}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handlePreviewMassEmail}
+                disabled={!canSendMassEmail()}
+                className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center space-x-2"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                </svg>
+                <span>Preview & Send</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Email Preview Modal */}
+      <Modal
+        isOpen={showEmailPreview}
+        onClose={() => {
+          setShowEmailPreview(false)
+          setPreviewData({ czech: null, english: null })
+        }}
+        title="Email Preview - Final Confirmation"
+      >
+        <div className="max-w-4xl">
+          <div className="mb-6">
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6">
+              <div className="flex items-center space-x-2">
+                <svg className="w-5 h-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.728-.833-2.498 0L4.316 15.5c-.77.833.192 2.5 1.732 2.5z" />
+                </svg>
+                <div>
+                  <h4 className="text-sm font-medium text-amber-800">Review before sending</h4>
+                  <p className="text-sm text-amber-700 mt-1">
+                    Please review the email content below. Once you click "Send Emails", the messages will be sent immediately to all selected recipients.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Czech Email Preview */}
+            {previewData.czech && (
+              <div className="border border-gray-200 rounded-lg p-6 mb-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-medium text-gray-900">Czech Version</h3>
+                  <span className="bg-blue-100 text-blue-800 text-sm font-medium px-2.5 py-0.5 rounded">
+                    {previewData.czech.recipients} recipients
+                  </span>
+                </div>
+                
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Subject Line:</label>
+                    <div className="bg-gray-50 border border-gray-200 rounded p-3 font-medium">
+                      {previewData.czech.subject}
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Full Email Preview:</label>
+                    <div className="bg-white border border-gray-200 rounded p-4 min-h-32">
+                      <div dangerouslySetInnerHTML={{ 
+                        __html: previewData.czech.fullEmailHtml
+                      }} />
+                    </div>
+                  </div>
+                  
+                  <div className="text-sm text-gray-500">
+                    <strong>Sample recipient:</strong> {previewData.czech.sampleRecipient}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* English Email Preview */}
+            {previewData.english && (
+              <div className="border border-gray-200 rounded-lg p-6 mb-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-medium text-gray-900">English Version</h3>
+                  <span className="bg-green-100 text-green-800 text-sm font-medium px-2.5 py-0.5 rounded">
+                    {previewData.english.recipients} recipients
+                  </span>
+                </div>
+                
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Subject Line:</label>
+                    <div className="bg-gray-50 border border-gray-200 rounded p-3 font-medium">
+                      {previewData.english.subject}
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Full Email Preview:</label>
+                    <div className="bg-white border border-gray-200 rounded p-4 min-h-32">
+                      <div dangerouslySetInnerHTML={{ 
+                        __html: previewData.english.fullEmailHtml
+                      }} />
+                    </div>
+                  </div>
+                  
+                  <div className="text-sm text-gray-500">
+                    <strong>Sample recipient:</strong> {previewData.english.sampleRecipient}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div className="flex justify-between pt-4 border-t border-gray-200">
+              <button
+                onClick={() => setShowEmailPreview(false)}
+                className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
+                disabled={sendingMassEmail}
+              >
+                ← Back to Edit
+              </button>
+              
+              <div className="flex space-x-3">
+                <button
+                  onClick={() => {
+                    setShowEmailPreview(false)
+                    setShowMassMailer(false)
+                    setSelectedInvitationsForEmail([])
+                    setMassEmailContent({ czech: '', english: '' })
+                    setMassEmailSubject({ czech: '', english: '' })
+                    setPreviewData({ czech: null, english: null })
+                  }}
+                  className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  disabled={sendingMassEmail}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSendMassEmail}
+                  disabled={sendingMassEmail}
+                  className="px-4 py-2 bg-red-600 text-white rounded-md text-sm font-medium hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center space-x-2"
+                >
+                  {sendingMassEmail && (
+                    <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                  )}
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 4.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                  </svg>
+                  <span>{sendingMassEmail ? 'Sending...' : 'Send Emails Now'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       </Modal>
     </div>

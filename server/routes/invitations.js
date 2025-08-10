@@ -461,6 +461,8 @@ router.get('/edition/:editionId', async (req, res) => {
         g.email,
         g.company,
         g.photo,
+        g.language,
+        g.greeting,
         e.name as edition_name,
         e.year as edition_year,
         COALESCE(
@@ -532,6 +534,8 @@ router.get('/edition/:editionId', async (req, res) => {
         email: row.email,
         company: row.company,
         photo: row.photo,
+        language: row.language,
+        greeting: row.greeting,
         category: row.category,
         secondary_relationships: row.secondary_relationships || []
       },
@@ -719,6 +723,115 @@ router.delete('/:invitationId', async (req, res) => {
     res.json({ message: 'Invitation deleted successfully' });
   } catch (error) {
     console.error('Error deleting invitation:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Send mass email to selected invitations
+router.post('/mass-email', async (req, res) => {
+  try {
+    const { invitation_ids, subjects, contents } = req.body;
+    
+    if (!invitation_ids || !Array.isArray(invitation_ids) || invitation_ids.length === 0) {
+      return res.status(400).json({ error: 'invitation_ids array is required' });
+    }
+    
+    if (!subjects || !contents) {
+      return res.status(400).json({ error: 'subjects and contents are required' });
+    }
+    
+    // Get all invitations with guest details
+    const invitationsResult = await pool.query(`
+      SELECT gi.id, gi.guest_id, gi.edition_id,
+             g.first_name, g.last_name, g.email, g.language, g.greeting, g.company,
+             e.name as edition_name, e.year as edition_year,
+             COALESCE(
+               (SELECT tag_name FROM (
+                 SELECT t2.name as tag_name, 
+                        CASE t2.name 
+                          WHEN 'filmmaker' THEN 1
+                          WHEN 'press' THEN 2  
+                          WHEN 'staff' THEN 3
+                          WHEN 'guest' THEN 4
+                          ELSE 5
+                        END as priority
+                 FROM guest_tags gt2 
+                 JOIN tags t2 ON gt2.tag_id = t2.id 
+                 WHERE gt2.guest_id = g.id 
+                 AND t2.name IN ('filmmaker', 'press', 'staff', 'guest')
+                 ORDER BY priority
+                 LIMIT 1
+               ) sub),
+               'guest'
+             ) as category
+      FROM guest_invitations gi
+      JOIN guests g ON gi.guest_id = g.id
+      JOIN editions e ON gi.edition_id = e.id
+      WHERE gi.id = ANY($1)
+    `, [invitation_ids]);
+    
+    if (invitationsResult.rows.length === 0) {
+      return res.status(404).json({ error: 'No invitations found for the provided IDs' });
+    }
+    
+    const invitations = invitationsResult.rows;
+    let successCount = 0;
+    let errorCount = 0;
+    const errors = [];
+    
+    // Send emails to each invitation
+    for (const invitation of invitations) {
+      try {
+        const guestLanguage = invitation.language || 'english';
+        const subject = subjects[guestLanguage];
+        const content = contents[guestLanguage];
+        
+        if (!subject || !content) {
+          errors.push(`Missing ${guestLanguage} version for ${invitation.first_name} ${invitation.last_name}`);
+          errorCount++;
+          continue;
+        }
+        
+        // Simple HTML formatting for the email content
+        const emailHtml = content.replace(/\n/g, '<br>');
+        
+        const emailData = {
+          to: invitation.email,
+          subject: subject,
+          html: `<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <div style="margin-bottom: 20px;">
+              ${invitation.greeting ? `<p>${invitation.greeting}</p>` : ''}
+              ${emailHtml}
+            </div>
+            <hr style="margin: 20px 0; border: none; border-top: 1px solid #eee;">
+            <div style="color: #666; font-size: 12px;">
+              <p>This email was sent to: ${invitation.first_name} ${invitation.last_name}</p>
+              <p>Event: ${invitation.edition_name}</p>
+              <p>Category: ${invitation.category}</p>
+            </div>
+          </div>`,
+        };
+        
+        await sendEmail(emailData);
+        successCount++;
+        
+      } catch (emailError) {
+        console.error(`Error sending email to ${invitation.email}:`, emailError.message);
+        errors.push(`Failed to send to ${invitation.first_name} ${invitation.last_name}: ${emailError.message}`);
+        errorCount++;
+      }
+    }
+    
+    res.json({
+      message: `Mass email completed`,
+      success_count: successCount,
+      error_count: errorCount,
+      total: invitations.length,
+      errors: errors
+    });
+    
+  } catch (error) {
+    logError(error, req, { operation: 'send_mass_email', formData: req.body });
     res.status(500).json({ error: error.message });
   }
 });
