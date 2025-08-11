@@ -208,6 +208,7 @@ function GuestModal({
               <div className="flex-shrink-0">
                 <PhotoUpload
                   currentPhoto={formData.photo}
+                  image_urls={guest?.image_urls}
                   onPhotoChange={(photo) => setFormData({ ...formData, photo })}
                   guestId={guest?.id}
                   guestData={guest}

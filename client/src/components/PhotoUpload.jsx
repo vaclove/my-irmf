@@ -3,14 +3,20 @@ import Cropper from 'react-easy-crop'
 import { useToast } from '../contexts/ToastContext'
 import { guestApi } from '../utils/api'
 
-const PhotoUpload = ({ currentPhoto, onPhotoChange, disabled = false, guestId = null, guestData = null }) => {
+const PhotoUpload = ({ currentPhoto, image_urls, onPhotoChange, disabled = false, guestId = null, guestData = null }) => {
   const { error: showError, success } = useToast()
   const [selectedFile, setSelectedFile] = useState(null)
   const [crop, setCrop] = useState({ x: 0, y: 0 })
   const [zoom, setZoom] = useState(1)
   const [croppedAreaPixels, setCroppedAreaPixels] = useState(null)
   const [showCropper, setShowCropper] = useState(false)
-  const [previewUrl, setPreviewUrl] = useState(currentPhoto || null)
+  const [previewUrl, setPreviewUrl] = useState(() => {
+    // Priority: S3 URLs > legacy base64 photo
+    if (image_urls?.medium) {
+      return image_urls.medium;
+    }
+    return currentPhoto || null;
+  })
   const [saving, setSaving] = useState(false)
   const fileInputRef = useRef(null)
 
