@@ -1352,6 +1352,7 @@ function Invitations() {
                       >
                         <Avatar
                           photo={invitation.guest?.photo}
+                          image_urls={invitation.guest?.image_urls}
                           firstName={invitation.guest?.first_name}
                           lastName={invitation.guest?.last_name}
                           size={condensedView ? "xs" : "sm"}
@@ -1530,6 +1531,7 @@ function Invitations() {
                           >
                             <Avatar
                               photo={guest.photo}
+                              image_urls={guest.image_urls}
                               firstName={guest.first_name}
                               lastName={guest.last_name}
                               size={condensedView ? "xs" : "sm"}
@@ -1856,6 +1858,7 @@ function Invitations() {
                 <div className="flex items-center space-x-4">
                   <Avatar
                     photo={selectedInvitation.guest?.photo}
+                    image_urls={selectedInvitation.guest?.image_urls}
                     firstName={selectedInvitation.guest?.first_name}
                     lastName={selectedInvitation.guest?.last_name}
                     size="md"

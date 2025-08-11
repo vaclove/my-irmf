@@ -1,5 +1,6 @@
 const Avatar = ({ 
   photo, 
+  image_urls,
   firstName, 
   lastName, 
   size = 'md', 
@@ -37,10 +38,30 @@ const Avatar = ({
     return colors[charCode % colors.length]
   }
 
-  if (photo) {
+  // Determine which image source to use
+  const getImageSrc = () => {
+    // Priority: S3 URLs > legacy base64 photo
+    if (image_urls) {
+      // Use appropriate size based on avatar size
+      if (size === 'xs' || size === 'sm') {
+        return image_urls.thumbnail;
+      } else if (size === 'md') {
+        return image_urls.medium;
+      } else {
+        return image_urls.original || image_urls.medium;
+      }
+    }
+    
+    // Fallback to legacy base64 photo
+    return photo;
+  };
+
+  const imageSrc = getImageSrc();
+  
+  if (imageSrc) {
     return (
       <img
-        src={photo}
+        src={imageSrc}
         alt={`${firstName} ${lastName}`}
         className={`${sizeClasses[size]} rounded-full object-cover border-2 border-gray-200 ${className}`}
       />

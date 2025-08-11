@@ -272,6 +272,7 @@ function EditionDetail() {
                     <div className="flex items-center space-x-3">
                       <Avatar
                         photo={guest.photo}
+                        image_urls={guest.image_urls}
                         firstName={guest.first_name}
                         lastName={guest.last_name}
                         size="sm"

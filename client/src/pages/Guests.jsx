@@ -589,6 +589,7 @@ function Guests() {
                     >
                       <Avatar
                         photo={guest.photo}
+                        image_urls={guest.image_urls}
                         firstName={guest.first_name}
                         lastName={guest.last_name}
                         size={condensedView ? "xs" : "sm"}
