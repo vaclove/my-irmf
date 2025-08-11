@@ -26,10 +26,16 @@ function EmailTemplates() {
     accommodationContent: ''
   })
   
-  // Track unsaved changes for both languages
+  // Track unsaved changes for both languages and template types
   const [unsavedChanges, setUnsavedChanges] = useState({
-    english: { subject: '', content: '', accommodationContent: '' },
-    czech: { subject: '', content: '', accommodationContent: '' }
+    invitation: {
+      english: { subject: '', content: '', accommodationContent: '' },
+      czech: { subject: '', content: '', accommodationContent: '' }
+    },
+    confirmation: {
+      english: { subject: '', content: '', accommodationContent: '' },
+      czech: { subject: '', content: '', accommodationContent: '' }
+    }
   })
 
   useEffect(() => {
@@ -60,15 +66,16 @@ function EmailTemplates() {
   }, [selectedEdition, currentTemplateType])
 
   useEffect(() => {
-    // Update form data when switching languages
+    // Update form data when switching languages or template types
     // Use unsaved changes if they exist, otherwise use template data
-    const hasUnsavedChanges = unsavedChanges[currentLanguage].subject || unsavedChanges[currentLanguage].content
+    const currentUnsaved = unsavedChanges[currentTemplateType]?.[currentLanguage]
+    const hasUnsavedChanges = currentUnsaved?.subject || currentUnsaved?.content
     
     if (hasUnsavedChanges) {
       setFormData({
-        subject: unsavedChanges[currentLanguage].subject,
-        content: unsavedChanges[currentLanguage].content,
-        accommodationContent: unsavedChanges[currentLanguage].accommodationContent
+        subject: currentUnsaved.subject,
+        content: currentUnsaved.content,
+        accommodationContent: currentUnsaved.accommodationContent
       })
     } else if (templates[currentLanguage]) {
       const templateData = {
@@ -77,19 +84,25 @@ function EmailTemplates() {
         accommodationContent: templates[currentLanguage].accommodation_content || ''
       }
       setFormData(templateData)
-      // Initialize unsaved changes with template data
+      // Initialize unsaved changes with template data for current template type and language
       setUnsavedChanges(prev => ({
         ...prev,
-        [currentLanguage]: templateData
+        [currentTemplateType]: {
+          ...prev[currentTemplateType],
+          [currentLanguage]: templateData
+        }
       }))
     } else {
       setFormData({ subject: '', content: '', accommodationContent: '' })
       setUnsavedChanges(prev => ({
         ...prev,
-        [currentLanguage]: { subject: '', content: '', accommodationContent: '' }
+        [currentTemplateType]: {
+          ...prev[currentTemplateType],
+          [currentLanguage]: { subject: '', content: '', accommodationContent: '' }
+        }
       }))
     }
-  }, [currentLanguage, templates])
+  }, [currentLanguage, currentTemplateType, templates])
 
   const fetchEditions = async () => {
     try {
@@ -142,10 +155,13 @@ function EmailTemplates() {
       // Refresh templates
       await fetchTemplates()
       
-      // Clear unsaved changes for current language
+      // Clear unsaved changes for current language and template type
       setUnsavedChanges(prev => ({
         ...prev,
-        [currentLanguage]: { subject: '', content: '', accommodationContent: '' }
+        [currentTemplateType]: {
+          ...prev[currentTemplateType],
+          [currentLanguage]: { subject: '', content: '', accommodationContent: '' }
+        }
       }))
       
       success('Template saved successfully!')
@@ -302,7 +318,7 @@ function EmailTemplates() {
                       <label className="block text-sm font-medium text-gray-700 mb-2">Subject</label>
                       <input
                         type="text"
-                        value={unsavedChanges.english?.subject || templates.english?.subject || ''}
+                        value={unsavedChanges[currentTemplateType]?.english?.subject || templates.english?.subject || ''}
                         readOnly
                         className="w-full border border-gray-300 rounded-md px-3 py-2 bg-gray-50 text-gray-600"
                       />
@@ -311,7 +327,7 @@ function EmailTemplates() {
                       <label className="block text-sm font-medium text-gray-700 mb-2">Content</label>
                       <div className="border border-gray-300 rounded-md bg-gray-50">
                         <MDEditor
-                          value={unsavedChanges.english?.content || templates.english?.markdown_content || templates.english?.body || ''}
+                          value={unsavedChanges[currentTemplateType]?.english?.content || templates.english?.markdown_content || templates.english?.body || ''}
                           preview="preview"
                           hideToolbar={true}
                           visibleDragBar={false}
@@ -323,7 +339,7 @@ function EmailTemplates() {
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">Accommodation Info</label>
                       <textarea
-                        value={unsavedChanges.english?.accommodationContent || templates.english?.accommodation_content || ''}
+                        value={unsavedChanges[currentTemplateType]?.english?.accommodationContent || templates.english?.accommodation_content || ''}
                         readOnly
                         className="w-full border border-gray-300 rounded-md px-3 py-2 bg-gray-50 text-gray-600"
                         rows={3}
@@ -340,7 +356,7 @@ function EmailTemplates() {
                       <label className="block text-sm font-medium text-gray-700 mb-2">Subject</label>
                       <input
                         type="text"
-                        value={unsavedChanges.czech?.subject || templates.czech?.subject || ''}
+                        value={unsavedChanges[currentTemplateType]?.czech?.subject || templates.czech?.subject || ''}
                         readOnly
                         className="w-full border border-gray-300 rounded-md px-3 py-2 bg-gray-50 text-gray-600"
                       />
@@ -349,7 +365,7 @@ function EmailTemplates() {
                       <label className="block text-sm font-medium text-gray-700 mb-2">Content</label>
                       <div className="border border-gray-300 rounded-md bg-gray-50">
                         <MDEditor
-                          value={unsavedChanges.czech?.content || templates.czech?.markdown_content || templates.czech?.body || ''}
+                          value={unsavedChanges[currentTemplateType]?.czech?.content || templates.czech?.markdown_content || templates.czech?.body || ''}
                           preview="preview"
                           hideToolbar={true}
                           visibleDragBar={false}
@@ -361,7 +377,7 @@ function EmailTemplates() {
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">Accommodation Info</label>
                       <textarea
-                        value={unsavedChanges.czech?.accommodationContent || templates.czech?.accommodation_content || ''}
+                        value={unsavedChanges[currentTemplateType]?.czech?.accommodationContent || templates.czech?.accommodation_content || ''}
                         readOnly
                         className="w-full border border-gray-300 rounded-md px-3 py-2 bg-gray-50 text-gray-600"
                         rows={3}
@@ -394,7 +410,10 @@ function EmailTemplates() {
                         setFormData(newFormData)
                         setUnsavedChanges(prev => ({
                           ...prev,
-                          [currentLanguage]: newFormData
+                          [currentTemplateType]: {
+                            ...prev[currentTemplateType],
+                            [currentLanguage]: newFormData
+                          }
                         }))
                       }}
                       className="w-full border border-gray-300 rounded-md px-3 py-2"
@@ -417,7 +436,10 @@ function EmailTemplates() {
                           setFormData(newFormData)
                           setUnsavedChanges(prev => ({
                             ...prev,
-                            [currentLanguage]: newFormData
+                            [currentTemplateType]: {
+                              ...prev[currentTemplateType],
+                              [currentLanguage]: newFormData
+                            }
                           }))
                         }}
                         preview={editorMode}
@@ -467,7 +489,10 @@ Festival Team`,
                         setFormData(newFormData)
                         setUnsavedChanges(prev => ({
                           ...prev,
-                          [currentLanguage]: newFormData
+                          [currentTemplateType]: {
+                            ...prev[currentTemplateType],
+                            [currentLanguage]: newFormData
+                          }
                         }))
                       }}
                       className="w-full border border-gray-300 rounded-md px-3 py-2"
