@@ -696,7 +696,7 @@ router.get('/edition/:editionId/assigned-not-invited', async (req, res) => {
         SELECT 1 FROM guest_invitations gi 
         WHERE gi.guest_id = g.id AND gi.edition_id = e.id
       )
-      ORDER BY g.first_name, g.last_name
+      ORDER BY g.last_name, g.first_name
     `, [editionId]);
     
     // Transform data to match frontend expectations
