@@ -84,23 +84,23 @@ function generateEnglishGreeting(firstName, lastName, gender, formal, fallbackTo
     // Formal greeting with surname
     switch (gender) {
       case 'male':
-        return `Dear Mr. ${lastName}`;
+        return `Dear Mr. ${lastName},`;
       case 'female':
-        return `Dear Ms. ${lastName}`;
+        return `Dear Ms. ${lastName},`;
       default:
         // Unknown gender - use first name or gender-neutral approach
         if (fallbackToFirstName && firstName) {
-          return `Dear ${firstName}`;
+          return `Dear ${firstName},`;
         }
-        return `Dear Mr./Ms. ${lastName}`;
+        return `Dear Mr./Ms. ${lastName},`;
     }
   } else if (firstName) {
     // Informal or first-name greeting
-    return `Dear ${firstName}`;
+    return `Dear ${firstName},`;
   }
   
   // Last resort
-  return 'Dear Guest';
+  return 'Dear Guest,';
 }
 
 /**
@@ -118,23 +118,23 @@ function generateCzechGreeting(firstName, lastName, gender, formal, fallbackToFi
     const honorific = getCzechHonorific(gender);
     const declinedSurname = declineSurnameToVocative(lastName, gender);
     const vazeny = gender === 'female' ? 'Vážená' : 'Vážený';
-    return `${vazeny} ${honorific} ${declinedSurname}`;
+    return `${vazeny} ${honorific} ${declinedSurname},`;
   } else if (formal && lastName) {
     // Formal but unknown gender - use neutral form
     const honorific = getCzechHonorific('male'); // Default to male form
     const declinedSurname = declineSurnameToVocative(lastName, 'male');
-    return `Vážený ${honorific} ${declinedSurname}`;
+    return `Vážený ${honorific} ${declinedSurname},`;
   } else if (firstName) {
     // Informal or first-name greeting
     if (gender === 'female') {
-      return `Vážená ${firstName}`;
+      return `Vážená ${firstName},`;
     } else {
-      return `Vážený ${firstName}`;
+      return `Vážený ${firstName},`;
     }
   }
   
   // Last resort
-  return 'Vážený hosté'; // "Dear guests" - neutral plural
+  return 'Vážení hosté,'; // "Dear guests" - neutral plural
 }
 
 /**
@@ -146,14 +146,14 @@ function generateCzechGreeting(firstName, lastName, gender, formal, fallbackToFi
  */
 function generateFallbackGreeting(firstName, lastName, language) {
   if (firstName) {
-    return language === 'czech' ? `Vážený ${firstName}` : `Dear ${firstName}`;
+    return language === 'czech' ? `Vážený ${firstName},` : `Dear ${firstName},`;
   }
   
   if (lastName) {
-    return language === 'czech' ? `Vážený pane ${lastName}` : `Dear ${lastName}`;
+    return language === 'czech' ? `Vážený pane ${lastName},` : `Dear ${lastName},`;
   }
   
-  return language === 'czech' ? 'Vážený hoste' : 'Dear Guest';
+  return language === 'czech' ? 'Vážený hoste,' : 'Dear Guest,';
 }
 
 /**

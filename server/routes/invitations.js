@@ -461,6 +461,7 @@ router.get('/edition/:editionId', async (req, res) => {
         g.email,
         g.company,
         g.photo,
+        g.image_path,
         g.language,
         g.greeting,
         e.name as edition_name,
@@ -514,36 +515,50 @@ router.get('/edition/:editionId', async (req, res) => {
     `, [editionId]);
     
     // Transform data to match frontend expectations
-    const invitations = result.rows.map(row => ({
-      id: row.id,
-      guest_id: row.guest_id,
-      edition_id: row.edition_id,
-      token: row.token,
-      sent_at: row.sent_at,
-      opened_at: row.opened_at,
-      responded_at: row.responded_at,
-      badge_printed_at: row.badge_printed_at,
-      status: row.status,
-      accommodation: row.accommodation,
-      covered_nights: row.covered_nights,
-      accommodation_dates: row.accommodation_dates || [],
-      guest: {
+    const invitations = result.rows.map(row => {
+      // Prepare guest object with S3 image URLs
+      const guest = {
         id: row.guest_id,
         first_name: row.first_name,
         last_name: row.last_name,
         email: row.email,
         company: row.company,
-        photo: row.photo,
         language: row.language,
         greeting: row.greeting,
         category: row.category,
         secondary_relationships: row.secondary_relationships || []
-      },
-      edition: {
-        name: row.edition_name,
-        year: row.edition_year
+      };
+      
+      // Add S3 image URLs if the guest has migrated images
+      if (row.image_path) {
+        const guestImageStorage = require('../services/guestImageStorage');
+        guest.image_urls = {
+          thumbnail: guestImageStorage.getImageUrl(row.image_path, 'thumbnail'),
+          medium: guestImageStorage.getImageUrl(row.image_path, 'medium'),
+          original: guestImageStorage.getImageUrl(row.image_path, 'original')
+        };
       }
-    }));
+      
+      return {
+        id: row.id,
+        guest_id: row.guest_id,
+        edition_id: row.edition_id,
+        token: row.token,
+        sent_at: row.sent_at,
+        opened_at: row.opened_at,
+        responded_at: row.responded_at,
+        badge_printed_at: row.badge_printed_at,
+        status: row.status,
+        accommodation: row.accommodation,
+        covered_nights: row.covered_nights,
+        accommodation_dates: row.accommodation_dates || [],
+        guest: guest,
+        edition: {
+          name: row.edition_name,
+          year: row.edition_year
+        }
+      };
+    });
     
     res.json({ data: invitations });
   } catch (error) {
@@ -633,6 +648,7 @@ router.get('/edition/:editionId/assigned-not-invited', async (req, res) => {
         g.email,
         g.company,
         g.photo,
+        g.image_path,
         g.language,
         e.name as edition_name,
         e.year as edition_year,
@@ -684,21 +700,35 @@ router.get('/edition/:editionId/assigned-not-invited', async (req, res) => {
     `, [editionId]);
     
     // Transform data to match frontend expectations
-    const assignedNotInvited = result.rows.map(row => ({
-      id: row.id,
-      first_name: row.first_name,
-      last_name: row.last_name,
-      email: row.email,
-      company: row.company,
-      photo: row.photo,
-      language: row.language,
-      category: row.category,
-      secondary_relationships: row.secondary_relationships || [],
-      edition: {
-        name: row.edition_name,
-        year: row.edition_year
+    const assignedNotInvited = result.rows.map(row => {
+      const guest = {
+        id: row.id,
+        first_name: row.first_name,
+        last_name: row.last_name,
+        email: row.email,
+        company: row.company,
+        photo: row.photo,
+        language: row.language,
+        category: row.category,
+        secondary_relationships: row.secondary_relationships || [],
+        edition: {
+          name: row.edition_name,
+          year: row.edition_year
+        }
+      };
+      
+      // Add S3 image URLs if the guest has migrated images
+      if (row.image_path) {
+        const guestImageStorage = require('../services/guestImageStorage');
+        guest.image_urls = {
+          thumbnail: guestImageStorage.getImageUrl(row.image_path, 'thumbnail'),
+          medium: guestImageStorage.getImageUrl(row.image_path, 'medium'),
+          original: guestImageStorage.getImageUrl(row.image_path, 'original')
+        };
       }
-    }));
+      
+      return guest;
+    });
     
     res.json({ data: assignedNotInvited });
   } catch (error) {

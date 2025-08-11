@@ -28,6 +28,7 @@ function Guests() {
     name: true,
     email: true,
     phone: false, // Hidden by default
+    greeting: false, // Hidden by default
     notes: true,
     tags: true
   })
@@ -363,6 +364,7 @@ function Guests() {
                       { key: 'name', label: 'Name', disabled: true },
                       { key: 'email', label: 'Email' },
                       { key: 'phone', label: 'Phone' },
+                      { key: 'greeting', label: 'Greeting' },
                       { key: 'notes', label: 'Notes' },
                       { key: 'tags', label: 'Tags' }
                     ].map(column => (
@@ -570,6 +572,9 @@ function Guests() {
                 {visibleColumns.phone && (
                   <th className={`${condensedView ? 'px-3 py-2' : 'px-6 py-3'} text-left text-xs font-medium text-gray-500 uppercase ${condensedView ? '' : 'tracking-wider'}`}>Phone</th>
                 )}
+                {visibleColumns.greeting && (
+                  <th className={`${condensedView ? 'px-3 py-2' : 'px-6 py-3'} text-left text-xs font-medium text-gray-500 uppercase ${condensedView ? '' : 'tracking-wider'}`}>Greeting</th>
+                )}
                 {visibleColumns.notes && (
                   <th className={`${condensedView ? 'px-3 py-2' : 'px-6 py-3'} text-left text-xs font-medium text-gray-500 uppercase ${condensedView ? '' : 'tracking-wider'}`}>Notes</th>
                 )}
@@ -624,6 +629,13 @@ function Guests() {
                   {visibleColumns.phone && (
                     <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} whitespace-nowrap text-sm text-gray-500`}>
                       {guest.phone || '-'}
+                    </td>
+                  )}
+                  {visibleColumns.greeting && (
+                    <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} text-sm text-gray-500 max-w-xs`}>
+                      <div className="truncate" title={guest.greeting}>
+                        {guest.greeting || '-'}
+                      </div>
                     </td>
                   )}
                   {visibleColumns.notes && (
