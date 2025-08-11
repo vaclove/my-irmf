@@ -10,20 +10,6 @@ export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(packageJson.version)
   },
-  build: {
-    // Optimize build for Azure
-    minify: 'esbuild', // Faster than terser
-    chunkSizeWarningLimit: 1000,
-    rollupOptions: {
-      output: {
-        manualChunks: {
-          vendor: ['react', 'react-dom'],
-          router: ['react-router-dom'],
-          ui: ['@uiw/react-md-editor', 'react-easy-crop']
-        }
-      }
-    }
-  },
   server: {
     port: 5173,
     proxy: {
