@@ -20,7 +20,26 @@ END $$;
 UPDATE email_templates SET template_type = 'invitation' WHERE template_type IS NULL;
 
 -- Drop old unique constraint that only considered edition_id and language
-DROP INDEX IF EXISTS email_templates_edition_language_unique;
+-- First try dropping as constraint, then as index
+DO $$ 
+BEGIN
+    -- Try to drop as constraint first
+    IF EXISTS (
+        SELECT 1 FROM information_schema.table_constraints 
+        WHERE constraint_name = 'email_templates_edition_language_unique'
+        AND table_name = 'email_templates'
+    ) THEN
+        ALTER TABLE email_templates DROP CONSTRAINT email_templates_edition_language_unique;
+    END IF;
+    
+    -- Then drop as index if it exists
+    IF EXISTS (
+        SELECT 1 FROM pg_indexes 
+        WHERE indexname = 'email_templates_edition_language_unique'
+    ) THEN
+        DROP INDEX email_templates_edition_language_unique;
+    END IF;
+END $$;
 
 -- Create new unique constraint that includes template_type (if it doesn't exist)
 DO $$ 
