@@ -998,6 +998,44 @@ function Invitations() {
       })
   }
 
+  const getFilteredAssignedNotInvited = () => {
+    return assignedNotInvited
+      .filter(guest => {
+        // Filter by search query (same logic as invitations)
+        if (searchQuery.trim()) {
+          const query = searchQuery.toLowerCase().trim()
+          const fullName = `${guest.first_name || ''} ${guest.last_name || ''}`.toLowerCase()
+          const email = (guest.email || '').toLowerCase()
+          const company = (guest.company || '').toLowerCase()
+          if (!fullName.includes(query) && !email.includes(query) && !company.includes(query)) {
+            return false
+          }
+        }
+        
+        // Filter by category (same logic as invitations)
+        if (filterCategory && guest.category !== filterCategory) {
+          return false
+        }
+        
+        // Note: Status filter doesn't apply to "assigned but not invited" since they don't have invitation status
+        
+        return true
+      })
+      .sort((a, b) => {
+        // First sort by category
+        const categoryA = a.category || 'guest'
+        const categoryB = b.category || 'guest'
+        if (categoryA !== categoryB) {
+          return categoryA.localeCompare(categoryB)
+        }
+        
+        // Then sort alphabetically by name
+        const nameA = `${a.first_name || ''} ${a.last_name || ''}`.toLowerCase()
+        const nameB = `${b.first_name || ''} ${b.last_name || ''}`.toLowerCase()
+        return nameA.localeCompare(nameB)
+      })
+  }
+
   const getStatusBadge = (invitation) => {
     if (invitation.status === 'badge_printed') {
       const printedDate = invitation.badge_printed_at ? formatDate(invitation.badge_printed_at) : null
@@ -1439,7 +1477,12 @@ function Invitations() {
       {selectedEdition && (
         <div className="mt-8">
           <div className="flex justify-between items-center mb-4">
-            <h2 className="text-lg font-semibold text-gray-900">Assigned but Not Invited</h2>
+            <h2 className="text-lg font-semibold text-gray-900">
+              {(searchQuery.trim() || filterCategory) ? 
+                `Filtered Assigned but Not Invited (${getFilteredAssignedNotInvited().length}/${assignedNotInvited.length})` : 
+                `Assigned but Not Invited (${assignedNotInvited.length})`
+              }
+            </h2>
           </div>
 
           {loadingAssigned ? (
@@ -1447,6 +1490,11 @@ function Invitations() {
           ) : !Array.isArray(assignedNotInvited) || assignedNotInvited.length === 0 ? (
             <div className="text-center py-8 bg-gray-50 rounded-lg">
               <h3 className="text-sm font-medium text-gray-900">All assigned guests have been invited</h3>
+            </div>
+          ) : getFilteredAssignedNotInvited().length === 0 ? (
+            <div className="text-center py-8 bg-gray-50 rounded-lg">
+              <h3 className="text-sm font-medium text-gray-900">No assigned guests match your filters</h3>
+              <p className="text-gray-600 mt-2">Try adjusting your search or category filter to see more results.</p>
             </div>
           ) : (
             <div className="bg-white shadow rounded-lg overflow-hidden">
@@ -1472,7 +1520,7 @@ function Invitations() {
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {assignedNotInvited.map((guest) => (
+                    {getFilteredAssignedNotInvited().map((guest) => (
                       <tr key={guest.id} className="hover:bg-gray-50">
                         <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} whitespace-nowrap`}>
                           <button
