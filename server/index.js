@@ -194,14 +194,6 @@ const startServer = async () => {
     await runMigrations();
     console.log('Database migrations completed');
     
-    // Run photo migration to S3 if needed
-    try {
-      const photoMigrationService = require('./services/photoMigrationService');
-      await photoMigrationService.migrateGuestPhotos();
-    } catch (error) {
-      console.error('Photo migration failed, but continuing server startup:', error.message);
-      // Don't fail server startup if photo migration fails
-    }
     
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
