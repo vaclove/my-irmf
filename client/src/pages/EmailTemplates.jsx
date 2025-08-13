@@ -69,15 +69,23 @@ function EmailTemplates() {
     // Update form data when switching languages or template types
     // Use unsaved changes if they exist, otherwise use template data
     const currentUnsaved = unsavedChanges[currentTemplateType]?.[currentLanguage]
-    const hasUnsavedChanges = currentUnsaved?.subject || currentUnsaved?.content
     
-    if (hasUnsavedChanges) {
+    // Check if we have actual meaningful unsaved changes (not just initialized empty values)
+    const hasActualChanges = currentUnsaved && templates[currentLanguage] && (
+      (currentUnsaved.subject !== templates[currentLanguage].subject) ||
+      (currentUnsaved.content !== (templates[currentLanguage].markdown_content || templates[currentLanguage].body || '')) ||
+      (currentUnsaved.accommodationContent !== (templates[currentLanguage].accommodation_content || ''))
+    )
+    
+    if (hasActualChanges && currentUnsaved.subject) {
+      // Use unsaved changes
       setFormData({
         subject: currentUnsaved.subject,
         content: currentUnsaved.content,
         accommodationContent: currentUnsaved.accommodationContent
       })
     } else if (templates[currentLanguage]) {
+      // Use template data from database
       const templateData = {
         subject: templates[currentLanguage].subject || '',
         content: templates[currentLanguage].markdown_content || templates[currentLanguage].body || '',
@@ -93,6 +101,7 @@ function EmailTemplates() {
         }
       }))
     } else {
+      // No template found - clear form
       setFormData({ subject: '', content: '', accommodationContent: '' })
       setUnsavedChanges(prev => ({
         ...prev,
@@ -124,16 +133,21 @@ function EmailTemplates() {
     try {
       setLoading(true)
       
+      // Clear templates first to ensure fresh data
+      setTemplates({ english: null, czech: null })
+      
       // Fetch both language templates for current template type
       const [englishResponse, czechResponse] = await Promise.allSettled([
         templateApi.getByLanguageAndType(selectedEdition.id, 'english', currentTemplateType),
         templateApi.getByLanguageAndType(selectedEdition.id, 'czech', currentTemplateType)
       ])
       
-      setTemplates({
+      const newTemplates = {
         english: englishResponse.status === 'fulfilled' ? englishResponse.value.data : null,
         czech: czechResponse.status === 'fulfilled' ? czechResponse.value.data : null
-      })
+      }
+      
+      setTemplates(newTemplates)
     } catch (error) {
       console.error('Error fetching templates:', error)
     } finally {
