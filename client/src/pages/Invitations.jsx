@@ -70,6 +70,9 @@ function Invitations() {
   const [showAddToRoomModal, setShowAddToRoomModal] = useState(false)
   const [selectedRoomForGuest, setSelectedRoomForGuest] = useState(null)
   const [selectedGuestToAdd, setSelectedGuestToAdd] = useState(null)
+  
+  // Status update states
+  const [updatingStatus, setUpdatingStatus] = useState(false)
 
   // Utility function to format date ranges
   const formatDateRange = (checkIn, checkOut) => {
@@ -298,6 +301,31 @@ function Invitations() {
   const handleSendInvitation = (guest) => {
     setSelectedGuestForInvitation(guest)
     setShowInvitationDialog(true)
+  }
+
+  const handleMarkAsInvited = async (guest) => {
+    try {
+      const response = await fetch('/api/invitations/mark-as-invited', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          guest_id: guest.id,
+          edition_id: selectedEdition.id
+        })
+      })
+      
+      if (!response.ok) {
+        const error = await response.json()
+        throw new Error(error.error || 'Failed to mark as invited')
+      }
+      
+      success(`${guest.first_name} ${guest.last_name} marked as invited`)
+      fetchInvitations()
+      fetchAssignedNotInvited()
+    } catch (error) {
+      console.error('Error marking as invited:', error)
+      showError(error.message || 'Failed to mark as invited')
+    }
   }
 
   const handleInvitationSent = () => {
@@ -626,7 +654,12 @@ function Invitations() {
       if (selectedInvitation && selectedInvitation.id === invitationId) {
         setSelectedInvitation(prev => ({
           ...prev,
-          accommodation_dates: selectedAccommodationDates
+          accommodation_dates: selectedAccommodationDates,
+          // If accommodation wasn't set before but now has dates, update these fields
+          accommodation: selectedAccommodationDates.length > 0 ? true : prev.accommodation,
+          covered_nights: !prev.accommodation && selectedAccommodationDates.length > 0 
+            ? selectedAccommodationDates.length 
+            : prev.covered_nights
         }))
       }
       
@@ -642,6 +675,34 @@ function Invitations() {
       showError(error.response?.data?.error || 'Failed to update accommodation dates')
     } finally {
       setSavingDates(false)
+    }
+  }
+
+  // Status update handler
+  const handleStatusUpdate = async (invitationId, newStatus) => {
+    setUpdatingStatus(true)
+    try {
+      await invitationApi.updateStatus(invitationId, newStatus)
+      success(`Status updated to ${newStatus}!`)
+      
+      // Refresh both invitations and assigned-not-invited lists to get updated data
+      await Promise.all([
+        fetchInvitations(),
+        fetchAssignedNotInvited()
+      ])
+      
+      // Update the selectedInvitation if it's the one being updated
+      if (selectedInvitation && selectedInvitation.id === invitationId) {
+        setSelectedInvitation(prev => ({
+          ...prev,
+          status: newStatus
+        }))
+      }
+    } catch (error) {
+      console.error('Error updating status:', error)
+      showError(error.response?.data?.error || 'Failed to update status')
+    } finally {
+      setUpdatingStatus(false)
     }
   }
 
@@ -1407,7 +1468,7 @@ function Invitations() {
                                   </div>
                                 </>
                               )
-                            } else if (invitation.status === 'confirmed' && invitation.accommodation_dates?.length > 0) {
+                            } else if ((invitation.status === 'confirmed' || invitation.status === 'badge_printed') && invitation.accommodation_dates?.length > 0) {
                               return (
                                 <>
                                   <div className="text-green-600">
@@ -1421,7 +1482,7 @@ function Invitations() {
                                   </button>
                                 </>
                               )
-                            } else if (invitation.status === 'confirmed') {
+                            } else if (invitation.status === 'confirmed' || invitation.status === 'badge_printed') {
                               return (
                                 <>
                                   <div className="text-green-600">
@@ -1570,12 +1631,21 @@ function Invitations() {
                           </div>
                         </td>
                         <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} whitespace-nowrap text-sm font-medium`}>
-                          <button
-                            onClick={() => handleSendInvitation(guest)}
-                            className="text-blue-600 hover:text-blue-900"
-                          >
-                            Send Invitation
-                          </button>
+                          <div className="flex flex-col gap-1">
+                            <button
+                              onClick={() => handleSendInvitation(guest)}
+                              className="text-blue-600 hover:text-blue-900 text-left"
+                            >
+                              Send Invitation
+                            </button>
+                            <button
+                              onClick={() => handleMarkAsInvited(guest)}
+                              className="text-green-600 hover:text-green-900 text-left text-sm"
+                              title="Mark as invited without sending email"
+                            >
+                              Mark as Invited
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -1881,7 +1951,21 @@ function Invitations() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700">Status</label>
-                    {getStatusBadge(selectedInvitation)}
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={selectedInvitation.status}
+                        onChange={(e) => handleStatusUpdate(selectedInvitation.id, e.target.value)}
+                        disabled={updatingStatus}
+                        className="text-xs px-2 py-1 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                      >
+                        <option value="pending">Pending</option>
+                        <option value="opened">Opened</option>
+                        <option value="confirmed">Confirmed</option>
+                        <option value="declined">Declined</option>
+                        <option value="badge_printed">Badge Printed</option>
+                      </select>
+                      {getStatusBadge(selectedInvitation)}
+                    </div>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700">Language</label>
@@ -1895,16 +1979,27 @@ function Invitations() {
                   </div>
                   <div className="col-span-3">
                     <label className="block text-sm font-medium text-gray-700">Accommodation</label>
-                    {selectedInvitation.accommodation ? (
+                    {true ? (
                       <div className="mt-1 space-y-2">
-                        <p className="text-sm text-green-600">
-                          {selectedInvitation.covered_nights} {selectedInvitation.covered_nights === 1 ? 'night' : 'nights'} covered
-                        </p>
+                        {selectedInvitation.accommodation && (
+                          <p className="text-sm text-green-600">
+                            {selectedInvitation.covered_nights} {selectedInvitation.covered_nights === 1 ? 'night' : 'nights'} covered
+                          </p>
+                        )}
+                        {!selectedInvitation.accommodation && (
+                          <p className="text-sm text-gray-500">
+                            No accommodation initially provided
+                          </p>
+                        )}
                         
                         {editingAccommodationDates ? (
                           <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-4 space-y-3">
                             <div className="text-sm text-blue-700 font-medium">
-                              Select continuous accommodation dates (max {selectedInvitation.covered_nights} nights):
+                              {selectedInvitation.covered_nights > 0 ? (
+                                <>Select continuous accommodation dates (max {selectedInvitation.covered_nights} nights):</>
+                              ) : (
+                                <>Select continuous accommodation dates:</>
+                              )}
                             </div>
                             <div className="grid grid-cols-4 gap-2 max-h-48 overflow-y-auto">
                               {(() => {
@@ -1956,7 +2051,7 @@ function Invitations() {
                                 
                                 return dates.map(date => {
                                   const isSelected = selectedAccommodationDates.includes(date)
-                                  const isDisabled = !isSelected && selectedAccommodationDates.length >= selectedInvitation.covered_nights
+                                  const isDisabled = !isSelected && selectedInvitation.covered_nights > 0 && selectedAccommodationDates.length >= selectedInvitation.covered_nights
                                   
                                   return (
                                     <button
@@ -2150,7 +2245,7 @@ function Invitations() {
                                 </div>
                               </div>
                             )
-                          } else if (selectedInvitation.status === 'confirmed' && selectedInvitation.accommodation_dates?.length > 0) {
+                          } else if ((selectedInvitation.status === 'confirmed' || selectedInvitation.status === 'badge_printed') && selectedInvitation.accommodation_dates?.length > 0) {
                             return (
                               <button
                                 onClick={() => {

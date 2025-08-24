@@ -445,17 +445,15 @@ router.get('/edition/:editionId', async (req, res) => {
         gi.guest_id,
         gi.edition_id,
         gi.token,
-        gi.invited_at as sent_at,
-        gi.confirmed_at as responded_at,
+        gi.invited_at,
+        gi.sent_at,
+        gi.opened_at,
+        gi.confirmed_at,
+        gi.declined_at,
         gi.accommodation,
         gi.covered_nights,
         gi.badge_printed_at,
-        CASE 
-          WHEN gi.badge_printed_at IS NOT NULL THEN 'badge_printed'
-          WHEN gi.confirmed_at IS NOT NULL THEN 'confirmed'
-          ELSE 'sent'
-        END as status,
-        NULL as opened_at,
+        gi.status,
         g.first_name,
         g.last_name,
         g.email,
@@ -580,7 +578,7 @@ router.put('/:invitationId/accommodation-dates', async (req, res) => {
 
     await client.query('BEGIN');
 
-    // Check if invitation exists and has accommodation
+    // Check if invitation exists
     const invitationResult = await client.query(
       'SELECT id, accommodation, covered_nights FROM guest_invitations WHERE id = $1',
       [invitationId]
@@ -592,17 +590,16 @@ router.put('/:invitationId/accommodation-dates', async (req, res) => {
     }
 
     const invitation = invitationResult.rows[0];
-    if (!invitation.accommodation) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'This invitation does not include accommodation' });
-    }
-
-    // Validate that the number of dates doesn't exceed covered_nights
-    if (accommodation_dates.length > invitation.covered_nights) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ 
-        error: `Cannot select more than ${invitation.covered_nights} nights` 
-      });
+    
+    // If invitation originally had accommodation with covered nights, validate against that limit
+    // Otherwise, allow any number of dates to be selected
+    if (invitation.accommodation && invitation.covered_nights > 0) {
+      if (accommodation_dates.length > invitation.covered_nights) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ 
+          error: `Cannot select more than ${invitation.covered_nights} nights` 
+        });
+      }
     }
 
     // Delete existing accommodation selections
@@ -616,6 +613,14 @@ router.put('/:invitationId/accommodation-dates', async (req, res) => {
       await client.query(
         'INSERT INTO accommodation_selections (invitation_id, selected_date) VALUES ($1, $2::date)',
         [invitationId, date]
+      );
+    }
+
+    // If guest didn't have accommodation before but now has dates, update the accommodation flag
+    if (!invitation.accommodation && accommodation_dates.length > 0) {
+      await client.query(
+        'UPDATE guest_invitations SET accommodation = true, covered_nights = $1 WHERE id = $2',
+        [accommodation_dates.length, invitationId]
       );
     }
 
@@ -738,6 +743,69 @@ router.get('/edition/:editionId/assigned-not-invited', async (req, res) => {
 });
 
 // Delete invitation
+// Update invitation status manually
+router.put('/:invitationId/status', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { invitationId } = req.params;
+    const { status, is_manual_change = true } = req.body;
+    
+    // Validate status
+    const validStatuses = ['pending', 'opened', 'confirmed', 'declined', 'badge_printed'];
+    if (!status || !validStatuses.includes(status)) {
+      return res.status(400).json({ 
+        error: 'Invalid status. Must be one of: ' + validStatuses.join(', ') 
+      });
+    }
+    
+    await client.query('BEGIN');
+    
+    // Check if invitation exists
+    const invitationResult = await client.query(
+      'SELECT id, status FROM guest_invitations WHERE id = $1',
+      [invitationId]
+    );
+    
+    if (invitationResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Invitation not found' });
+    }
+    
+    const currentStatus = invitationResult.rows[0].status;
+    
+    // Update the status and set appropriate timestamps
+    let updateQuery = 'UPDATE guest_invitations SET status = $1, is_manual_change = $2';
+    const updateParams = [status, is_manual_change];
+    
+    // Set timestamps based on status change
+    if (status === 'opened' && currentStatus === 'pending') {
+      updateQuery += ', opened_at = CURRENT_TIMESTAMP';
+    } else if (status === 'confirmed' && currentStatus !== 'confirmed') {
+      updateQuery += ', confirmed_at = CURRENT_TIMESTAMP';
+    } else if (status === 'declined' && currentStatus !== 'declined') {
+      updateQuery += ', declined_at = CURRENT_TIMESTAMP';
+    }
+    
+    updateQuery += ' WHERE id = $3 RETURNING *';
+    updateParams.push(invitationId);
+    
+    const result = await client.query(updateQuery, updateParams);
+    
+    await client.query('COMMIT');
+    
+    res.json({ 
+      message: 'Invitation status updated successfully',
+      invitation: result.rows[0]
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error updating invitation status:', error);
+    res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
 router.delete('/:invitationId', async (req, res) => {
   try {
     const { invitationId } = req.params;
@@ -862,6 +930,109 @@ router.post('/mass-email', async (req, res) => {
     
   } catch (error) {
     logError(error, req, { operation: 'send_mass_email', formData: req.body });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Mark guest as invited without sending email
+router.post('/mark-as-invited', async (req, res) => {
+  const { guest_id, edition_id, accommodation = false, covered_nights = 0 } = req.body;
+  
+  try {
+    if (!guest_id || !edition_id) {
+      return res.status(400).json({ error: 'Guest ID and Edition ID are required' });
+    }
+    
+    // Check if guest has the year tag for this edition
+    const guestEditionResult = await pool.query(`
+      SELECT g.first_name || ' ' || g.last_name as name, 
+             g.first_name, g.last_name, g.email, g.language as guest_language,
+             e.name as edition_name, e.year,
+             COALESCE(
+               (SELECT tag_name FROM (
+                 SELECT t2.name as tag_name, 
+                        CASE t2.name 
+                          WHEN 'filmmaker' THEN 1
+                          WHEN 'press' THEN 2  
+                          WHEN 'staff' THEN 3
+                          WHEN 'guest' THEN 4
+                          ELSE 5
+                        END as priority
+                 FROM guest_tags gt2 
+                 JOIN tags t2 ON gt2.tag_id = t2.id 
+                 WHERE gt2.guest_id = g.id 
+                 AND t2.name IN ('filmmaker', 'press', 'staff', 'guest')
+                 ORDER BY priority
+                 LIMIT 1
+               ) sub),
+               'guest'
+             ) as category
+      FROM guests g
+      JOIN guest_tags gt ON g.id = gt.guest_id
+      JOIN tags year_tag ON gt.tag_id = year_tag.id
+      JOIN editions e ON year_tag.name = e.year::text
+      WHERE g.id = $1 AND e.id = $2
+    `, [guest_id, edition_id]);
+    
+    if (guestEditionResult.rows.length === 0) {
+      return res.status(404).json({ 
+        error: 'Guest is not assigned to this edition. Please assign the year tag to the guest first.' 
+      });
+    }
+    
+    const assignment = guestEditionResult.rows[0];
+    
+    // Generate a confirmation token for tracking purposes
+    const confirmationToken = crypto.randomBytes(32).toString('hex');
+    
+    // Get default template ID for tracking
+    const templateResult = await pool.query(`
+      SELECT id FROM email_templates 
+      WHERE template_type = 'invitation'
+      ORDER BY created_at DESC
+      LIMIT 1
+    `);
+    
+    const templateId = templateResult.rows.length > 0 ? templateResult.rows[0].id : null;
+    
+    // Insert or update invitation tracking (mark as manually invited)
+    await pool.query(
+      `INSERT INTO guest_invitations (guest_id, edition_id, template_id, token, invited_at, accommodation, covered_nights, manual_invitation)
+       VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, $5, $6, true)
+       ON CONFLICT (guest_id, edition_id, template_id) 
+       DO UPDATE SET 
+         invited_at = CURRENT_TIMESTAMP,
+         token = $4,
+         accommodation = $5,
+         covered_nights = $6,
+         manual_invitation = true`,
+      [guest_id, edition_id, templateId, confirmationToken, accommodation, covered_nights]
+    );
+
+    // Assign badge number if guest doesn't have one for this edition
+    const badgeNumberResult = await pool.query(`
+      SELECT id FROM guest_badge_numbers 
+      WHERE guest_id = $1 AND edition_id = $2
+    `, [guest_id, edition_id]);
+    
+    if (badgeNumberResult.rows.length === 0) {
+      await pool.query(`
+        INSERT INTO guest_badge_numbers (guest_id, edition_id, badge_number)
+        VALUES ($1, $2, get_next_badge_number($2))
+      `, [guest_id, edition_id]);
+    }
+    
+    res.json({ 
+      message: 'Guest marked as invited successfully',
+      invited_at: new Date().toISOString(),
+      token: confirmationToken,
+      accommodation,
+      covered_nights,
+      manual_invitation: true
+    });
+    
+  } catch (error) {
+    logError(error, req, { operation: 'mark_as_invited', guestId: guest_id, editionId: edition_id, formData: req.body });
     res.status(500).json({ error: error.message });
   }
 });
