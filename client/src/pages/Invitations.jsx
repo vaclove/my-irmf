@@ -56,6 +56,8 @@ function Invitations() {
   const [editingAccommodationDates, setEditingAccommodationDates] = useState(false)
   const [selectedAccommodationDates, setSelectedAccommodationDates] = useState([])
   const [savingDates, setSavingDates] = useState(false)
+  const [editingCoveredNights, setEditingCoveredNights] = useState(false)
+  const [tempCoveredNights, setTempCoveredNights] = useState(0)
   
   // Tab and rooming list states
   const [activeTab, setActiveTab] = useState('invitations')
@@ -71,19 +73,33 @@ function Invitations() {
   const [selectedRoomForGuest, setSelectedRoomForGuest] = useState(null)
   const [selectedGuestToAdd, setSelectedGuestToAdd] = useState(null)
 
+  // Extra nights management states
+  const [extraNightsRequests, setExtraNightsRequests] = useState([])
+  const [loadingExtraNights, setLoadingExtraNights] = useState(false)
+  const [showExtraNightsTab, setShowExtraNightsTab] = useState(false)
+  const [processingExtraNights, setProcessingExtraNights] = useState(false)
+
   // Utility function to format date ranges
   const formatDateRange = (checkIn, checkOut) => {
     const startDate = new Date(checkIn + 'T12:00:00')
     const endDate = new Date(checkOut + 'T12:00:00')
     endDate.setDate(endDate.getDate() - 1) // Checkout is morning, so last night is day before
     
-    return `${startDate.toLocaleDateString('en-US', { 
+    const startFormatted = startDate.toLocaleDateString('en-US', { 
       month: 'short', 
       day: 'numeric' 
-    })} - ${endDate.toLocaleDateString('en-US', { 
+    })
+    const endFormatted = endDate.toLocaleDateString('en-US', { 
       month: 'short', 
       day: 'numeric' 
-    })}`
+    })
+    
+    // If it's the same date (single night), just show one date
+    if (startFormatted === endFormatted) {
+      return startFormatted
+    }
+    
+    return `${startFormatted} - ${endFormatted}`
   }
 
   useEffect(() => {
@@ -91,6 +107,7 @@ function Invitations() {
       fetchInvitations()
       fetchAssignedNotInvited()
       fetchRoomAssignments()
+      fetchExtraNightsRequests()
     } else {
       setLoading(false)
       setLoadingAssigned(false)
@@ -138,6 +155,44 @@ function Invitations() {
       setInvitations([]) // Ensure it's always an array
     } finally {
       setLoading(false)
+    }
+  }
+
+  const fetchExtraNightsRequests = async () => {
+    if (!selectedEdition) return
+    try {
+      setLoadingExtraNights(true)
+      const response = await invitationApi.getExtraNightsRequests({
+        edition_id: selectedEdition.id,
+        status: 'pending_approval'
+      })
+      setExtraNightsRequests(response.data || [])
+    } catch (error) {
+      console.error('Error fetching extra nights requests:', error)
+      showError('Failed to load extra nights requests')
+    } finally {
+      setLoadingExtraNights(false)
+    }
+  }
+
+  const handleExtraNightsStatus = async (invitationId, status) => {
+    try {
+      setProcessingExtraNights(true)
+      await invitationApi.updateExtraNightsStatus(invitationId, status)
+      success(`Extra nights request ${status}`)
+      
+      // Refresh the extra nights list
+      await fetchExtraNightsRequests()
+      
+      // Also refresh main invitations if needed
+      if (activeTab === 'invitations') {
+        await fetchInvitations()
+      }
+    } catch (error) {
+      console.error(`Error ${status} extra nights:`, error)
+      showError(`Failed to ${status} extra nights request`)
+    } finally {
+      setProcessingExtraNights(false)
     }
   }
 
@@ -1156,6 +1211,23 @@ function Invitations() {
           >
             Rooming
           </button>
+          <button
+            onClick={() => {
+              setActiveTab('extra-nights')
+              fetchExtraNightsRequests() // Fetch extra nights requests when opening tab
+            }}
+            className={`py-2 px-1 border-b-2 font-medium text-sm ${
+              activeTab === 'extra-nights'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            Extra Nights {extraNightsRequests.length > 0 && (
+              <span className="ml-1 bg-red-100 text-red-800 text-xs font-medium px-2 py-0.5 rounded-full">
+                {extraNightsRequests.length}
+              </span>
+            )}
+          </button>
         </nav>
       </div>
 
@@ -1399,8 +1471,39 @@ function Invitations() {
                             if (assignment) {
                               return (
                                 <>
-                                  <div className="text-green-600">
-                                    {invitation.covered_nights} {invitation.covered_nights === 1 ? 'night' : 'nights'} • {formatDateRange(assignment.check_in_date, assignment.check_out_date)}
+                                  <div>
+                                    {(() => {
+                                      const totalNights = invitation.accommodation_dates?.length || 0;
+                                      const coveredNights = invitation.covered_nights || 0;
+                                      const extraNights = Math.max(0, totalNights - coveredNights);
+                                      
+                                      if (totalNights === 0) {
+                                        return (
+                                          <div className="text-green-600">
+                                            {coveredNights} {coveredNights === 1 ? 'night' : 'nights'} • {formatDateRange(assignment.check_in_date, assignment.check_out_date)}
+                                          </div>
+                                        );
+                                      }
+                                      
+                                      if (extraNights > 0) {
+                                        return (
+                                          <div className="space-y-1">
+                                            <div className="text-green-600">
+                                              {totalNights} {totalNights === 1 ? 'night' : 'nights'} • {formatDateRange(assignment.check_in_date, assignment.check_out_date)}
+                                            </div>
+                                            <div className="text-xs text-gray-500">
+                                              ({coveredNights} covered + {extraNights} extra)
+                                            </div>
+                                          </div>
+                                        );
+                                      } else {
+                                        return (
+                                          <div className="text-green-600">
+                                            {totalNights} {totalNights === 1 ? 'night' : 'nights'} • {formatDateRange(assignment.check_in_date, assignment.check_out_date)}
+                                          </div>
+                                        );
+                                      }
+                                    })()}
                                   </div>
                                   <div className="text-xs text-gray-500">
                                     {assignment.hotel_name} - {assignment.room_type_name}
@@ -1410,8 +1513,39 @@ function Invitations() {
                             } else if (invitation.status === 'confirmed' && invitation.accommodation_dates?.length > 0) {
                               return (
                                 <>
-                                  <div className="text-green-600">
-                                    {invitation.covered_nights} {invitation.covered_nights === 1 ? 'night' : 'nights'}
+                                  <div>
+                                    {(() => {
+                                      const totalNights = invitation.accommodation_dates?.length || 0;
+                                      const coveredNights = invitation.covered_nights || 0;
+                                      const extraNights = Math.max(0, totalNights - coveredNights);
+                                      
+                                      if (totalNights === 0) {
+                                        return (
+                                          <div className="text-green-600">
+                                            {coveredNights} {coveredNights === 1 ? 'night' : 'nights'}
+                                          </div>
+                                        );
+                                      }
+                                      
+                                      if (extraNights > 0) {
+                                        return (
+                                          <div className="space-y-1">
+                                            <div className="text-green-600">
+                                              {totalNights} {totalNights === 1 ? 'night' : 'nights'}
+                                            </div>
+                                            <div className="text-xs text-gray-500">
+                                              ({coveredNights} covered + {extraNights} extra)
+                                            </div>
+                                          </div>
+                                        );
+                                      } else {
+                                        return (
+                                          <div className="text-green-600">
+                                            {totalNights} {totalNights === 1 ? 'night' : 'nights'}
+                                          </div>
+                                        );
+                                      }
+                                    })()}
                                   </div>
                                   <button
                                     onClick={() => handleAssignRoom(invitation)}
@@ -1424,8 +1558,39 @@ function Invitations() {
                             } else if (invitation.status === 'confirmed') {
                               return (
                                 <>
-                                  <div className="text-green-600">
-                                    {invitation.covered_nights} {invitation.covered_nights === 1 ? 'night' : 'nights'}
+                                  <div>
+                                    {(() => {
+                                      const totalNights = invitation.accommodation_dates?.length || 0;
+                                      const coveredNights = invitation.covered_nights || 0;
+                                      const extraNights = Math.max(0, totalNights - coveredNights);
+                                      
+                                      if (totalNights === 0) {
+                                        return (
+                                          <div className="text-green-600">
+                                            {coveredNights} {coveredNights === 1 ? 'night' : 'nights'}
+                                          </div>
+                                        );
+                                      }
+                                      
+                                      if (extraNights > 0) {
+                                        return (
+                                          <div className="space-y-1">
+                                            <div className="text-green-600">
+                                              {totalNights} {totalNights === 1 ? 'night' : 'nights'}
+                                            </div>
+                                            <div className="text-xs text-gray-500">
+                                              ({coveredNights} covered + {extraNights} extra)
+                                            </div>
+                                          </div>
+                                        );
+                                      } else {
+                                        return (
+                                          <div className="text-green-600">
+                                            {totalNights} {totalNights === 1 ? 'night' : 'nights'}
+                                          </div>
+                                        );
+                                      }
+                                    })()}
                                   </div>
                                   <div className="text-xs text-amber-600">
                                     No dates selected
@@ -1434,8 +1599,25 @@ function Invitations() {
                               )
                             } else {
                               return (
-                                <div className="text-green-600">
-                                  {invitation.covered_nights} {invitation.covered_nights === 1 ? 'night' : 'nights'}
+                                <div>
+                                  {(() => {
+                                    const totalNights = invitation.accommodation_dates?.length || invitation.covered_nights;
+                                    const coveredNights = invitation.covered_nights || 0;
+                                    const extraNights = Math.max(0, totalNights - coveredNights);
+                                    
+                                    return (
+                                      <div className="space-y-1">
+                                        <div className="text-green-600">
+                                          {totalNights} {totalNights === 1 ? 'night' : 'nights'}
+                                        </div>
+                                        {extraNights > 0 && (
+                                          <div className="text-xs text-amber-600">
+                                            +{extraNights} extra night{extraNights > 1 ? 's' : ''}
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
+                                  })()}
                                 </div>
                               )
                             }
@@ -1823,6 +2005,128 @@ function Invitations() {
         </div>
       )}
 
+      {/* Extra Nights Tab Content */}
+      {activeTab === 'extra-nights' && (
+        <div className="bg-white shadow rounded-lg p-6 mb-6">
+          <div className="mb-4">
+            <h3 className="text-lg font-medium text-gray-900">Extra Nights Requests</h3>
+            <p className="text-gray-600 text-sm mt-1">
+              Manage guest requests for additional accommodation beyond covered nights
+            </p>
+          </div>
+          
+          {loadingExtraNights ? (
+            <div className="text-center py-8">
+              <div className="text-gray-600">Loading extra nights requests...</div>
+            </div>
+          ) : extraNightsRequests.length === 0 ? (
+            <div className="text-center py-8">
+              <div className="text-gray-600">No pending extra nights requests</div>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Guest
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Covered
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Extra Dates Requested
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Comment
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Est. Cost
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {extraNightsRequests.map((request) => (
+                    <tr key={request.id} className="hover:bg-gray-50">
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div>
+                          <div className="text-sm font-medium text-gray-900">
+                            {request.guest_name}
+                          </div>
+                          <div className="text-sm text-gray-500">
+                            {request.email}
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {request.covered_nights} night{request.covered_nights !== 1 ? 's' : ''}
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="text-sm">
+                          {request.accommodation_dates && request.accommodation_dates.length > 0 ? (
+                            <div className="space-y-1">
+                              {request.accommodation_dates
+                                .filter(dateObj => dateObj.is_extra_night)
+                                .map((dateObj, index) => (
+                                  <div key={index} className="flex items-center space-x-2">
+                                    <span className="font-medium text-amber-600">
+                                      {new Date(dateObj.date + 'T12:00:00').toLocaleDateString('en-US', {
+                                        weekday: 'short',
+                                        month: 'short',
+                                        day: 'numeric'
+                                      })}
+                                    </span>
+                                    <span className="text-xs text-gray-500">
+                                      ({dateObj.price_per_night?.toLocaleString() || 1950} CZK)
+                                    </span>
+                                  </div>
+                                ))}
+                            </div>
+                          ) : (
+                            <span className="text-sm font-medium text-blue-600">
+                              +{request.requested_extra_nights} night{request.requested_extra_nights !== 1 ? 's' : ''}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="text-sm text-gray-900 max-w-xs truncate" title={request.extra_nights_comment}>
+                          {request.extra_nights_comment || 'No comment'}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {(request.requested_extra_nights * 1950).toLocaleString()} CZK
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                        <div className="flex space-x-2">
+                          <button
+                            onClick={() => handleExtraNightsStatus(request.id, 'approved')}
+                            disabled={processingExtraNights}
+                            className="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            Approve
+                          </button>
+                          <button
+                            onClick={() => handleExtraNightsStatus(request.id, 'rejected')}
+                            disabled={processingExtraNights}
+                            className="bg-red-600 text-white px-3 py-1 rounded text-sm hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Details Modal */}
       {showDetails && selectedInvitation && (
         <div 
@@ -1897,14 +2201,73 @@ function Invitations() {
                     <label className="block text-sm font-medium text-gray-700">Accommodation</label>
                     {selectedInvitation.accommodation ? (
                       <div className="mt-1 space-y-2">
-                        <p className="text-sm text-green-600">
-                          {selectedInvitation.covered_nights} {selectedInvitation.covered_nights === 1 ? 'night' : 'nights'} covered
-                        </p>
+                        <div className="flex items-center gap-2">
+                          {editingCoveredNights ? (
+                            <>
+                              <input
+                                type="number"
+                                min="0"
+                                max="10"
+                                value={tempCoveredNights}
+                                onChange={(e) => setTempCoveredNights(parseInt(e.target.value) || 0)}
+                                className="w-16 px-2 py-1 border border-gray-300 rounded text-sm"
+                              />
+                              <span className="text-sm text-green-600">
+                                {tempCoveredNights === 1 ? 'night' : 'nights'} covered
+                              </span>
+                              <button
+                                onClick={async () => {
+                                  try {
+                                    // Update covered nights via API
+                                    await invitationApi.updateCoveredNights(selectedInvitation.id, tempCoveredNights)
+                                    success('Covered nights updated!')
+                                    setEditingCoveredNights(false)
+                                    
+                                    // Update the selected invitation immediately for modal refresh
+                                    setSelectedInvitation({
+                                      ...selectedInvitation,
+                                      covered_nights: tempCoveredNights
+                                    })
+                                    
+                                    // Refresh invitations
+                                    await fetchInvitations()
+                                  } catch (error) {
+                                    showError('Failed to update covered nights')
+                                  }
+                                }}
+                                className="text-xs bg-green-600 text-white px-2 py-1 rounded hover:bg-green-700"
+                              >
+                                Save
+                              </button>
+                              <button
+                                onClick={() => setEditingCoveredNights(false)}
+                                className="text-xs bg-gray-300 text-gray-700 px-2 py-1 rounded hover:bg-gray-400"
+                              >
+                                Cancel
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <p className="text-sm text-green-600">
+                                {selectedInvitation.covered_nights} {selectedInvitation.covered_nights === 1 ? 'night' : 'nights'} covered
+                              </p>
+                              <button
+                                onClick={() => {
+                                  setEditingCoveredNights(true)
+                                  setTempCoveredNights(selectedInvitation.covered_nights || 0)
+                                }}
+                                className="text-xs text-blue-600 hover:text-blue-800"
+                              >
+                                Edit
+                              </button>
+                            </>
+                          )}
+                        </div>
                         
                         {editingAccommodationDates ? (
                           <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-4 space-y-3">
                             <div className="text-sm text-blue-700 font-medium">
-                              Select continuous accommodation dates (max {selectedInvitation.covered_nights} nights):
+                              Select accommodation dates (first {selectedInvitation.covered_nights} will be covered, rest are extra):
                             </div>
                             <div className="grid grid-cols-4 gap-2 max-h-48 overflow-y-auto">
                               {(() => {
@@ -1956,30 +2319,44 @@ function Invitations() {
                                 
                                 return dates.map(date => {
                                   const isSelected = selectedAccommodationDates.includes(date)
-                                  const isDisabled = !isSelected && selectedAccommodationDates.length >= selectedInvitation.covered_nights
+                                  const isDisabled = false // Allow selecting any number of dates now
                                   
-                                  return (
-                                    <button
-                                      key={date}
-                                      type="button"
-                                      onClick={() => !isDisabled && toggleAccommodationDate(date)}
-                                      disabled={isDisabled}
-                                      className={`
-                                        px-2 py-1 rounded text-xs
-                                        ${isSelected 
-                                          ? 'bg-blue-600 text-white' 
-                                          : isDisabled
-                                            ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                                        }
-                                      `}
-                                    >
-                                      {new Date(date + 'T12:00:00').toLocaleDateString('en-US', { 
-                                        month: 'short', 
-                                        day: 'numeric' 
-                                      })}
-                                    </button>
-                                  )
+                                  return (() => {
+                                    // Determine if this date would be covered or extra
+                                    const sortedSelectedDates = selectedAccommodationDates.sort()
+                                    const dateIndex = sortedSelectedDates.indexOf(date)
+                                    const coveredNights = selectedInvitation.covered_nights || 0
+                                    const isExtraNight = isSelected && dateIndex >= coveredNights
+                                    
+                                    return (
+                                      <button
+                                        key={date}
+                                        type="button"
+                                        onClick={() => toggleAccommodationDate(date)}
+                                        className={`
+                                          px-2 py-1 rounded text-xs font-medium transition-colors
+                                          ${isSelected 
+                                            ? isExtraNight
+                                              ? 'bg-amber-500 text-white border-2 border-amber-600' 
+                                              : 'bg-green-500 text-white border-2 border-green-600'
+                                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300 border-2 border-transparent'
+                                          }
+                                        `}
+                                      >
+                                        <div>
+                                          {new Date(date + 'T12:00:00').toLocaleDateString('en-US', { 
+                                            month: 'short', 
+                                            day: 'numeric' 
+                                          })}
+                                        </div>
+                                        {isSelected && (
+                                          <div className="text-[10px] leading-3 opacity-90">
+                                            {isExtraNight ? 'extra' : 'covered'}
+                                          </div>
+                                        )}
+                                      </button>
+                                    )
+                                  })()
                                 })
                               })()}
                             </div>
@@ -2071,19 +2448,43 @@ function Invitations() {
                                     
                                     return dates.map(date => {
                                       const isSelected = selectedInvitation.accommodation_dates?.includes(date)
+                                      
+                                      if (!isSelected) {
+                                        return (
+                                          <div
+                                            key={date}
+                                            className="px-2 py-1 rounded text-xs text-center bg-gray-100 text-gray-500"
+                                          >
+                                            {new Date(date + 'T12:00:00').toLocaleDateString('en-US', { 
+                                              month: 'short', 
+                                              day: 'numeric' 
+                                            })}
+                                          </div>
+                                        )
+                                      }
+                                      
+                                      // Determine if this is a covered or extra night
+                                      const selectedDates = selectedInvitation.accommodation_dates?.sort() || []
+                                      const dateIndex = selectedDates.indexOf(date)
+                                      const coveredNights = selectedInvitation.covered_nights || 0
+                                      const isExtraNight = dateIndex >= coveredNights
+                                      
                                       return (
                                         <div
                                           key={date}
-                                          className={`px-2 py-1 rounded text-xs text-center ${
-                                            isSelected 
-                                              ? 'bg-green-100 text-green-800 font-medium' 
-                                              : 'bg-gray-100 text-gray-500'
+                                          className={`px-2 py-1 rounded text-xs text-center font-medium ${
+                                            isExtraNight 
+                                              ? 'bg-amber-100 text-amber-800 border border-amber-300' 
+                                              : 'bg-green-100 text-green-800 border border-green-300'
                                           }`}
                                         >
                                           {new Date(date + 'T12:00:00').toLocaleDateString('en-US', { 
                                             month: 'short', 
                                             day: 'numeric' 
                                           })}
+                                          <div className="text-[10px] leading-3 mt-0.5 opacity-75">
+                                            {isExtraNight ? 'extra' : 'covered'}
+                                          </div>
                                         </div>
                                       )
                                     })

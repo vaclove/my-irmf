@@ -21,14 +21,23 @@ const translations = {
     
     accommodation: 'Accommodation',
     accommodationDesc: (nights) => `The festival is offering accommodation for up to ${nights} night${nights > 1 ? 's' : ''}.`,
-    selectNights: 'Please select continuous nights you will need accommodation:',
+    selectNights: 'Please select nights you will need accommodation:',
     selected: 'Selected',
     of: 'of',
     nights: 'nights',
     maximumSelected: 'Maximum nights selected',
-    selectAtLeastOne: 'Please select at least one night if you need accommodation, or contact the organizers if you don\'t need it.',
     continuousOnlyFeedback: 'Please select continuous nights only',
     canOnlyRemoveEnds: 'Can only remove first or last night',
+    coveredNights: 'Covered by festival',
+    extraNightsLabel: 'Extra nights (paid separately)',
+    extraCostPerNight: '1,950 CZK per night',
+    
+    extraNightsWarning: 'Additional nights are subject to availability and must be paid separately.',
+    estimatedExtraCost: 'Estimated extra cost:',
+    extraNightsRequireApproval: 'Extra nights require approval and separate payment',
+    totalSelected: 'Total selected:',
+    nightsUnit: 'nights',
+    nightUnit: 'night',
     
     confirmButton: 'Confirm Attendance',
     confirming: 'Confirming...',
@@ -73,9 +82,18 @@ const translations = {
       return 'nocí';
     },
     maximumSelected: 'Maximální počet nocí vybrán',
-    selectAtLeastOne: 'Prosím vyberte alespoň jednu noc, pokud potřebujete ubytování, nebo kontaktujte organizátory, pokud ubytování nepotřebujete.',
     continuousOnlyFeedback: 'Vyberte prosím pouze souvislé noci',
-    canOnlyRemoveEnds: 'Pouze první nebo poslední noc',
+    canOnlyRemoveEnds: 'Lze odebrat pouze první nebo poslední noc',
+    coveredNights: 'Hrazeno festivalem',
+    extraNightsLabel: 'Dodatečné noci (hradí host)',
+    extraCostPerNight: '1 950 Kč za noc',
+    
+    extraNightsWarning: 'Dodatečné noci podléhají dostupnosti a musí být uhrazeny samostatně.',
+    estimatedExtraCost: 'Odhadované dodatečné náklady:',
+    extraNightsRequireApproval: 'Dodatečné noci vyžadují schválení a samostatnou úhradu',
+    totalSelected: 'Celkem vybráno:',
+    nightsUnit: 'nocí',
+    nightUnit: 'noc',
     
     confirmButton: 'Potvrdit účast',
     confirming: 'Potvrzování...',
@@ -103,6 +121,9 @@ function Confirmation() {
   const [language, setLanguage] = useState('english')
   const [feedbackMessage, setFeedbackMessage] = useState('')
   const [invalidAttemptIndex, setInvalidAttemptIndex] = useState(null)
+  const [extraNightsRequested, setExtraNightsRequested] = useState(0)
+  const [extraNightsComment, setExtraNightsComment] = useState('')
+  const [showExtraNights, setShowExtraNights] = useState(false)
   
   // Get translations for current language
   const t = translations[language] || translations.english
@@ -189,7 +210,9 @@ function Confirmation() {
         : []
       
       const response = await invitationApi.confirm(token, {
-        accommodation_dates: selectedDates
+        accommodation_dates: selectedDates,
+        extra_nights_requested: extraNightsRequested,
+        extra_nights_comment: '' // No comment field anymore, but keep for backend compatibility
       })
       setConfirmationData(response.data)
       setStatus('success')
@@ -212,11 +235,7 @@ function Confirmation() {
   const toggleNight = (index) => {
     const newNights = [...selectedNights]
     const currentlySelected = newNights.filter(n => n.selected).length
-    
-    // If trying to select and already at max, don't allow
-    if (!newNights[index].selected && currentlySelected >= invitationData.covered_nights) {
-      return
-    }
+    const coveredNights = invitationData.covered_nights || 0
     
     if (newNights[index].selected) {
       // Removing a date - only allow if it's at the start or end of the range
@@ -249,6 +268,11 @@ function Confirmation() {
     setFeedbackMessage('')
     newNights[index].selected = !newNights[index].selected
     setSelectedNights(newNights)
+    
+    // Update extra nights requested count based on selections beyond covered nights
+    const totalSelected = newNights.filter(n => n.selected).length
+    const extraSelected = Math.max(0, totalSelected - coveredNights)
+    setExtraNightsRequested(extraSelected)
   }
 
   if (status === 'loading') {
@@ -320,56 +344,126 @@ function Confirmation() {
               </p>
               <div className="space-y-2">
                 {selectedNights.map((night, index) => {
-                  const isDisabled = !night.selected && selectedNights.filter(n => n.selected).length >= invitationData.covered_nights
+                  // For sequential selection, determine which nights are extra based on selection order
+                  // Since selection must be continuous, we can use the selection index
+                  const selectedIndices = selectedNights.map((n, i) => n.selected ? i : -1).filter(i => i !== -1).sort((a, b) => a - b);
+                  const selectionPosition = selectedIndices.indexOf(index);
+                  const isExtraNight = night.selected && (selectionPosition >= invitationData.covered_nights)
                   const isFlashing = invalidAttemptIndex === index
+                  
                   return (
                     <label 
                       key={index} 
-                      className={`flex items-center p-3 bg-white rounded border transition-all duration-200 ${
+                      className={`flex items-center justify-between p-3 rounded border transition-all duration-200 cursor-pointer ${
                         isFlashing 
                           ? 'border-red-300 bg-red-50 animate-pulse'
-                          : isDisabled 
-                            ? 'opacity-50 cursor-not-allowed border-gray-200' 
-                            : 'hover:bg-gray-50 cursor-pointer border-gray-200'
+                          : night.selected 
+                            ? isExtraNight 
+                              ? 'bg-amber-50 border-amber-200 hover:bg-amber-100' 
+                              : 'bg-green-50 border-green-200 hover:bg-green-100'
+                            : 'bg-white border-gray-200 hover:bg-gray-50'
                       }`}
                     >
-                      <input
-                        type="checkbox"
-                        checked={night.selected}
-                        onChange={() => toggleNight(index)}
-                        disabled={isDisabled}
-                        className="h-4 w-4 text-blue-600 rounded focus:ring-blue-500"
-                      />
-                      <span className="ml-3 flex-1">
-                        <span className="font-medium">{night.dayName}</span>, {night.dateFormatted}
-                      </span>
+                      <div className="flex items-center">
+                        <input
+                          type="checkbox"
+                          checked={night.selected}
+                          onChange={() => toggleNight(index)}
+                          className="h-4 w-4 text-blue-600 rounded focus:ring-blue-500"
+                        />
+                        <span className="ml-3">
+                          <span className="font-medium">{night.dayName}</span>, {night.dateFormatted}
+                        </span>
+                      </div>
+                      {night.selected && (
+                        <div className="flex items-center space-x-2">
+                          {isExtraNight ? (
+                            <>
+                              <span className="text-xs bg-amber-100 text-amber-800 px-2 py-1 rounded-full">
+                                {t.extraNightsLabel}
+                              </span>
+                              <span className="text-xs text-amber-700 font-medium">
+                                {t.extraCostPerNight}
+                              </span>
+                            </>
+                          ) : (
+                            <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full">
+                              {t.coveredNights}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </label>
                   )
                 })}
               </div>
-              <div className="mt-3 flex justify-between items-center">
-                <p className={`text-sm ${
-                  selectedNights.filter(n => n.selected).length === invitationData.covered_nights 
-                    ? 'text-green-600 font-medium' 
-                    : 'text-gray-600'
-                }`}>
-                  {t.selected}: {selectedNights.filter(n => n.selected).length} {t.of} {invitationData.covered_nights} {typeof t.nights === 'function' ? t.nights(invitationData.covered_nights) : t.nights}
-                </p>
-                {feedbackMessage ? (
-                  <p className="text-sm text-orange-600 flex items-center">
-                    <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                    </svg>
-                    {feedbackMessage}
-                  </p>
-                ) : selectedNights.filter(n => n.selected).length === invitationData.covered_nights ? (
-                  <p className="text-sm text-amber-600">
-                    {t.maximumSelected}
-                  </p>
-                ) : null}
+              <div className="mt-4 p-3 bg-gray-50 rounded-lg">
+                {(() => {
+                  const totalSelected = selectedNights.filter(n => n.selected).length
+                  const coveredSelected = Math.min(totalSelected, invitationData.covered_nights)
+                  const extraSelected = Math.max(0, totalSelected - invitationData.covered_nights)
+                  
+                  return (
+                    <div className="space-y-2">
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-gray-700">
+                          🏨 {t.coveredNights}: 
+                        </span>
+                        <span className="text-sm font-medium text-green-600">
+                          {coveredSelected} / {invitationData.covered_nights} {invitationData.covered_nights === 1 ? t.nightUnit : t.nightsUnit}
+                        </span>
+                      </div>
+                      
+                      {extraSelected > 0 && (
+                        <>
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm text-gray-700">
+                              💰 {t.extraNightsLabel}:
+                            </span>
+                            <span className="text-sm font-medium text-amber-600">
+                              +{extraSelected} {extraSelected === 1 ? t.nightUnit : t.nightsUnit}
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center pt-1 border-t border-gray-200">
+                            <span className="text-sm font-medium text-gray-700">
+                              {t.estimatedExtraCost}
+                            </span>
+                            <span className="text-sm font-bold text-amber-700">
+                              {(extraSelected * 1950).toLocaleString()} CZK
+                            </span>
+                          </div>
+                          <p className="text-xs text-amber-600 mt-2">
+                            ⚠️ {t.extraNightsRequireApproval}
+                          </p>
+                        </>
+                      )}
+                      
+                      <div className="flex justify-between items-center pt-2 border-t border-gray-300">
+                        <span className="text-sm font-bold text-gray-900">
+                          {t.totalSelected}
+                        </span>
+                        <span className="text-sm font-bold text-blue-600">
+                          {totalSelected} {totalSelected === 1 ? t.nightUnit : t.nightsUnit}
+                        </span>
+                      </div>
+                    </div>
+                  )
+                })()}
+                
+                {feedbackMessage && (
+                  <div className="mt-3 p-2 bg-orange-50 border border-orange-200 rounded">
+                    <p className="text-sm text-orange-600 flex items-center">
+                      <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                      </svg>
+                      {feedbackMessage}
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
           )}
+
 
           <div className="flex gap-4">
             <button
@@ -397,11 +491,6 @@ function Confirmation() {
             </a>
           </div>
 
-          {invitationData?.accommodation && selectedNights.filter(n => n.selected).length === 0 && (
-            <p className="text-red-600 text-sm mt-2 text-center">
-              {t.selectAtLeastOne}
-            </p>
-          )}
         </div>
       </div>
     )

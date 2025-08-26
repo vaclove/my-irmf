@@ -115,7 +115,7 @@ router.get('/invitation/:token', async (req, res) => {
 router.post('/confirm/:token', async (req, res) => {
   try {
     const { token } = req.params;
-    const { accommodation_dates = [] } = req.body;
+    const { accommodation_dates = [], extra_nights_requested = 0, extra_nights_comment = '' } = req.body;
     
     // Find invitation by token
     const result = await pool.query(`
@@ -158,11 +158,18 @@ router.post('/confirm/:token', async (req, res) => {
     try {
       await client.query('BEGIN');
       
-      // Update confirmation
-      await client.query(
-        'UPDATE guest_invitations SET confirmed_at = CURRENT_TIMESTAMP WHERE token = $1',
-        [token]
-      );
+      // Update confirmation and extra nights request if provided
+      const updateParams = [token];
+      let updateQuery = 'UPDATE guest_invitations SET confirmed_at = CURRENT_TIMESTAMP';
+      
+      // Handle extra nights request
+      if (extra_nights_requested > 0) {
+        updateQuery += ', requested_extra_nights = $2, extra_nights_comment = $3, extra_nights_status = $4';
+        updateParams.push(extra_nights_requested, extra_nights_comment || null, 'pending_approval');
+      }
+      
+      updateQuery += ' WHERE token = $1';
+      await client.query(updateQuery, updateParams);
       
       // If accommodation dates are provided, store them
       if (assignment.accommodation && accommodation_dates.length > 0) {
@@ -178,10 +185,26 @@ router.post('/confirm/:token', async (req, res) => {
         `);
         
         // Insert selected accommodation dates
-        for (const date of accommodation_dates) {
+        // Sort dates to process them in chronological order
+        const sortedDates = accommodation_dates.sort();
+        const coveredNights = assignment.covered_nights || 0;
+        
+        for (let i = 0; i < sortedDates.length; i++) {
+          const date = sortedDates[i];
+          // First N nights are covered, rest are extra
+          const isExtraNight = i >= coveredNights;
+          
+          // For extra nights, we'll need to set pricing (this could be fetched from room_types table)
+          // For now, using a default price that should be configured
+          const pricePerNight = isExtraNight ? 1950.00 : null; // Default 1950 CZK per extra night
+          const paymentStatus = isExtraNight ? 'pending' : 'not_required';
+          
           await client.query(
-            'INSERT INTO accommodation_selections (invitation_id, selected_date) VALUES ($1, $2::date) ON CONFLICT DO NOTHING',
-            [assignment.id, date]
+            `INSERT INTO accommodation_selections (invitation_id, selected_date, is_extra_night, price_per_night, currency, payment_status) 
+             VALUES ($1, $2::date, $3, $4, $5, $6) 
+             ON CONFLICT (invitation_id, selected_date) 
+             DO UPDATE SET is_extra_night = $3, price_per_night = $4, payment_status = $6`,
+            [assignment.id, date, isExtraNight, pricePerNight, 'CZK', paymentStatus]
           );
         }
       }

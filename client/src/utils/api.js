@@ -59,6 +59,9 @@ export const invitationApi = {
   getStatus: (guestId, editionId) => publicApi.get(`/status/${guestId}/${editionId}`),
   updateAccommodationDates: (invitationId, dates) => api.put(`/invitations/${invitationId}/accommodation-dates`, { accommodation_dates: dates }),
   sendMassEmail: (data) => api.post('/invitations/mass-email', data),
+  getExtraNightsRequests: (params = {}) => api.get('/invitations/extra-nights', { params }),
+  updateExtraNightsStatus: (invitationId, status, adminComment = '') => api.put(`/invitations/${invitationId}/extra-nights`, { status, admin_comment: adminComment }),
+  updateCoveredNights: (invitationId, coveredNights) => api.put(`/invitations/${invitationId}/covered-nights`, { covered_nights: coveredNights }),
 }
 
 // Templates API

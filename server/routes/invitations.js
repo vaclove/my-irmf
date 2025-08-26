@@ -597,25 +597,53 @@ router.put('/:invitationId/accommodation-dates', async (req, res) => {
       return res.status(400).json({ error: 'This invitation does not include accommodation' });
     }
 
-    // Validate that the number of dates doesn't exceed covered_nights
-    if (accommodation_dates.length > invitation.covered_nights) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ 
-        error: `Cannot select more than ${invitation.covered_nights} nights` 
-      });
-    }
-
     // Delete existing accommodation selections
     await client.query(
       'DELETE FROM accommodation_selections WHERE invitation_id = $1',
       [invitationId]
     );
 
-    // Insert new accommodation dates
-    for (const date of accommodation_dates) {
+    // Insert new accommodation dates with extra nights logic
+    // Sort dates to process them in chronological order
+    const sortedDates = accommodation_dates.sort();
+    const coveredNights = invitation.covered_nights || 0;
+    
+    for (let i = 0; i < sortedDates.length; i++) {
+      const date = sortedDates[i];
+      // First N nights are covered, rest are extra
+      const isExtraNight = i >= coveredNights;
+      const pricePerNight = isExtraNight ? 1950.00 : null;
+      const paymentStatus = isExtraNight ? 'pending' : 'not_required';
+      
       await client.query(
-        'INSERT INTO accommodation_selections (invitation_id, selected_date) VALUES ($1, $2::date)',
-        [invitationId, date]
+        `INSERT INTO accommodation_selections 
+         (invitation_id, selected_date, is_extra_night, price_per_night, currency, payment_status) 
+         VALUES ($1, $2::date, $3, $4, $5, $6)`,
+        [invitationId, date, isExtraNight, pricePerNight, 'CZK', paymentStatus]
+      );
+    }
+
+    // Update the invitation's extra nights count and status if there are extra nights
+    const extraNights = Math.max(0, sortedDates.length - coveredNights);
+    if (extraNights > 0) {
+      await client.query(
+        `UPDATE guest_invitations 
+         SET requested_extra_nights = $1, 
+             extra_nights_status = CASE 
+               WHEN extra_nights_status = 'not_requested' THEN 'approved' 
+               ELSE extra_nights_status 
+             END
+         WHERE id = $2`,
+        [extraNights, invitationId]
+      );
+    } else {
+      // If no extra nights, reset the extra nights fields
+      await client.query(
+        `UPDATE guest_invitations 
+         SET requested_extra_nights = 0, 
+             extra_nights_status = 'not_requested' 
+         WHERE id = $1`,
+        [invitationId]
       );
     }
 
@@ -862,6 +890,146 @@ router.post('/mass-email', async (req, res) => {
     
   } catch (error) {
     logError(error, req, { operation: 'send_mass_email', formData: req.body });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/invitations/extra-nights - Get all extra nights requests
+router.get('/extra-nights', async (req, res) => {
+  try {
+    const { status = 'pending_approval', edition_id } = req.query;
+    
+    let query = `
+      SELECT 
+        gi.id,
+        gi.token,
+        gi.requested_extra_nights,
+        gi.extra_nights_comment,
+        gi.extra_nights_status,
+        gi.extra_nights_approved_by,
+        gi.extra_nights_approved_at,
+        gi.covered_nights,
+        g.first_name || ' ' || g.last_name as guest_name,
+        g.email,
+        e.name as edition_name,
+        e.id as edition_id,
+        (
+          SELECT json_agg(
+            json_build_object(
+              'date', as_sel.selected_date,
+              'is_extra_night', as_sel.is_extra_night,
+              'price_per_night', as_sel.price_per_night
+            ) ORDER BY as_sel.selected_date
+          )
+          FROM accommodation_selections as_sel 
+          WHERE as_sel.invitation_id = gi.id
+        ) as accommodation_dates
+      FROM guest_invitations gi
+      JOIN guests g ON gi.guest_id = g.id
+      JOIN editions e ON gi.edition_id = e.id
+      WHERE gi.requested_extra_nights > 0
+    `;
+    
+    const params = [];
+    
+    if (status && status !== 'all') {
+      query += ` AND gi.extra_nights_status = $${params.length + 1}`;
+      params.push(status);
+    }
+    
+    if (edition_id) {
+      query += ` AND gi.edition_id = $${params.length + 1}`;
+      params.push(edition_id);
+    }
+    
+    query += ' ORDER BY gi.created_at DESC';
+    
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (error) {
+    logError(error, req, { operation: 'get_extra_nights_requests' });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// PUT /api/invitations/:invitationId/extra-nights - Approve or reject extra nights request
+router.put('/:invitationId/extra-nights', async (req, res) => {
+  try {
+    const { invitationId } = req.params;
+    const { status, admin_comment = '' } = req.body; // status: 'approved' or 'rejected'
+    
+    if (!['approved', 'rejected'].includes(status)) {
+      return res.status(400).json({ error: 'Status must be "approved" or "rejected"' });
+    }
+    
+    // Update the extra nights status
+    const result = await pool.query(`
+      UPDATE guest_invitations 
+      SET 
+        extra_nights_status = $1,
+        extra_nights_approved_by = $2,
+        extra_nights_approved_at = CURRENT_TIMESTAMP
+      WHERE id = $3
+      RETURNING *
+    `, [status, req.user?.email || 'admin', invitationId]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Invitation not found' });
+    }
+    
+    // If approved, update accommodation_selections to mark extra nights as approved
+    if (status === 'approved') {
+      await pool.query(`
+        UPDATE accommodation_selections 
+        SET payment_status = 'pending'
+        WHERE invitation_id = $1 AND is_extra_night = true
+      `, [invitationId]);
+    } else {
+      // If rejected, remove extra nights from accommodation_selections
+      await pool.query(`
+        DELETE FROM accommodation_selections 
+        WHERE invitation_id = $1 AND is_extra_night = true
+      `, [invitationId]);
+    }
+    
+    res.json({ 
+      message: `Extra nights request ${status}`, 
+      invitation: result.rows[0] 
+    });
+  } catch (error) {
+    logError(error, req, { operation: 'update_extra_nights_status', invitationId: req.params.invitationId });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// PUT /api/invitations/:invitationId/covered-nights - Update covered nights for an invitation
+router.put('/:invitationId/covered-nights', async (req, res) => {
+  try {
+    const { invitationId } = req.params;
+    const { covered_nights } = req.body;
+    
+    if (covered_nights === undefined || covered_nights < 0 || covered_nights > 10) {
+      return res.status(400).json({ error: 'covered_nights must be a number between 0 and 10' });
+    }
+    
+    // Update the covered nights
+    const result = await pool.query(`
+      UPDATE guest_invitations 
+      SET covered_nights = $1
+      WHERE id = $2
+      RETURNING *
+    `, [covered_nights, invitationId]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Invitation not found' });
+    }
+    
+    res.json({ 
+      message: 'Covered nights updated successfully', 
+      invitation: result.rows[0] 
+    });
+  } catch (error) {
+    logError(error, req, { operation: 'update_covered_nights', invitationId: req.params.invitationId });
     res.status(500).json({ error: error.message });
   }
 });
