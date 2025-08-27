@@ -6,6 +6,7 @@ const { pool } = require('../models/database');
 const { logError } = require('../utils/logger');
 const { auditMiddleware, captureOriginalData } = require('../utils/auditLogger');
 const { processTemplate } = require('../utils/templateEngine');
+const { requireAuth } = require('../middleware/auth');
 const router = express.Router();
 
 // Apply audit middleware to all routes
@@ -15,7 +16,7 @@ router.use(auditMiddleware('invitations'));
 
 // Email transporter setup (fallback for SMTP)
 const createTransporter = () => {
-  return nodemailer.createTransporter({
+  return nodemailer.createTransport({
     host: process.env.SMTP_HOST,
     port: process.env.SMTP_PORT,
     secure: false,
@@ -450,6 +451,7 @@ router.get('/edition/:editionId', async (req, res) => {
         gi.opened_at,
         gi.confirmed_at,
         gi.declined_at,
+        COALESCE(gi.confirmed_at, gi.declined_at) AS responded_at,
         gi.accommodation,
         gi.covered_nights,
         gi.badge_printed_at,
@@ -744,7 +746,7 @@ router.get('/edition/:editionId/assigned-not-invited', async (req, res) => {
 
 // Delete invitation
 // Update invitation status manually
-router.put('/:invitationId/status', async (req, res) => {
+router.put('/:invitationId/status', requireAuth, async (req, res) => {
   const client = await pool.connect();
   try {
     const { invitationId } = req.params;
@@ -773,20 +775,44 @@ router.put('/:invitationId/status', async (req, res) => {
     
     const currentStatus = invitationResult.rows[0].status;
     
-    // Update the status and set appropriate timestamps
-    let updateQuery = 'UPDATE guest_invitations SET status = $1, is_manual_change = $2';
-    const updateParams = [status, is_manual_change];
+    // Get the user email from the authenticated session
+    const changedBy = req.user ? req.user.email : null;
     
-    // Set timestamps based on status change
-    if (status === 'opened' && currentStatus === 'pending') {
-      updateQuery += ', opened_at = CURRENT_TIMESTAMP';
-    } else if (status === 'confirmed' && currentStatus !== 'confirmed') {
-      updateQuery += ', confirmed_at = CURRENT_TIMESTAMP';
-    } else if (status === 'declined' && currentStatus !== 'declined') {
-      updateQuery += ', declined_at = CURRENT_TIMESTAMP';
+    // Update the status and set appropriate timestamps
+    let updateQuery = 'UPDATE guest_invitations SET status = $1, is_manual_change = $2, changed_by = $3';
+    const updateParams = [status, is_manual_change, changedBy];
+    
+    // Set or clear timestamps based on status change
+    // Clear timestamps when rolling back to an earlier status
+    if (status === 'pending') {
+      // Rolling back to pending clears all timestamps
+      updateQuery += ', opened_at = NULL, confirmed_at = NULL, declined_at = NULL, badge_printed_at = NULL';
+    } else if (status === 'opened') {
+      // Set opened timestamp and clear later ones
+      if (currentStatus === 'pending') {
+        updateQuery += ', opened_at = CURRENT_TIMESTAMP';
+      }
+      updateQuery += ', confirmed_at = NULL, declined_at = NULL, badge_printed_at = NULL';
+    } else if (status === 'confirmed') {
+      // Set confirmed timestamp and clear declined/badge_printed
+      if (currentStatus !== 'confirmed') {
+        updateQuery += ', confirmed_at = CURRENT_TIMESTAMP';
+      }
+      updateQuery += ', declined_at = NULL, badge_printed_at = NULL';
+    } else if (status === 'declined') {
+      // Set declined timestamp and clear confirmed/badge_printed
+      if (currentStatus !== 'declined') {
+        updateQuery += ', declined_at = CURRENT_TIMESTAMP';
+      }
+      updateQuery += ', confirmed_at = NULL, badge_printed_at = NULL';
+    } else if (status === 'badge_printed') {
+      // Badge printed is the final state, only set if not already set
+      if (currentStatus !== 'badge_printed') {
+        updateQuery += ', badge_printed_at = CURRENT_TIMESTAMP';
+      }
     }
     
-    updateQuery += ' WHERE id = $3 RETURNING *';
+    updateQuery += ' WHERE id = $4 RETURNING *';
     updateParams.push(invitationId);
     
     const result = await client.query(updateQuery, updateParams);

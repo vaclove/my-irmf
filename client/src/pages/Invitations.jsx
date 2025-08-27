@@ -682,21 +682,67 @@ function Invitations() {
   const handleStatusUpdate = async (invitationId, newStatus) => {
     setUpdatingStatus(true)
     try {
-      await invitationApi.updateStatus(invitationId, newStatus)
+      const response = await invitationApi.updateStatus(invitationId, newStatus)
       success(`Status updated to ${newStatus}!`)
       
-      // Refresh both invitations and assigned-not-invited lists to get updated data
-      await Promise.all([
-        fetchInvitations(),
-        fetchAssignedNotInvited()
-      ])
+      // Update local state instead of fetching all data
+      setInvitations(prevInvitations => 
+        prevInvitations.map(inv => 
+          inv.id === invitationId ? { ...inv, status: newStatus } : inv
+        )
+      )
+      
+      // Update assignedNotInvited list if the status change affects it
+      if (newStatus === 'pending') {
+        // If setting back to pending, it might need to appear in the not-invited list
+        await fetchAssignedNotInvited()
+      } else {
+        // Remove from assignedNotInvited if it was there
+        setAssignedNotInvited(prev => 
+          prev.filter(guest => guest.invitation_id !== invitationId)
+        )
+      }
       
       // Update the selectedInvitation if it's the one being updated
       if (selectedInvitation && selectedInvitation.id === invitationId) {
-        setSelectedInvitation(prev => ({
-          ...prev,
-          status: newStatus
-        }))
+        const now = new Date().toISOString()
+        setSelectedInvitation(prev => {
+          const updated = {
+            ...prev,
+            status: newStatus,
+            is_manual_change: true
+          }
+          
+          // Update timestamps based on new status
+          if (newStatus === 'pending') {
+            // Clear all timestamps when rolling back to pending
+            updated.opened_at = null
+            updated.confirmed_at = null
+            updated.declined_at = null
+            updated.badge_printed_at = null
+            updated.responded_at = null
+          } else if (newStatus === 'opened') {
+            updated.opened_at = prev.opened_at || now
+            updated.confirmed_at = null
+            updated.declined_at = null
+            updated.badge_printed_at = null
+            updated.responded_at = null
+          } else if (newStatus === 'confirmed') {
+            updated.confirmed_at = now
+            updated.declined_at = null
+            updated.badge_printed_at = null
+            updated.responded_at = now
+          } else if (newStatus === 'declined') {
+            updated.declined_at = now
+            updated.confirmed_at = null
+            updated.badge_printed_at = null
+            updated.responded_at = now
+          } else if (newStatus === 'badge_printed') {
+            updated.badge_printed_at = now
+          }
+          
+          return updated
+        })
       }
     } catch (error) {
       console.error('Error updating status:', error)
@@ -1024,8 +1070,9 @@ function Invitations() {
         
         // Filter by status
         if (filterStatus) {
+          if (filterStatus === 'badge_printed' && invitation.status !== 'badge_printed') return false
           if (filterStatus === 'confirmed' && invitation.status !== 'confirmed') return false
-          if (filterStatus === 'sent' && invitation.status !== 'sent') return false
+          if (filterStatus === 'pending' && invitation.status !== 'pending') return false
           if (filterStatus === 'opened' && invitation.status !== 'opened') return false
           if (filterStatus === 'declined' && invitation.status !== 'declined') return false
         }
@@ -1040,13 +1087,14 @@ function Invitations() {
           return categoryA.localeCompare(categoryB)
         }
         
-        // Then sort by status (confirmed > opened > sent > declined)
+        // Then sort by status (badge_printed > confirmed > opened > pending > declined)
         const getStatusPriority = (invitation) => {
-          if (invitation.status === 'confirmed') return 0
-          if (invitation.status === 'opened') return 1
-          if (invitation.status === 'sent') return 2
-          if (invitation.status === 'declined') return 3
-          return 4
+          if (invitation.status === 'badge_printed') return 0
+          if (invitation.status === 'confirmed') return 1
+          if (invitation.status === 'opened') return 2
+          if (invitation.status === 'pending') return 3
+          if (invitation.status === 'declined') return 4
+          return 5
         }
         
         const statusDiff = getStatusPriority(a) - getStatusPriority(b)
@@ -1118,11 +1166,11 @@ function Invitations() {
           )}
         </div>
       )
-    } else if (invitation.status === 'sent') {
-      const sentDate = formatDate(invitation.sent_at)
+    } else if (invitation.status === 'pending') {
+      const sentDate = formatDate(invitation.sent_at || invitation.invited_at)
       return (
         <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-2 space-y-1 sm:space-y-0">
-          <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-xs whitespace-nowrap">Sent</span>
+          <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-xs whitespace-nowrap">Pending</span>
           {sentDate && (
             <span className="text-xs text-gray-600 whitespace-nowrap">• {sentDate}</span>
           )}
@@ -1296,8 +1344,9 @@ function Invitations() {
               className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
             >
               <option value="">All Statuses</option>
+              <option value="badge_printed">Badge Printed</option>
               <option value="confirmed">Confirmed</option>
-              <option value="sent">Sent</option>
+              <option value="pending">Pending</option>
               <option value="opened">Opened</option>
               <option value="declined">Declined</option>
             </select>
