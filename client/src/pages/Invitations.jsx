@@ -72,6 +72,9 @@ function Invitations() {
   const [showAddToRoomModal, setShowAddToRoomModal] = useState(false)
   const [selectedRoomForGuest, setSelectedRoomForGuest] = useState(null)
   const [selectedGuestToAdd, setSelectedGuestToAdd] = useState(null)
+  
+  // Status update states
+  const [updatingStatus, setUpdatingStatus] = useState(false)
 
   // Extra nights management states
   const [extraNightsRequests, setExtraNightsRequests] = useState([])
@@ -353,6 +356,31 @@ function Invitations() {
   const handleSendInvitation = (guest) => {
     setSelectedGuestForInvitation(guest)
     setShowInvitationDialog(true)
+  }
+
+  const handleMarkAsInvited = async (guest) => {
+    try {
+      const response = await fetch('/api/invitations/mark-as-invited', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          guest_id: guest.id,
+          edition_id: selectedEdition.id
+        })
+      })
+      
+      if (!response.ok) {
+        const error = await response.json()
+        throw new Error(error.error || 'Failed to mark as invited')
+      }
+      
+      success(`${guest.first_name} ${guest.last_name} marked as invited`)
+      fetchInvitations()
+      fetchAssignedNotInvited()
+    } catch (error) {
+      console.error('Error marking as invited:', error)
+      showError(error.message || 'Failed to mark as invited')
+    }
   }
 
   const handleInvitationSent = () => {
@@ -681,7 +709,12 @@ function Invitations() {
       if (selectedInvitation && selectedInvitation.id === invitationId) {
         setSelectedInvitation(prev => ({
           ...prev,
-          accommodation_dates: selectedAccommodationDates
+          accommodation_dates: selectedAccommodationDates,
+          // If accommodation wasn't set before but now has dates, update these fields
+          accommodation: selectedAccommodationDates.length > 0 ? true : prev.accommodation,
+          covered_nights: !prev.accommodation && selectedAccommodationDates.length > 0 
+            ? selectedAccommodationDates.length 
+            : prev.covered_nights
         }))
       }
       
@@ -697,6 +730,80 @@ function Invitations() {
       showError(error.response?.data?.error || 'Failed to update accommodation dates')
     } finally {
       setSavingDates(false)
+    }
+  }
+
+  // Status update handler
+  const handleStatusUpdate = async (invitationId, newStatus) => {
+    setUpdatingStatus(true)
+    try {
+      const response = await invitationApi.updateStatus(invitationId, newStatus)
+      success(`Status updated to ${newStatus}!`)
+      
+      // Update local state instead of fetching all data
+      setInvitations(prevInvitations => 
+        prevInvitations.map(inv => 
+          inv.id === invitationId ? { ...inv, status: newStatus } : inv
+        )
+      )
+      
+      // Update assignedNotInvited list if the status change affects it
+      if (newStatus === 'pending') {
+        // If setting back to pending, it might need to appear in the not-invited list
+        await fetchAssignedNotInvited()
+      } else {
+        // Remove from assignedNotInvited if it was there
+        setAssignedNotInvited(prev => 
+          prev.filter(guest => guest.invitation_id !== invitationId)
+        )
+      }
+      
+      // Update the selectedInvitation if it's the one being updated
+      if (selectedInvitation && selectedInvitation.id === invitationId) {
+        const now = new Date().toISOString()
+        setSelectedInvitation(prev => {
+          const updated = {
+            ...prev,
+            status: newStatus,
+            is_manual_change: true
+          }
+          
+          // Update timestamps based on new status
+          if (newStatus === 'pending') {
+            // Clear all timestamps when rolling back to pending
+            updated.opened_at = null
+            updated.confirmed_at = null
+            updated.declined_at = null
+            updated.badge_printed_at = null
+            updated.responded_at = null
+          } else if (newStatus === 'opened') {
+            updated.opened_at = prev.opened_at || now
+            updated.confirmed_at = null
+            updated.declined_at = null
+            updated.badge_printed_at = null
+            updated.responded_at = null
+          } else if (newStatus === 'confirmed') {
+            updated.confirmed_at = now
+            updated.declined_at = null
+            updated.badge_printed_at = null
+            updated.responded_at = now
+          } else if (newStatus === 'declined') {
+            updated.declined_at = now
+            updated.confirmed_at = null
+            updated.badge_printed_at = null
+            updated.responded_at = now
+          } else if (newStatus === 'badge_printed') {
+            updated.badge_printed_at = now
+          }
+          
+          return updated
+        })
+      }
+    } catch (error) {
+      console.error('Error updating status:', error)
+      showError(error.response?.data?.error || 'Failed to update status')
+    } finally {
+      setUpdatingStatus(false)
     }
   }
 
@@ -1018,8 +1125,9 @@ function Invitations() {
         
         // Filter by status
         if (filterStatus) {
+          if (filterStatus === 'badge_printed' && invitation.status !== 'badge_printed') return false
           if (filterStatus === 'confirmed' && invitation.status !== 'confirmed') return false
-          if (filterStatus === 'sent' && invitation.status !== 'sent') return false
+          if (filterStatus === 'pending' && invitation.status !== 'pending') return false
           if (filterStatus === 'opened' && invitation.status !== 'opened') return false
           if (filterStatus === 'declined' && invitation.status !== 'declined') return false
         }
@@ -1034,13 +1142,14 @@ function Invitations() {
           return categoryA.localeCompare(categoryB)
         }
         
-        // Then sort by status (confirmed > opened > sent > declined)
+        // Then sort by status (badge_printed > confirmed > opened > pending > declined)
         const getStatusPriority = (invitation) => {
-          if (invitation.status === 'confirmed') return 0
-          if (invitation.status === 'opened') return 1
-          if (invitation.status === 'sent') return 2
-          if (invitation.status === 'declined') return 3
-          return 4
+          if (invitation.status === 'badge_printed') return 0
+          if (invitation.status === 'confirmed') return 1
+          if (invitation.status === 'opened') return 2
+          if (invitation.status === 'pending') return 3
+          if (invitation.status === 'declined') return 4
+          return 5
         }
         
         const statusDiff = getStatusPriority(a) - getStatusPriority(b)
@@ -1112,11 +1221,11 @@ function Invitations() {
           )}
         </div>
       )
-    } else if (invitation.status === 'sent') {
-      const sentDate = formatDate(invitation.sent_at)
+    } else if (invitation.status === 'pending') {
+      const sentDate = formatDate(invitation.sent_at || invitation.invited_at)
       return (
         <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-2 space-y-1 sm:space-y-0">
-          <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-xs whitespace-nowrap">Sent</span>
+          <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-xs whitespace-nowrap">Pending</span>
           {sentDate && (
             <span className="text-xs text-gray-600 whitespace-nowrap">• {sentDate}</span>
           )}
@@ -1307,8 +1416,9 @@ function Invitations() {
               className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
             >
               <option value="">All Statuses</option>
+              <option value="badge_printed">Badge Printed</option>
               <option value="confirmed">Confirmed</option>
-              <option value="sent">Sent</option>
+              <option value="pending">Pending</option>
               <option value="opened">Opened</option>
               <option value="declined">Declined</option>
             </select>
@@ -1510,7 +1620,7 @@ function Invitations() {
                                   </div>
                                 </>
                               )
-                            } else if (invitation.status === 'confirmed' && invitation.accommodation_dates?.length > 0) {
+                            } else if ((invitation.status === 'confirmed' || invitation.status === 'badge_printed') && invitation.accommodation_dates?.length > 0) {
                               return (
                                 <>
                                   <div>
@@ -1555,7 +1665,7 @@ function Invitations() {
                                   </button>
                                 </>
                               )
-                            } else if (invitation.status === 'confirmed') {
+                            } else if (invitation.status === 'confirmed' || invitation.status === 'badge_printed') {
                               return (
                                 <>
                                   <div>
@@ -1752,12 +1862,21 @@ function Invitations() {
                           </div>
                         </td>
                         <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} whitespace-nowrap text-sm font-medium`}>
-                          <button
-                            onClick={() => handleSendInvitation(guest)}
-                            className="text-blue-600 hover:text-blue-900"
-                          >
-                            Send Invitation
-                          </button>
+                          <div className="flex flex-col gap-1">
+                            <button
+                              onClick={() => handleSendInvitation(guest)}
+                              className="text-blue-600 hover:text-blue-900 text-left"
+                            >
+                              Send Invitation
+                            </button>
+                            <button
+                              onClick={() => handleMarkAsInvited(guest)}
+                              className="text-green-600 hover:text-green-900 text-left text-sm"
+                              title="Mark as invited without sending email"
+                            >
+                              Mark as Invited
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -2185,7 +2304,21 @@ function Invitations() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700">Status</label>
-                    {getStatusBadge(selectedInvitation)}
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={selectedInvitation.status}
+                        onChange={(e) => handleStatusUpdate(selectedInvitation.id, e.target.value)}
+                        disabled={updatingStatus}
+                        className="text-xs px-2 py-1 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                      >
+                        <option value="pending">Pending</option>
+                        <option value="opened">Opened</option>
+                        <option value="confirmed">Confirmed</option>
+                        <option value="declined">Declined</option>
+                        <option value="badge_printed">Badge Printed</option>
+                      </select>
+                      {getStatusBadge(selectedInvitation)}
+                    </div>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700">Language</label>
@@ -2199,7 +2332,7 @@ function Invitations() {
                   </div>
                   <div className="col-span-3">
                     <label className="block text-sm font-medium text-gray-700">Accommodation</label>
-                    {selectedInvitation.accommodation ? (
+                    {true ? (
                       <div className="mt-1 space-y-2">
                         <div className="flex items-center gap-2">
                           {editingCoveredNights ? (
@@ -2248,18 +2381,26 @@ function Invitations() {
                             </>
                           ) : (
                             <>
-                              <p className="text-sm text-green-600">
-                                {selectedInvitation.covered_nights} {selectedInvitation.covered_nights === 1 ? 'night' : 'nights'} covered
-                              </p>
-                              <button
-                                onClick={() => {
-                                  setEditingCoveredNights(true)
-                                  setTempCoveredNights(selectedInvitation.covered_nights || 0)
-                                }}
-                                className="text-xs text-blue-600 hover:text-blue-800"
-                              >
-                                Edit
-                              </button>
+                              {selectedInvitation.accommodation ? (
+                                <p className="text-sm text-green-600">
+                                  {selectedInvitation.covered_nights} {selectedInvitation.covered_nights === 1 ? 'night' : 'nights'} covered
+                                </p>
+                              ) : (
+                                <p className="text-sm text-gray-500">
+                                  No accommodation initially provided
+                                </p>
+                              )}
+                              {selectedInvitation.accommodation && (
+                                <button
+                                  onClick={() => {
+                                    setEditingCoveredNights(true)
+                                    setTempCoveredNights(selectedInvitation.covered_nights || 0)
+                                  }}
+                                  className="text-xs text-blue-600 hover:text-blue-800"
+                                >
+                                  Edit
+                                </button>
+                              )}
                             </>
                           )}
                         </div>
@@ -2319,7 +2460,7 @@ function Invitations() {
                                 
                                 return dates.map(date => {
                                   const isSelected = selectedAccommodationDates.includes(date)
-                                  const isDisabled = false // Allow selecting any number of dates now
+                                  const isDisabled = false // Allow selecting any number of dates now for extra nights feature
                                   
                                   return (() => {
                                     // Determine if this date would be covered or extra
@@ -2551,7 +2692,7 @@ function Invitations() {
                                 </div>
                               </div>
                             )
-                          } else if (selectedInvitation.status === 'confirmed' && selectedInvitation.accommodation_dates?.length > 0) {
+                          } else if ((selectedInvitation.status === 'confirmed' || selectedInvitation.status === 'badge_printed') && selectedInvitation.accommodation_dates?.length > 0) {
                             return (
                               <button
                                 onClick={() => {
