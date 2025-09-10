@@ -255,27 +255,12 @@ router.post('/confirm/:token', async (req, res) => {
           confirmed_at: confirmedAt.toLocaleString(emailLanguage === 'czech' ? 'cs-CZ' : 'en-US'),
           company: assignment.company || '',
           language: emailLanguage,
-          accommodation_dates: formattedAccommodationDates || false, // Use false when no dates
+          accommodation_dates: accommodation_dates, // Pass raw dates array
           has_accommodation_dates: accommodation_dates.length > 0
         };
         
-        // Process template content and add accommodation info if needed
-        let templateContent = template.markdown_content || template.body || '';
-        
-        // If there are accommodation dates, add them to the template content
-        if (accommodation_dates.length > 0) {
-          const accommodationSection = emailLanguage === 'czech' 
-            ? `- **Ubytování potvrzeno pro:** ${formattedAccommodationDates}`
-            : `- **Accommodation confirmed for:** ${formattedAccommodationDates}`;
-          
-          // Insert accommodation info after the "Confirmed at:" line
-          const confirmationLinePattern = emailLanguage === 'czech' 
-            ? /(\*\*Potvrzeno:\*\* \{\{confirmed_at\}\})/
-            : /(\*\*Confirmed at:\*\* \{\{confirmed_at\}\})/;
-          
-          templateContent = templateContent.replace(confirmationLinePattern, `$1\n${accommodationSection}`);
-        }
-        
+        // Process template content - the template engine will handle accommodation_dates_info
+        const templateContent = template.markdown_content || template.body || '';
         const processed = processTemplate(templateContent, templateData, { isPreview: false });
         
         // Replace variables in subject

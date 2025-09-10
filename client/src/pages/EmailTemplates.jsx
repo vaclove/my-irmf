@@ -525,12 +525,21 @@ Festival Team`,
                     <code>{'{{edition_name}}'}</code> <span className="text-blue-600">- Festival edition name</span>
                     <code>{'{{category}}'}</code> <span className="text-blue-600">- Guest category</span>
                     <code>{'{{confirmation_url}}'}</code> <span className="text-blue-600">- Confirmation link</span>
-                    <code>{'{{accommodation_info}}'}</code> <span className="text-blue-600">- Accommodation details (conditional)</span>
+                    <code>{'{{accommodation_info}}'}</code> <span className="text-blue-600">- Accommodation details (invitations)</span>
                   </div>
+                  
                   <div className="mt-3 pt-3 border-t border-blue-200">
-                    <h5 className="text-sm font-medium text-blue-900 mb-2">For Accommodation Content:</h5>
+                    <h5 className="text-sm font-medium text-blue-900 mb-2">For Invitation Templates:</h5>
                     <div className="grid grid-cols-2 gap-2 text-sm text-blue-800">
                       <code>{'{{accommodation_nights_text}}'}</code> <span className="text-blue-600">- Language-aware: "2 nights" or "2 noci"</span>
+                    </div>
+                  </div>
+                  
+                  <div className="mt-3 pt-3 border-t border-blue-200">
+                    <h5 className="text-sm font-medium text-blue-900 mb-2">For Confirmation Templates:</h5>
+                    <div className="grid grid-cols-2 gap-2 text-sm text-blue-800">
+                      <code>{'{{confirmed_at}}'}</code> <span className="text-blue-600">- Confirmation date and time</span>
+                      <code>{'{{accommodation_dates_info}}'}</code> <span className="text-blue-600">- Selected accommodation dates (conditional)</span>
                     </div>
                   </div>
                 </div>

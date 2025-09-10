@@ -131,7 +131,8 @@ router.post('/preview/edition/:editionId/language/:language', async (req, res) =
     // Generate sample data with accommodation options
     const sampleData = generateSampleData(language, {
       withAccommodation: withAccommodation === 'true',
-      accommodationNights: parseInt(accommodationNights) || 2
+      accommodationNights: parseInt(accommodationNights) || 2,
+      templateType: template_type
     });
     
     // Override with actual edition data
@@ -225,7 +226,8 @@ router.get('/preview/edition/:editionId/language/:language', async (req, res) =>
     // Generate sample data with accommodation options
     const sampleData = generateSampleData(language, {
       withAccommodation: withAccommodation === 'true',
-      accommodationNights: parseInt(accommodationNights) || 2
+      accommodationNights: parseInt(accommodationNights) || 2,
+      templateType: template.template_type || 'invitation'
     });
     
     // Override with actual edition data

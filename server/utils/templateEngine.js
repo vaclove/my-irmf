@@ -101,6 +101,16 @@ function replaceTemplateVariables(content, variables) {
   }
   processedContent = processedContent.replace(/\{\{accommodation_info\}\}/g, accommodationHtml);
 
+  // Handle accommodation dates info for confirmation emails
+  let accommodationDatesHtml = '';
+  if (variables.accommodation_dates && Array.isArray(variables.accommodation_dates) && variables.accommodation_dates.length > 0) {
+    accommodationDatesHtml = generateAccommodationDatesInfo(
+      variables.accommodation_dates,
+      variables.language || 'english'
+    );
+  }
+  processedContent = processedContent.replace(/\{\{accommodation_dates_info\}\}/g, accommodationDatesHtml);
+
   return processedContent;
 }
 
@@ -127,6 +137,36 @@ function generateAccommodationInfo(nights, language = 'english') {
   return nights === 1 
     ? accommodationText[language].single 
     : accommodationText[language].multiple;
+}
+
+/**
+ * Generate accommodation dates information for confirmation emails
+ * @param {Array} accommodationDates - Array of accommodation date strings
+ * @param {string} language - Language for accommodation text
+ * @returns {string} Formatted accommodation dates HTML
+ */
+function generateAccommodationDatesInfo(accommodationDates, language = 'english') {
+  if (!accommodationDates || !Array.isArray(accommodationDates) || accommodationDates.length === 0) {
+    return '';
+  }
+
+  // Format dates according to language
+  const dateFormatter = new Intl.DateTimeFormat(language === 'czech' ? 'cs-CZ' : 'en-US', {
+    weekday: 'long',
+    day: 'numeric', 
+    month: 'long'
+  });
+  
+  const formattedDates = accommodationDates.map(date => 
+    dateFormatter.format(new Date(date + 'T00:00:00'))
+  ).join(', ');
+
+  const accommodationDatesText = {
+    english: `Your accommodation has been confirmed for the following dates: **${formattedDates}**`,
+    czech: `Vaše ubytování bylo potvrzeno na následující data: **${formattedDates}**`
+  };
+
+  return accommodationDatesText[language];
 }
 
 /**
@@ -483,7 +523,8 @@ function wrapInEmailTemplate(htmlContent, variables = {}, isPreview = false) {
 function generateSampleData(language = 'english', options = {}) {
   const {
     withAccommodation = true,
-    accommodationNights = 2
+    accommodationNights = 2,
+    templateType = 'invitation'
   } = options;
 
   const sampleData = {
@@ -500,6 +541,25 @@ function generateSampleData(language = 'english', options = {}) {
 
   if (withAccommodation) {
     sampleData.accommodation_info = generateAccommodationInfo(accommodationNights, language);
+    
+    // For confirmation templates, also include sample accommodation dates
+    if (templateType === 'confirmation') {
+      const today = new Date();
+      const sampleDates = [];
+      
+      // Create sample dates for the accommodation nights
+      for (let i = 0; i < accommodationNights; i++) {
+        const date = new Date(today);
+        date.setDate(today.getDate() + i + 1); // Start from tomorrow
+        sampleDates.push(date.toISOString().split('T')[0]); // Format as YYYY-MM-DD
+      }
+      
+      sampleData.accommodation_dates = sampleDates;
+      sampleData.has_accommodation_dates = true;
+      
+      // Add confirmed_at for confirmation emails
+      sampleData.confirmed_at = new Date().toLocaleString(language === 'czech' ? 'cs-CZ' : 'en-US');
+    }
   }
 
   return sampleData;
@@ -510,5 +570,6 @@ module.exports = {
   generateSampleData,
   replaceTemplateVariables,
   processAccommodationSections,
-  wrapInEmailTemplate
+  wrapInEmailTemplate,
+  generateAccommodationDatesInfo
 };
