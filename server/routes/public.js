@@ -158,9 +158,9 @@ router.post('/confirm/:token', async (req, res) => {
     try {
       await client.query('BEGIN');
       
-      // Update confirmation and extra nights request if provided
+      // Update confirmation status and extra nights request if provided
       const updateParams = [token];
-      let updateQuery = 'UPDATE guest_invitations SET confirmed_at = CURRENT_TIMESTAMP';
+      let updateQuery = "UPDATE guest_invitations SET confirmed_at = CURRENT_TIMESTAMP, status = 'confirmed'";
       
       // Handle extra nights request
       if (extra_nights_requested > 0) {
