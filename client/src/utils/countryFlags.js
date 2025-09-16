@@ -181,6 +181,7 @@ export const getCountryFlag = (countryCode) => {
     'HN': '🇭🇳', // Honduras
     'NI': '🇳🇮', // Nicaragua
     'CR': '🇨🇷', // Costa Rica
+    'CS': '🇨🇿', // Československo
     'PA': '🇵🇦', // Panama
     'CU': '🇨🇺', // Cuba
     'JM': '🇯🇲', // Jamaica
@@ -237,6 +238,7 @@ export const getCountryFlag = (countryCode) => {
     'BV': '🇧🇻', // Bouvet Island
     'SJ': '🇸🇯', // Svalbard and Jan Mayen
     'AX': '🇦🇽', // Åland Islands
+    'XC': '🇨🇿', // Česká a Slovenská Federativní Republika
   };
   
   return countryFlags[cleanCode] || null;
@@ -418,6 +420,7 @@ const countryNames = {
   'HN': 'Honduras',
   'NI': 'Nicaragua',
   'CR': 'Costa Rica',
+  'CS': 'Československo',
   'PA': 'Panama',
   'CU': 'Cuba',
   'JM': 'Jamaica',
@@ -474,6 +477,7 @@ const countryNames = {
   'BV': 'Bouvet Island',
   'SJ': 'Svalbard and Jan Mayen',
   'AX': 'Åland Islands',
+  'XC': 'Česká a Slovenská Federativní Republika',
 };
 
 // Get country name from country code
