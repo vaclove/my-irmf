@@ -647,8 +647,9 @@ router.get('/public/programming', async (req, res) => {
     const countResult = await pool.query(countQuery);
     const total = parseInt(countResult.rows[0].total);
 
-    // Add image URLs to movies
-    const programmingWithImages = result.rows.map(entry => {
+    // Add image URLs to movies and fetch block movies if needed
+    const programmingWithImages = await Promise.all(result.rows.map(async (entry) => {
+      // Add image URLs for single movies
       if (entry.movie_image_url) {
         entry.movie_image_urls = {
           original: imageStorage.getImageUrl(entry.movie_image_url, 'original'),
@@ -658,8 +659,48 @@ router.get('/public/programming', async (req, res) => {
           small: imageStorage.getImageUrl(entry.movie_image_url, 'small')
         };
       }
+      
+      // If it's a block, get the movies in the block
+      if (entry.block_name_cs || entry.block_name_en) {
+        const moviesResult = await pool.query(`
+          SELECT 
+            m.id,
+            m.name_cs,
+            m.name_en,
+            m.director,
+            m.runtime,
+            m.section,
+            m.synopsis_cs,
+            m.synopsis_en,
+            m.year,
+            m.country,
+            m.cast,
+            m.image_url,
+            bm.sort_order
+          FROM block_movies bm
+          JOIN movies m ON bm.movie_id = m.id
+          JOIN programming_schedule ps ON ps.block_id = bm.block_id
+          WHERE ps.id = $1
+          ORDER BY bm.sort_order, m.name_cs
+        `, [entry.id]);
+        
+        // Add image URLs to block movies
+        entry.block_movies = moviesResult.rows.map(movie => {
+          if (movie.image_url) {
+            movie.image_urls = {
+              original: imageStorage.getImageUrl(movie.image_url, 'original'),
+              large: imageStorage.getImageUrl(movie.image_url, 'large'),
+              medium: imageStorage.getImageUrl(movie.image_url, 'medium'),
+              thumbnail: imageStorage.getImageUrl(movie.image_url, 'thumbnail'),
+              small: imageStorage.getImageUrl(movie.image_url, 'small')
+            };
+          }
+          return movie;
+        });
+      }
+      
       return entry;
-    });
+    }));
 
     res.json({
       programming: programmingWithImages,
