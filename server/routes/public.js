@@ -588,6 +588,7 @@ router.get('/public/programming', async (req, res) => {
         m.synopsis_cs as movie_synopsis_cs,
         m.synopsis_en as movie_synopsis_en,
         m.image_url as movie_image_url,
+        m.has_delegation as movie_has_delegation,
         -- Block details (if block)
         mb.name_cs as block_name_cs,
         mb.name_en as block_name_en,
@@ -676,6 +677,7 @@ router.get('/public/programming', async (req, res) => {
             m.country,
             m.cast,
             m.image_url,
+            m.has_delegation,
             bm.sort_order
           FROM block_movies bm
           JOIN movies m ON bm.movie_id = m.id
@@ -750,6 +752,7 @@ router.get('/public/programming/:id', async (req, res) => {
         m.country as movie_country,
         m.cast as movie_cast,
         m.image_url as movie_image_url,
+        m.has_delegation as movie_has_delegation,
         -- Block details (if block)
         mb.id as block_id,
         mb.name_cs as block_name_cs,
@@ -790,6 +793,7 @@ router.get('/public/programming/:id', async (req, res) => {
           m.country,
           m.cast,
           m.image_url,
+          m.has_delegation,
           bm.sort_order
         FROM block_movies bm
         JOIN movies m ON bm.movie_id = m.id
