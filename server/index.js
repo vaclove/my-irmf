@@ -95,6 +95,17 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 // Request logging middleware
 app.use(requestLogger);
 
+// No-cache middleware for all API routes
+app.use('/api', (req, res, next) => {
+  res.set({
+    'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+    'Pragma': 'no-cache',
+    'Expires': '0',
+    'Surrogate-Control': 'no-store'
+  });
+  next();
+});
+
 // Session configuration with PostgreSQL store
 app.use(session({
   store: new pgSession({
