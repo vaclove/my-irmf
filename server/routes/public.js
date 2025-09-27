@@ -449,8 +449,85 @@ router.get('/public/movies', async (req, res) => {
     const countResult = await pool.query(countQuery);
     const total = parseInt(countResult.rows[0].total);
 
-    // Add image URLs to movies
-    const moviesWithImages = result.rows.map(movie => {
+    // Get all movie IDs to fetch screenings
+    const movieIds = result.rows.map(m => m.id);
+    const movieEditionIds = [...new Set(result.rows.map(m => m.edition_id))];
+
+    // Fetch all screenings for these movies (both direct and in blocks)
+    let screeningsMap = {};
+    if (movieIds.length > 0 && movieEditionIds.length > 0) {
+      // Get direct movie screenings
+      const directScreeningsQuery = `
+        SELECT
+          ps.id as screening_id,
+          ps.movie_id,
+          ps.scheduled_date::text as scheduled_date,
+          ps.scheduled_time,
+          ps.ticket_link,
+          v.name_cs as venue_name_cs,
+          v.name_en as venue_name_en,
+          null as block_name_cs,
+          null as block_name_en
+        FROM programming_schedule ps
+        JOIN venues v ON ps.venue_id = v.id
+        WHERE ps.movie_id = ANY($1::uuid[])
+        ORDER BY ps.scheduled_date, ps.scheduled_time
+      `;
+
+      const directScreenings = await pool.query(directScreeningsQuery, [movieIds]);
+
+      // Get block screenings where these movies appear
+      const blockScreeningsQuery = `
+        SELECT
+          ps.id as screening_id,
+          bm.movie_id,
+          ps.scheduled_date::text as scheduled_date,
+          ps.scheduled_time,
+          ps.ticket_link,
+          v.name_cs as venue_name_cs,
+          v.name_en as venue_name_en,
+          mb.name_cs as block_name_cs,
+          mb.name_en as block_name_en
+        FROM programming_schedule ps
+        JOIN movie_blocks mb ON ps.block_id = mb.id
+        JOIN block_movies bm ON mb.id = bm.block_id
+        JOIN venues v ON ps.venue_id = v.id
+        WHERE bm.movie_id = ANY($1::uuid[])
+        ORDER BY ps.scheduled_date, ps.scheduled_time
+      `;
+
+      const blockScreenings = await pool.query(blockScreeningsQuery, [movieIds]);
+
+      // Combine and organize screenings by movie ID
+      [...directScreenings.rows, ...blockScreenings.rows].forEach(screening => {
+        if (!screeningsMap[screening.movie_id]) {
+          screeningsMap[screening.movie_id] = [];
+        }
+        screeningsMap[screening.movie_id].push({
+          screening_id: screening.screening_id,
+          date: screening.scheduled_date,
+          time: screening.scheduled_time,
+          venue_cs: screening.venue_name_cs,
+          venue_en: screening.venue_name_en,
+          ticket_link: screening.ticket_link,
+          block_name_cs: screening.block_name_cs,
+          block_name_en: screening.block_name_en,
+          is_block: !!screening.block_name_cs
+        });
+      });
+
+      // Sort screenings for each movie
+      Object.keys(screeningsMap).forEach(movieId => {
+        screeningsMap[movieId].sort((a, b) => {
+          const dateTimeA = a.date + ' ' + a.time;
+          const dateTimeB = b.date + ' ' + b.time;
+          return dateTimeA.localeCompare(dateTimeB);
+        });
+      });
+    }
+
+    // Add image URLs and screenings to movies
+    const moviesWithImagesAndScreenings = result.rows.map(movie => {
       if (movie.image_url) {
         movie.image_urls = {
           original: imageStorage.getImageUrl(movie.image_url, 'original'),
@@ -460,11 +537,15 @@ router.get('/public/movies', async (req, res) => {
           small: imageStorage.getImageUrl(movie.image_url, 'small')
         };
       }
+
+      // Add screenings if available
+      movie.screenings = screeningsMap[movie.id] || [];
+
       return movie;
     });
 
     res.json({
-      movies: moviesWithImages,
+      movies: moviesWithImagesAndScreenings,
       pagination: {
         total,
         limit: parseInt(limit),
@@ -504,7 +585,7 @@ router.get('/public/movies/:id', async (req, res) => {
     }
     
     const movie = result.rows[0];
-    
+
     // Add image URLs if image_url exists
     if (movie.image_url) {
       movie.image_urls = {
@@ -515,7 +596,75 @@ router.get('/public/movies/:id', async (req, res) => {
         small: imageStorage.getImageUrl(movie.image_url, 'small')
       };
     }
-    
+
+    // Fetch screenings for this movie (both direct and in blocks)
+    const screenings = [];
+
+    // Get direct movie screenings
+    const directScreeningsQuery = `
+      SELECT
+        ps.id as screening_id,
+        ps.scheduled_date::text as scheduled_date,
+        ps.scheduled_time,
+        ps.ticket_link,
+        v.name_cs as venue_name_cs,
+        v.name_en as venue_name_en,
+        null as block_name_cs,
+        null as block_name_en
+      FROM programming_schedule ps
+      JOIN venues v ON ps.venue_id = v.id
+      WHERE ps.movie_id = $1
+      ORDER BY ps.scheduled_date, ps.scheduled_time
+    `;
+
+    const directScreenings = await pool.query(directScreeningsQuery, [movie.id]);
+
+    // Get block screenings where this movie appears
+    const blockScreeningsQuery = `
+      SELECT
+        ps.id as screening_id,
+        ps.scheduled_date::text as scheduled_date,
+        ps.scheduled_time,
+        ps.ticket_link,
+        v.name_cs as venue_name_cs,
+        v.name_en as venue_name_en,
+        mb.name_cs as block_name_cs,
+        mb.name_en as block_name_en
+      FROM programming_schedule ps
+      JOIN movie_blocks mb ON ps.block_id = mb.id
+      JOIN block_movies bm ON mb.id = bm.block_id
+      JOIN venues v ON ps.venue_id = v.id
+      WHERE bm.movie_id = $1
+      ORDER BY ps.scheduled_date, ps.scheduled_time
+    `;
+
+    const blockScreenings = await pool.query(blockScreeningsQuery, [movie.id]);
+
+    // Combine and format screenings
+    [...directScreenings.rows, ...blockScreenings.rows].forEach(screening => {
+      screenings.push({
+        screening_id: screening.screening_id,
+        date: screening.scheduled_date,
+        time: screening.scheduled_time,
+        venue_cs: screening.venue_name_cs,
+        venue_en: screening.venue_name_en,
+        ticket_link: screening.ticket_link,
+        block_name_cs: screening.block_name_cs,
+        block_name_en: screening.block_name_en,
+        is_block: !!screening.block_name_cs
+      });
+    });
+
+    // Sort screenings by date and time
+    screenings.sort((a, b) => {
+      const dateTimeA = a.date + ' ' + a.time;
+      const dateTimeB = b.date + ' ' + b.time;
+      return dateTimeA.localeCompare(dateTimeB);
+    });
+
+    // Add screenings to movie object
+    movie.screenings = screenings;
+
     res.json({
       movie,
       // Include WordPress compatibility fields
