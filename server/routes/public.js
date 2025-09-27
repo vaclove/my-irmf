@@ -568,7 +568,7 @@ router.get('/public/programming', async (req, res) => {
     } = req.query;
 
     let query = `
-      SELECT 
+      SELECT
         ps.id,
         ps.scheduled_date::text as scheduled_date,
         ps.scheduled_time,
@@ -576,6 +576,7 @@ router.get('/public/programming', async (req, res) => {
         ps.title_override_cs,
         ps.title_override_en,
         ps.notes,
+        ps.ticket_link,
         v.name_cs as venue_name_cs,
         v.name_en as venue_name_en,
         v.capacity as venue_capacity,
@@ -726,7 +727,7 @@ router.get('/public/programming/:id', async (req, res) => {
     const { id } = req.params;
     
     const query = `
-      SELECT 
+      SELECT
         ps.id,
         ps.scheduled_date::text as scheduled_date,
         ps.scheduled_time,
@@ -736,6 +737,7 @@ router.get('/public/programming/:id', async (req, res) => {
         ps.title_override_cs,
         ps.title_override_en,
         ps.notes,
+        ps.ticket_link,
         v.name_cs as venue_name_cs,
         v.name_en as venue_name_en,
         v.capacity as venue_capacity,

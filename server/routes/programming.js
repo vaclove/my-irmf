@@ -145,7 +145,7 @@ router.get('/edition/:editionId', async (req, res) => {
     const { date, venue_id } = req.query;
     
     let query = `
-      SELECT 
+      SELECT
         ps.id,
         ps.edition_id,
         ps.venue_id,
@@ -159,6 +159,7 @@ router.get('/edition/:editionId', async (req, res) => {
         ps.title_override_cs,
         ps.title_override_en,
         ps.notes,
+        ps.ticket_link,
         ps.created_at,
         ps.updated_at,
         v.name_cs as venue_name_cs,
@@ -213,7 +214,7 @@ router.get('/:id', async (req, res) => {
     const { id } = req.params;
     
     const result = await pool.query(`
-      SELECT 
+      SELECT
         ps.id,
         ps.edition_id,
         ps.venue_id,
@@ -227,6 +228,7 @@ router.get('/:id', async (req, res) => {
         ps.title_override_cs,
         ps.title_override_en,
         ps.notes,
+        ps.ticket_link,
         ps.created_at,
         ps.updated_at,
         v.name_cs as venue_name_cs,
@@ -293,7 +295,8 @@ router.post('/', async (req, res) => {
       discussion_time,
       title_override_cs,
       title_override_en,
-      notes
+      notes,
+      ticket_link
     } = req.body;
     
     
@@ -332,14 +335,14 @@ router.post('/', async (req, res) => {
     const result = await pool.query(`
       INSERT INTO programming_schedule (
         edition_id, venue_id, movie_id, block_id, scheduled_date, scheduled_time,
-        discussion_time, title_override_cs, title_override_en, notes
+        discussion_time, title_override_cs, title_override_en, notes, ticket_link
       )
-      VALUES ($1, $2, $3, $4, $5::date, $6::time, $7, $8, $9, $10)
+      VALUES ($1, $2, $3, $4, $5::date, $6::time, $7, $8, $9, $10, $11)
       RETURNING *
     `, [
-      edition_id, venue_id, movie_id || null, block_id || null, 
+      edition_id, venue_id, movie_id || null, block_id || null,
       cleanDate, scheduled_time, discussion_time || 0,
-      title_override_cs || null, title_override_en || null, notes || null
+      title_override_cs || null, title_override_en || null, notes || null, ticket_link || null
     ]);
     
     res.status(201).json(result.rows[0]);
@@ -362,7 +365,8 @@ router.put('/:id', async (req, res) => {
       discussion_time,
       title_override_cs,
       title_override_en,
-      notes
+      notes,
+      ticket_link
     } = req.body;
     
     // Validate that either movie_id or block_id is provided, but not both (if either is being updated)
@@ -411,8 +415,8 @@ router.put('/:id', async (req, res) => {
     const cleanDate = scheduled_date ? scheduled_date.split('T')[0] : null;
     
     const result = await pool.query(`
-      UPDATE programming_schedule 
-      SET 
+      UPDATE programming_schedule
+      SET
         venue_id = COALESCE($1, venue_id),
         movie_id = CASE WHEN $2::UUID IS NOT NULL THEN $2 ELSE movie_id END,
         block_id = CASE WHEN $3::UUID IS NOT NULL THEN $3 ELSE block_id END,
@@ -421,12 +425,13 @@ router.put('/:id', async (req, res) => {
         discussion_time = COALESCE($6, discussion_time),
         title_override_cs = $7,
         title_override_en = $8,
-        notes = $9
-      WHERE id = $10
+        notes = $9,
+        ticket_link = $10
+      WHERE id = $11
       RETURNING *
     `, [
       venue_id, movie_id || null, block_id || null, cleanDate, scheduled_time, discussion_time,
-      title_override_cs, title_override_en, notes, id
+      title_override_cs, title_override_en, notes, ticket_link, id
     ]);
     
     if (result.rows.length === 0) {
