@@ -64,7 +64,7 @@ const DraggableElement = ({ element }) => {
   );
 };
 
-const CanvasElement = ({ element, isSelected, onSelect, onMove, onResize }) => {
+const CanvasElement = ({ element, isSelected, onSelect, onMove, onResize, zoom }) => {
   const elementRef = useRef(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
@@ -87,8 +87,8 @@ const CanvasElement = ({ element, isSelected, onSelect, onMove, onResize }) => {
       if (canvasContainer) {
         const rect = canvasContainer.getBoundingClientRect();
         setDragStart({
-          x: e.clientX - rect.left - element.x,
-          y: e.clientY - rect.top - element.y
+          x: e.clientX - rect.left - element.x * zoom,
+          y: e.clientY - rect.top - element.y * zoom
         });
       }
     }
@@ -102,19 +102,19 @@ const CanvasElement = ({ element, isSelected, onSelect, onMove, onResize }) => {
       const canvasContainer = elementRef.current?.parentElement;
       if (canvasContainer) {
         const rect = canvasContainer.getBoundingClientRect();
-        const newX = e.clientX - rect.left - dragStart.x;
-        const newY = e.clientY - rect.top - dragStart.y;
+        const newX = (e.clientX - rect.left - dragStart.x) / zoom;
+        const newY = (e.clientY - rect.top - dragStart.y) / zoom;
         onMove(element.id, { x: newX, y: newY });
       }
     } else if (isResizing && resizeHandle) {
-      const deltaX = e.clientX - dragStart.x;
-      const deltaY = e.clientY - dragStart.y;
-      
+      const deltaX = (e.clientX - dragStart.x) / zoom;
+      const deltaY = (e.clientY - dragStart.y) / zoom;
+
       let newWidth = initialSize.width;
       let newHeight = initialSize.height;
       let newX = initialPosition.x;
       let newY = initialPosition.y;
-      
+
       switch (resizeHandle) {
         case 'nw': // Top-left
           newWidth = Math.max(20, initialSize.width - deltaX);
@@ -137,7 +137,7 @@ const CanvasElement = ({ element, isSelected, onSelect, onMove, onResize }) => {
           newHeight = Math.max(20, initialSize.height + deltaY);
           break;
       }
-      
+
       // Update both size and position
       onResize(element.id, { width: newWidth, height: newHeight });
       if (newX !== initialPosition.x || newY !== initialPosition.y) {
@@ -173,10 +173,10 @@ const CanvasElement = ({ element, isSelected, onSelect, onMove, onResize }) => {
         );
       case ELEMENT_TYPES.GUEST_NAME:
         return (
-          <div 
+          <div
             className="w-full h-full flex items-center justify-center border border-gray-300"
-            style={{ 
-              fontSize: `${element.fontSize}px`,
+            style={{
+              fontSize: `${element.fontSize * zoom}px`,
               fontWeight: element.fontWeight,
               color: element.color,
               textAlign: element.textAlign
@@ -187,10 +187,10 @@ const CanvasElement = ({ element, isSelected, onSelect, onMove, onResize }) => {
         );
       case ELEMENT_TYPES.GUEST_CATEGORY:
         return (
-          <div 
+          <div
             className="w-full h-full flex items-center justify-center border border-gray-300"
-            style={{ 
-              fontSize: `${element.fontSize}px`,
+            style={{
+              fontSize: `${element.fontSize * zoom}px`,
               fontWeight: element.fontWeight,
               color: element.color,
               backgroundColor: element.backgroundColor
@@ -201,10 +201,10 @@ const CanvasElement = ({ element, isSelected, onSelect, onMove, onResize }) => {
         );
       case ELEMENT_TYPES.BADGE_NUMBER:
         return (
-          <div 
+          <div
             className="w-full h-full flex items-center justify-center border border-gray-300"
-            style={{ 
-              fontSize: `${element.fontSize}px`,
+            style={{
+              fontSize: `${element.fontSize * zoom}px`,
               fontWeight: element.fontWeight,
               color: element.color
             }}
@@ -215,15 +215,15 @@ const CanvasElement = ({ element, isSelected, onSelect, onMove, onResize }) => {
       case ELEMENT_TYPES.BARCODE:
         return (
           <div className="w-full h-full bg-white flex items-center justify-center border border-gray-300">
-            <div className="text-xs text-gray-600">|||||||||||</div>
+            <div style={{ fontSize: `${12 * zoom}px` }} className="text-gray-600">|||||||||||</div>
           </div>
         );
       case ELEMENT_TYPES.STATIC_TEXT:
         return (
-          <div 
+          <div
             className="w-full h-full flex items-center justify-center border border-gray-300"
-            style={{ 
-              fontSize: `${element.fontSize}px`,
+            style={{
+              fontSize: `${element.fontSize * zoom}px`,
               fontWeight: element.fontWeight,
               color: element.color,
               textAlign: element.textAlign
@@ -248,16 +248,16 @@ const CanvasElement = ({ element, isSelected, onSelect, onMove, onResize }) => {
       ref={elementRef}
       className={`absolute cursor-move ${isSelected ? 'ring-2 ring-blue-500' : ''}`}
       style={{
-        left: element.x,
-        top: element.y,
-        width: element.width,
-        height: element.height,
+        left: element.x * zoom,
+        top: element.y * zoom,
+        width: element.width * zoom,
+        height: element.height * zoom,
         zIndex: element.zIndex || 1
       }}
       onMouseDown={handleMouseDown}
     >
       {renderElementContent()}
-      
+
       {isSelected && (
         <>
           <div className="absolute -top-1 -left-1 w-2 h-2 bg-blue-500 cursor-nw-resize resize-handle" data-handle="nw"></div>
@@ -270,18 +270,19 @@ const CanvasElement = ({ element, isSelected, onSelect, onMove, onResize }) => {
   );
 };
 
-const CanvasArea = ({ 
-  canvasSize, 
-  elements, 
-  selectedElement, 
-  onElementSelect, 
-  onElementMove, 
+const CanvasArea = ({
+  canvasSize,
+  elements,
+  selectedElement,
+  onElementSelect,
+  onElementMove,
   onElementResize,
   onElementAdd,
-  backgroundColor 
+  backgroundColor,
+  zoom
 }) => {
   const canvasRef = useRef(null);
-  const scale = 2; // 2 pixels per mm for display
+  const scale = 2 * zoom; // 2 pixels per mm for display, multiplied by zoom
 
   const [{ isOver }, drop] = useDrop(() => ({
     accept: 'element',
@@ -307,34 +308,37 @@ const CanvasArea = ({
   return (
     <div className="bg-white rounded-lg shadow-sm border p-4">
       <h3 className="text-lg font-semibold mb-3">Canvas</h3>
-      <div 
-        ref={drop}
-        className="relative border-2 border-dashed border-gray-300 mx-auto"
-        style={{
-          width: canvasSize.width * scale,
-          height: canvasSize.height * scale,
-          backgroundColor: backgroundColor || '#ffffff'
-        }}
-        onClick={handleCanvasClick}
-      >
+      <div className="overflow-auto max-h-[600px]">
         <div
-          ref={canvasRef}
-          className={`relative w-full h-full ${isOver ? 'bg-blue-50' : ''}`}
+          ref={drop}
+          className="relative border-2 border-dashed border-gray-300 mx-auto"
+          style={{
+            width: canvasSize.width * scale,
+            height: canvasSize.height * scale,
+            backgroundColor: backgroundColor || '#ffffff'
+          }}
+          onClick={handleCanvasClick}
         >
-          {elements.map((element) => (
-            <CanvasElement
-              key={element.id}
-              element={element}
-              isSelected={selectedElement === element.id}
-              onSelect={onElementSelect}
-              onMove={onElementMove}
-              onResize={onElementResize}
-            />
-          ))}
+          <div
+            ref={canvasRef}
+            className={`relative w-full h-full ${isOver ? 'bg-blue-50' : ''}`}
+          >
+            {elements.map((element) => (
+              <CanvasElement
+                key={element.id}
+                element={element}
+                isSelected={selectedElement === element.id}
+                onSelect={onElementSelect}
+                onMove={onElementMove}
+                onResize={onElementResize}
+                zoom={zoom}
+              />
+            ))}
+          </div>
         </div>
       </div>
       <div className="text-xs text-gray-500 text-center mt-2">
-        {canvasSize.width}mm × {canvasSize.height}mm
+        {canvasSize.width}mm × {canvasSize.height}mm (Zoom: {Math.round(zoom * 100)}%)
       </div>
     </div>
   );
@@ -502,11 +506,11 @@ const PropertyPanel = ({ selectedElement, elements, onElementUpdate }) => {
   );
 };
 
-const BadgeDesigner = ({ 
-  initialLayout, 
-  onSave, 
+const BadgeDesigner = ({
+  initialLayout,
+  onSave,
   onCancel,
-  editionId 
+  editionId
 }) => {
   const [layoutName, setLayoutName] = useState(initialLayout?.name || '');
   const [canvasSize, setCanvasSize] = useState({
@@ -516,6 +520,7 @@ const BadgeDesigner = ({
   const [backgroundColor, setBackgroundColor] = useState(initialLayout?.background_color || '#ffffff');
   const [elements, setElements] = useState(initialLayout?.layout_data?.elements || []);
   const [selectedElement, setSelectedElement] = useState(null);
+  const [zoom, setZoom] = useState(1);
   
   // Use ref to track next ID to avoid async state issues
   const nextElementIdRef = useRef(
@@ -722,6 +727,38 @@ const BadgeDesigner = ({
 
             {/* Canvas */}
             <div className="lg:col-span-2">
+              {/* Zoom Controls */}
+              <div className="bg-white rounded-lg shadow-sm border p-4 mb-4">
+                <h3 className="text-lg font-semibold mb-3">Zoom</h3>
+                <div className="flex items-center gap-4">
+                  <button
+                    onClick={() => setZoom(1)}
+                    className={`px-4 py-2 rounded-md ${zoom === 1 ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                  >
+                    100%
+                  </button>
+                  <button
+                    onClick={() => setZoom(2)}
+                    className={`px-4 py-2 rounded-md ${zoom === 2 ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                  >
+                    200%
+                  </button>
+                  <div className="flex-1 flex items-center gap-2">
+                    <span className="text-sm text-gray-600">Custom:</span>
+                    <input
+                      type="range"
+                      min="0.5"
+                      max="3"
+                      step="0.1"
+                      value={zoom}
+                      onChange={(e) => setZoom(parseFloat(e.target.value))}
+                      className="flex-1"
+                    />
+                    <span className="text-sm font-medium w-12">{Math.round(zoom * 100)}%</span>
+                  </div>
+                </div>
+              </div>
+
               <CanvasArea
                 canvasSize={canvasSize}
                 elements={elements}
@@ -731,6 +768,7 @@ const BadgeDesigner = ({
                 onElementResize={handleElementResize}
                 onElementAdd={handleElementAdd}
                 backgroundColor={backgroundColor}
+                zoom={zoom}
               />
             </div>
 
