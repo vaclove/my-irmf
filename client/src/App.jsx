@@ -19,6 +19,7 @@ import Settings from './pages/Settings'
 import Sections from './pages/Sections'
 import AccommodationSettings from './pages/AccommodationSettings'
 import Confirmation from './pages/Confirmation'
+import Scanner from './pages/Scanner'
 
 function App() {
   return (
@@ -49,6 +50,7 @@ function App() {
                   <Route path="/settings/sections" element={<Sections />} />
                   <Route path="/settings/accommodation" element={<AccommodationSettings />} />
                   <Route path="/audit" element={<AuditLogs />} />
+                  <Route path="/scanner" element={<Scanner />} />
                 </Routes>
               </Layout>
             </ProtectedRoute>

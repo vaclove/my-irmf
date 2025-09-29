@@ -28,6 +28,7 @@ const programmingRoutes = require('./routes/programming');
 const sectionRoutes = require('./routes/sections');
 const accommodationRoutes = require('./routes/accommodation');
 const associationRoutes = require('./routes/associations');
+const scannerRoutes = require('./routes/scanner');
 const mailgunService = require('./utils/mailgun');
 
 const app = express();
@@ -75,6 +76,9 @@ const corsOptions = {
       allowedOrigins.push('http://127.0.0.1:5173');
       allowedOrigins.push('http://127.0.0.1:5174');
       allowedOrigins.push('http://127.0.0.1:3000');
+      allowedOrigins.push('https://localhost:5173');
+      allowedOrigins.push('https://dev.my.irmf.cz:5173');
+      allowedOrigins.push('https://dev.my.irmf.cz:3001');
     }
     
     console.log('CORS: Allowed origins:', allowedOrigins);
@@ -148,6 +152,7 @@ app.use('/api/programming', requireIrmfDomain, programmingRoutes);
 app.use('/api/sections', requireIrmfDomain, sectionRoutes);
 app.use('/api/accommodation', requireIrmfDomain, accommodationRoutes);
 app.use('/api/associations', requireIrmfDomain, associationRoutes);
+app.use('/api/scanner', requireIrmfDomain, scannerRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
@@ -209,20 +214,37 @@ const startServer = async () => {
     console.log('Testing database connection...');
     await pool.query('SELECT 1');
     console.log('Database connection successful');
-    
+
     // Auto-run migrations on startup
     console.log('Running database migrations...');
     await runMigrations();
     console.log('Database migrations completed');
-    
-    
-    app.listen(PORT, () => {
-      console.log(`Server running on port ${PORT}`);
-      console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-      if (process.env.NODE_ENV === 'production') {
-        console.log('Serving static files from client/dist');
-      }
-    });
+
+    // Check if we should use HTTPS in development
+    const isDevelopment = process.env.NODE_ENV !== 'production';
+    const useHttps = isDevelopment && process.env.USE_HTTPS === 'true';
+
+    if (useHttps) {
+      // Load SSL certificates for development
+      const httpsOptions = {
+        key: fs.readFileSync(path.join(__dirname, '../certs/dev-key.pem')),
+        cert: fs.readFileSync(path.join(__dirname, '../certs/dev-cert.pem'))
+      };
+
+      https.createServer(httpsOptions, app).listen(PORT, () => {
+        console.log(`Server running on https://localhost:${PORT}`);
+        console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+        console.log('Using HTTPS with self-signed certificate');
+      });
+    } else {
+      app.listen(PORT, () => {
+        console.log(`Server running on port ${PORT}`);
+        console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+        if (process.env.NODE_ENV === 'production') {
+          console.log('Serving static files from client/dist');
+        }
+      });
+    }
   } catch (error) {
     console.error('Failed to start server:', error);
     process.exit(1);
