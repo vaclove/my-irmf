@@ -1444,12 +1444,22 @@ function Invitations() {
           <h3 className="text-sm font-medium text-gray-700 mb-3">Confirmed Guests</h3>
           <div className="flex flex-wrap gap-4">
             {/* Total */}
-            <div className="bg-blue-50 rounded-lg px-4 py-2">
+            <button
+              onClick={() => {
+                setFilterCategory('');
+                setFilterStatus('confirmed');
+              }}
+              className={`rounded-lg px-4 py-2 transition-all hover:ring-2 hover:ring-blue-500 ${
+                filterCategory === '' && filterStatus === 'confirmed'
+                  ? 'bg-blue-100 ring-2 ring-blue-500'
+                  : 'bg-blue-50 hover:bg-blue-100'
+              }`}
+            >
               <div className="text-2xl font-bold text-blue-700">
                 {invitations.filter(inv => inv.status === 'confirmed' || inv.status === 'badge_printed').length}
               </div>
               <div className="text-xs text-blue-600 uppercase">Total</div>
-            </div>
+            </button>
 
             {/* By Category */}
             {['filmmaker', 'press', 'guest', 'staff'].map(category => {
@@ -1459,10 +1469,21 @@ function Invitations() {
               ).length;
               if (count === 0) return null;
               return (
-                <div key={category} className="bg-gray-50 rounded-lg px-4 py-2">
+                <button
+                  key={category}
+                  onClick={() => {
+                    setFilterCategory(category);
+                    setFilterStatus('confirmed');
+                  }}
+                  className={`rounded-lg px-4 py-2 transition-all hover:ring-2 hover:ring-gray-400 ${
+                    filterCategory === category && filterStatus === 'confirmed'
+                      ? 'bg-gray-200 ring-2 ring-gray-400'
+                      : 'bg-gray-50 hover:bg-gray-100'
+                  }`}
+                >
                   <div className="text-2xl font-bold text-gray-700">{count}</div>
                   <div className="text-xs text-gray-600 uppercase">{category}</div>
-                </div>
+                </button>
               );
             })}
           </div>
