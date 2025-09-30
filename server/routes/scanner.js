@@ -203,9 +203,10 @@ router.get('/scans/:programming_id', async (req, res) => {
         bs.scanned_at,
         bs.scanned_by,
         g.first_name,
-        g.last_name
+        g.last_name,
+        bs.guest_id
       FROM badge_scans bs
-      JOIN guests g ON bs.guest_id = g.id
+      LEFT JOIN guests g ON bs.guest_id = g.id
       WHERE bs.programming_id = $1
       ORDER BY bs.scanned_at DESC
     `;
@@ -215,8 +216,8 @@ router.get('/scans/:programming_id', async (req, res) => {
     const scans = result.rows.map(row => ({
       id: row.id,
       badgeNumber: row.badge_number,
-      firstName: row.first_name,
-      lastName: row.last_name,
+      firstName: row.guest_id ? row.first_name : 'External',
+      lastName: row.guest_id ? row.last_name : 'Guest',
       scannedAt: row.scanned_at,
       scannedBy: row.scanned_by
     }));
