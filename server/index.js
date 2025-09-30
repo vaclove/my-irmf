@@ -29,6 +29,7 @@ const sectionRoutes = require('./routes/sections');
 const accommodationRoutes = require('./routes/accommodation');
 const associationRoutes = require('./routes/associations');
 const scannerRoutes = require('./routes/scanner');
+const gooutRoutes = require('./routes/goout');
 const mailgunService = require('./utils/mailgun');
 
 const app = express();
@@ -153,6 +154,7 @@ app.use('/api/sections', requireIrmfDomain, sectionRoutes);
 app.use('/api/accommodation', requireIrmfDomain, accommodationRoutes);
 app.use('/api/associations', requireIrmfDomain, associationRoutes);
 app.use('/api/scanner', requireIrmfDomain, scannerRoutes);
+app.use('/api/goout', requireIrmfDomain, gooutRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
