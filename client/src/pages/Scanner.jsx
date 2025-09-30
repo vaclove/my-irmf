@@ -125,7 +125,7 @@ const Scanner = () => {
   };
 
   const onScanSuccess = async (decodedText) => {
-    // Check if we're in cooldown period
+    // Check if we're in cooldown period (overlay is showing)
     if (scanCooldownRef.current) {
       return;
     }
@@ -138,6 +138,15 @@ const Scanner = () => {
     // Check if this is the same badge as the last scan (prevent double scans)
     if (lastScannedBadgeRef.current === decodedText) {
       return;
+    }
+
+    // Pause scanner during overlay display
+    if (html5QrcodeRef.current) {
+      try {
+        await html5QrcodeRef.current.pause();
+      } catch (err) {
+        console.error('Error pausing scanner:', err);
+      }
     }
 
     // Submit scan to backend (send raw scanned text)
@@ -199,31 +208,129 @@ const Scanner = () => {
         setError('');
 
         // Clear the success message and reset cooldown after 2.5 seconds
-        setTimeout(() => {
+        setTimeout(async () => {
           setLastScan(null);
           scanCooldownRef.current = false;
           lastScannedBadgeRef.current = null;
+
+          // Resume scanner after overlay is hidden
+          if (html5QrcodeRef.current) {
+            try {
+              await html5QrcodeRef.current.resume();
+            } catch (err) {
+              console.error('Error resuming scanner:', err);
+            }
+          }
         }, 2500);
       } else if (response.status === 409) {
         // Already scanned
+        // Vibrate on error (different pattern than success)
+        if (navigator.vibrate) {
+          navigator.vibrate([100, 50, 100]);
+        }
+
+        scanCooldownRef.current = true;
         setLastScan({
           success: false,
           error: 'Already scanned',
           guest: data.guest
         });
         setError(`Badge ${scannedCode} already scanned for this screening`);
+
+        // Resume scanner after error overlay
+        setTimeout(async () => {
+          setLastScan(null);
+          setError('');
+          scanCooldownRef.current = false;
+          if (html5QrcodeRef.current) {
+            try {
+              await html5QrcodeRef.current.resume();
+            } catch (err) {
+              console.error('Error resuming scanner:', err);
+            }
+          }
+        }, 2500);
       } else if (response.status === 404) {
+        // Vibrate on error (different pattern than success)
+        if (navigator.vibrate) {
+          navigator.vibrate([100, 50, 100]);
+        }
+
+        scanCooldownRef.current = true;
         setLastScan({
           success: false,
           error: 'Badge not found'
         });
         setError(`Badge ${scannedCode} not found`);
+
+        // Resume scanner after error overlay
+        setTimeout(async () => {
+          setLastScan(null);
+          setError('');
+          scanCooldownRef.current = false;
+          if (html5QrcodeRef.current) {
+            try {
+              await html5QrcodeRef.current.resume();
+            } catch (err) {
+              console.error('Error resuming scanner:', err);
+            }
+          }
+        }, 2500);
       } else {
+        // Vibrate on error (different pattern than success)
+        if (navigator.vibrate) {
+          navigator.vibrate([100, 50, 100]);
+        }
+
+        scanCooldownRef.current = true;
+        setLastScan({
+          success: false,
+          error: data.error || 'Failed to submit scan'
+        });
         setError(data.error || 'Failed to submit scan');
+
+        // Resume scanner after error overlay
+        setTimeout(async () => {
+          setLastScan(null);
+          setError('');
+          scanCooldownRef.current = false;
+          if (html5QrcodeRef.current) {
+            try {
+              await html5QrcodeRef.current.resume();
+            } catch (err) {
+              console.error('Error resuming scanner:', err);
+            }
+          }
+        }, 2500);
       }
     } catch (error) {
       console.error('Error submitting scan:', error);
+
+      // Vibrate on error (different pattern than success)
+      if (navigator.vibrate) {
+        navigator.vibrate([100, 50, 100]);
+      }
+
+      scanCooldownRef.current = true;
+      setLastScan({
+        success: false,
+        error: 'Network error'
+      });
       setError('Failed to submit scan');
+
+      // Resume scanner after error overlay
+      setTimeout(async () => {
+        setLastScan(null);
+        setError('');
+        scanCooldownRef.current = false;
+        if (html5QrcodeRef.current) {
+          try {
+            await html5QrcodeRef.current.resume();
+          } catch (err) {
+            console.error('Error resuming scanner:', err);
+          }
+        }
+      }, 2500);
     } finally {
       setLoading(false);
     }
@@ -294,33 +401,7 @@ const Scanner = () => {
 
   if (!scanning) {
     return (
-      <div className="min-h-screen bg-gray-50">
-        <div className="bg-white shadow-sm border-b px-4 py-3">
-          <div className="max-w-2xl mx-auto">
-            <h1 className="text-xl font-bold">Badge Scanner</h1>
-          </div>
-        </div>
-
-        <div className="max-w-2xl mx-auto p-4">
-          {/* Edition Selection */}
-          <div className="bg-white rounded-lg shadow-sm border p-4 mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Festival Edition
-            </label>
-            <select
-              value={selectedEdition || ''}
-              onChange={(e) => setSelectedEdition(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md text-base"
-            >
-              <option value="">Select edition...</option>
-              {editions.map(edition => (
-                <option key={edition.id} value={edition.id}>
-                  {edition.year} - {edition.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
+      <div className="max-w-2xl mx-auto">
           {/* Screenings List */}
           {loading && (
             <div className="text-center py-8">
@@ -373,7 +454,6 @@ const Scanner = () => {
               ))}
             </div>
           )}
-        </div>
       </div>
     );
   }
@@ -392,6 +472,24 @@ const Scanner = () => {
           <div className="text-xl text-green-100 mt-2">
             Badge #{lastScan.guest.badgeNumber}
           </div>
+        </div>
+      )}
+
+      {/* Fullscreen Error Overlay */}
+      {lastScan && !lastScan.success && (
+        <div className="fixed inset-0 bg-red-600 z-50 flex flex-col items-center justify-center">
+          <div className="text-9xl mb-8">✗</div>
+          <div className="text-4xl font-bold mb-4">{lastScan.error}</div>
+          {lastScan.guest && (
+            <>
+              <div className="text-2xl">
+                {lastScan.guest.firstName} {lastScan.guest.lastName}
+              </div>
+              <div className="text-xl text-red-100 mt-2">
+                Badge #{lastScan.guest.badgeNumber}
+              </div>
+            </>
+          )}
         </div>
       )}
 
@@ -424,28 +522,6 @@ const Scanner = () => {
           <div className="text-3xl font-bold">{scanCount}</div>
           <div className="text-sm text-gray-400">Total Scans</div>
         </div>
-
-        {/* Last Scan Result - Error only */}
-        {lastScan && !lastScan.success && (
-          <div className="rounded-lg p-4 mb-4 bg-red-900">
-            <div>
-              <div className="text-lg font-semibold mb-1">✗ Error</div>
-              <div className="text-sm">{lastScan.error}</div>
-              {lastScan.guest && (
-                <div className="text-xs text-gray-300 mt-1">
-                  {lastScan.guest.firstName} {lastScan.guest.lastName}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Error Message */}
-        {error && !lastScan && (
-          <div className="bg-red-900 rounded-lg p-4 mb-4">
-            <div className="text-sm">{error}</div>
-          </div>
-        )}
 
         {/* Toggle Scanned Guests List */}
         <button
