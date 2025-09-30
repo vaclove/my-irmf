@@ -58,10 +58,7 @@ const corsOptions = {
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps or curl)
     if (!origin) return callback(null, true);
-    
-    // Log the incoming origin for debugging
-    console.log('CORS: Incoming origin:', origin);
-    
+
     const allowedOrigins = [
       process.env.APP_URL || 'https://my.irmf.cz',
       'https://irmf.cz',
@@ -69,7 +66,7 @@ const corsOptions = {
       'https://irmf.net',
       'https://www.irmf.net'
     ];
-    
+
     // In development, also allow localhost with various ports
     if (process.env.NODE_ENV !== 'production') {
       allowedOrigins.push(process.env.CLIENT_URL || 'http://localhost:5173');
@@ -82,12 +79,11 @@ const corsOptions = {
       allowedOrigins.push('https://dev.my.irmf.cz:5173');
       allowedOrigins.push('https://dev.my.irmf.cz:3001');
     }
-    
-    console.log('CORS: Allowed origins:', allowedOrigins);
-    
+
     if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
+      // Only log when origin is NOT allowed (security issue)
       console.error('CORS: Origin not allowed:', origin);
       callback(new Error('Not allowed by CORS'));
     }

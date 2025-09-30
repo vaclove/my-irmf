@@ -1438,6 +1438,37 @@ function Invitations() {
         </div>
       </div>
 
+      {/* Confirmed Guests Stats */}
+      {Array.isArray(invitations) && invitations.length > 0 && (
+        <div className="bg-white rounded-lg shadow-sm border p-4 mb-6">
+          <h3 className="text-sm font-medium text-gray-700 mb-3">Confirmed Guests</h3>
+          <div className="flex flex-wrap gap-4">
+            {/* Total */}
+            <div className="bg-blue-50 rounded-lg px-4 py-2">
+              <div className="text-2xl font-bold text-blue-700">
+                {invitations.filter(inv => inv.status === 'confirmed' || inv.status === 'badge_printed').length}
+              </div>
+              <div className="text-xs text-blue-600 uppercase">Total</div>
+            </div>
+
+            {/* By Category */}
+            {['filmmaker', 'press', 'guest', 'staff'].map(category => {
+              const count = invitations.filter(inv =>
+                (inv.status === 'confirmed' || inv.status === 'badge_printed') &&
+                inv.guest?.category === category
+              ).length;
+              if (count === 0) return null;
+              return (
+                <div key={category} className="bg-gray-50 rounded-lg px-4 py-2">
+                  <div className="text-2xl font-bold text-gray-700">{count}</div>
+                  <div className="text-xs text-gray-600 uppercase">{category}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {!Array.isArray(invitations) || invitations.length === 0 ? (
         <div className="text-center py-12">
           <h3 className="text-lg font-medium text-gray-900 mb-2">No invitations yet</h3>
@@ -1508,7 +1539,7 @@ function Invitations() {
                     Status
                   </th>
                   <th className={`${condensedView ? 'px-3 py-2' : 'px-6 py-3'} text-left text-xs font-medium text-gray-500 uppercase ${condensedView ? '' : 'tracking-wider'}`}>
-                    Accommodation
+                    Hotel
                   </th>
                   <th className={`${condensedView ? 'px-3 py-2' : 'px-6 py-3'} text-left text-xs font-medium text-gray-500 uppercase ${condensedView ? '' : 'tracking-wider'}`}>
                     Actions
