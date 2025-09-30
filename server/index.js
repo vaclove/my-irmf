@@ -30,6 +30,7 @@ const accommodationRoutes = require('./routes/accommodation');
 const associationRoutes = require('./routes/associations');
 const scannerRoutes = require('./routes/scanner');
 const gooutRoutes = require('./routes/goout');
+const gooutTokenScheduler = require('./services/goout-token-scheduler');
 const mailgunService = require('./utils/mailgun');
 
 const app = express();
@@ -221,6 +222,9 @@ const startServer = async () => {
     console.log('Running database migrations...');
     await runMigrations();
     console.log('Database migrations completed');
+
+    // Start GoOut token refresh scheduler
+    gooutTokenScheduler.start();
 
     // Check if we should use HTTPS in development
     const isDevelopment = process.env.NODE_ENV !== 'production';
