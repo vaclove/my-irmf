@@ -15,7 +15,7 @@ router.get('/screenings', async (req, res) => {
     const currentDate = now.toISOString().split('T')[0];
     const currentTime = now.toTimeString().split(' ')[0].substring(0, 5);
 
-    // Get screenings for the edition that haven't passed yet
+    // Get screenings that haven't finished yet (includes currently running)
     const query = `
       SELECT
         ps.id,
@@ -38,7 +38,7 @@ router.get('/screenings', async (req, res) => {
       WHERE ps.edition_id = $1
         AND (
           ps.scheduled_date > $2
-          OR (ps.scheduled_date = $2 AND ps.scheduled_time >= $3)
+          OR (ps.scheduled_date = $2 AND (ps.scheduled_time + (ps.total_runtime || ' minutes')::interval)::time >= $3)
         )
       ORDER BY ps.scheduled_date ASC, ps.scheduled_time ASC
       LIMIT 50
