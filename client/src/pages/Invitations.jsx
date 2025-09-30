@@ -1561,8 +1561,8 @@ function Invitations() {
                         </div>
                       </button>
                     </td>
-                    <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} whitespace-nowrap`}>
-                      <div className="text-sm text-gray-900">{invitation.guest?.email}</div>
+                    <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'}`} style={{maxWidth: '250px'}}>
+                      <div className="text-sm text-gray-900 truncate" title={invitation.guest?.email}>{invitation.guest?.email}</div>
                     </td>
                     <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} whitespace-nowrap`}>
                       {getCategoryBadge(invitation.guest?.category || 'guest')}
@@ -1850,8 +1850,8 @@ function Invitations() {
                             </div>
                           </button>
                         </td>
-                        <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} whitespace-nowrap`}>
-                          <div className="text-sm text-gray-900">{guest.email}</div>
+                        <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'}`} style={{maxWidth: '250px'}}>
+                          <div className="text-sm text-gray-900 truncate" title={guest.email}>{guest.email}</div>
                         </td>
                         <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} whitespace-nowrap`}>
                           {getCategoryBadge(guest.category)}
