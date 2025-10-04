@@ -36,7 +36,8 @@ const Programming = () => {
     title_override_en: '',
     notes: '',
     ticket_link: '',
-    highlighted: false
+    highlighted: false,
+    hidden_from_public: false
   })
 
   useEffect(() => {
@@ -166,7 +167,8 @@ const Programming = () => {
       title_override_en: '',
       notes: '',
       ticket_link: '',
-      highlighted: false
+      highlighted: false,
+      hidden_from_public: false
     })
     setEditingEntry(null)
     setShowForm(false)
@@ -243,7 +245,8 @@ const Programming = () => {
       title_override_en: '',
       notes: '',
       ticket_link: '',
-      highlighted: false
+      highlighted: false,
+      hidden_from_public: false
     })
     setShowForm(true)
   }
@@ -260,7 +263,8 @@ const Programming = () => {
       title_override_en: '',
       notes: '',
       ticket_link: '',
-      highlighted: false
+      highlighted: false,
+      hidden_from_public: false
     })
     setShowForm(true)
   }
@@ -295,7 +299,8 @@ const Programming = () => {
       title_override_en: entry.title_override_en || '',
       notes: entry.notes || '',
       ticket_link: entry.ticket_link || '',
-      highlighted: entry.highlighted || false
+      highlighted: entry.highlighted || false,
+      hidden_from_public: entry.hidden_from_public || false
     })
     setContentType(entry.movie_id ? 'movie' : entry.block_id ? 'block' : '')
     setEditingEntry(entry)
@@ -947,17 +952,33 @@ const Programming = () => {
                 </p>
               </div>
 
-              <div className="flex items-center">
-                <input
-                  type="checkbox"
-                  id="highlighted"
-                  checked={formData.highlighted}
-                  onChange={(e) => setFormData({...formData, highlighted: e.target.checked})}
-                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                />
-                <label htmlFor="highlighted" className="ml-2 block text-sm font-medium text-gray-700">
-                  Highlighted screening
-                </label>
+              <div className="space-y-3">
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
+                    id="highlighted"
+                    checked={formData.highlighted}
+                    onChange={(e) => setFormData({...formData, highlighted: e.target.checked})}
+                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                  />
+                  <label htmlFor="highlighted" className="ml-2 block text-sm font-medium text-gray-700">
+                    Highlighted screening
+                  </label>
+                </div>
+
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
+                    id="hidden_from_public"
+                    checked={formData.hidden_from_public}
+                    onChange={(e) => setFormData({...formData, hidden_from_public: e.target.checked})}
+                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                  />
+                  <label htmlFor="hidden_from_public" className="ml-2 block text-sm font-medium text-gray-700">
+                    Hide from public schedule
+                  </label>
+                  <span className="ml-2 text-xs text-gray-500">(Visible only in admin)</span>
+                </div>
               </div>
 
               <div className="flex justify-end space-x-3 pt-4 border-t">
@@ -1117,7 +1138,11 @@ const Programming = () => {
                         </div>
                       ) : gooutTickets[entry.id] !== undefined && gooutTickets[entry.id] !== null ? (
                         <div className="inline-flex items-center justify-center">
-                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                          <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
+                            gooutTickets[entry.id] === 0
+                              ? 'bg-gray-100 text-gray-600'
+                              : 'bg-green-100 text-green-800'
+                          }`}>
                             {gooutTickets[entry.id]}
                           </span>
                         </div>

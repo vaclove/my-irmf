@@ -471,6 +471,7 @@ router.get('/public/movies', async (req, res) => {
         FROM programming_schedule ps
         JOIN venues v ON ps.venue_id = v.id
         WHERE ps.movie_id = ANY($1::uuid[])
+          AND ps.hidden_from_public = false
         ORDER BY ps.scheduled_date, ps.scheduled_time
       `;
 
@@ -493,6 +494,7 @@ router.get('/public/movies', async (req, res) => {
         JOIN block_movies bm ON mb.id = bm.block_id
         JOIN venues v ON ps.venue_id = v.id
         WHERE bm.movie_id = ANY($1::uuid[])
+          AND ps.hidden_from_public = false
         ORDER BY ps.scheduled_date, ps.scheduled_time
       `;
 
@@ -614,6 +616,7 @@ router.get('/public/movies/:id', async (req, res) => {
       FROM programming_schedule ps
       JOIN venues v ON ps.venue_id = v.id
       WHERE ps.movie_id = $1
+        AND ps.hidden_from_public = false
       ORDER BY ps.scheduled_date, ps.scheduled_time
     `;
 
@@ -635,6 +638,7 @@ router.get('/public/movies/:id', async (req, res) => {
       JOIN block_movies bm ON mb.id = bm.block_id
       JOIN venues v ON ps.venue_id = v.id
       WHERE bm.movie_id = $1
+        AND ps.hidden_from_public = false
       ORDER BY ps.scheduled_date, ps.scheduled_time
     `;
 
@@ -752,7 +756,7 @@ router.get('/public/programming', async (req, res) => {
       JOIN editions e ON ps.edition_id = e.id
       LEFT JOIN movies m ON ps.movie_id = m.id
       LEFT JOIN movie_blocks mb ON ps.block_id = mb.id
-      WHERE 1=1
+      WHERE ps.hidden_from_public = false
     `;
     
     const params = [];
@@ -787,9 +791,9 @@ router.get('/public/programming', async (req, res) => {
 
     // Get total count for pagination
     let countQuery = `
-      SELECT COUNT(*) as total 
+      SELECT COUNT(*) as total
       FROM programming_schedule ps
-      WHERE 1=1
+      WHERE ps.hidden_from_public = false
     `;
     
     if (edition_id) countQuery += ` AND ps.edition_id = '${edition_id}'`;
@@ -919,7 +923,7 @@ router.get('/public/programming/:id', async (req, res) => {
       JOIN editions e ON ps.edition_id = e.id
       LEFT JOIN movies m ON ps.movie_id = m.id
       LEFT JOIN movie_blocks mb ON ps.block_id = mb.id
-      WHERE ps.id = $1
+      WHERE ps.id = $1 AND ps.hidden_from_public = false
     `;
     
     const result = await pool.query(query, [id]);

@@ -161,6 +161,7 @@ router.get('/edition/:editionId', async (req, res) => {
         ps.notes,
         ps.ticket_link,
         ps.highlighted,
+        ps.hidden_from_public,
         ps.goout_schedule_id,
         ps.goout_checkin_id,
         ps.created_at,
@@ -233,6 +234,7 @@ router.get('/:id', async (req, res) => {
         ps.notes,
         ps.ticket_link,
         ps.highlighted,
+        ps.hidden_from_public,
         ps.goout_schedule_id,
         ps.goout_checkin_id,
         ps.created_at,
@@ -304,11 +306,12 @@ router.post('/', async (req, res) => {
       notes,
       ticket_link,
       highlighted,
+      hidden_from_public,
       goout_schedule_id,
       goout_checkin_id
     } = req.body;
-    
-    
+
+
     // Validate required fields
     if (!edition_id || !venue_id || !scheduled_date || !scheduled_time) {
       return res.status(400).json({ 
@@ -345,15 +348,16 @@ router.post('/', async (req, res) => {
       INSERT INTO programming_schedule (
         edition_id, venue_id, movie_id, block_id, scheduled_date, scheduled_time,
         discussion_time, title_override_cs, title_override_en, notes, ticket_link, highlighted,
-        goout_schedule_id, goout_checkin_id
+        hidden_from_public, goout_schedule_id, goout_checkin_id
       )
-      VALUES ($1, $2, $3, $4, $5::date, $6::time, $7, $8, $9, $10, $11, $12, $13, $14)
+      VALUES ($1, $2, $3, $4, $5::date, $6::time, $7, $8, $9, $10, $11, $12, $13, $14, $15)
       RETURNING *
     `, [
       edition_id, venue_id, movie_id || null, block_id || null,
       cleanDate, scheduled_time, discussion_time || 0,
       title_override_cs || null, title_override_en || null, notes || null, ticket_link || null,
       highlighted || false,
+      hidden_from_public || false,
       goout_schedule_id || null, goout_checkin_id || null
     ]);
     
@@ -380,10 +384,11 @@ router.put('/:id', async (req, res) => {
       notes,
       ticket_link,
       highlighted,
+      hidden_from_public,
       goout_schedule_id,
       goout_checkin_id
     } = req.body;
-    
+
     // Validate that either movie_id or block_id is provided, but not both (if either is being updated)
     if ((movie_id !== undefined || block_id !== undefined) && 
         ((movie_id && block_id) || (!movie_id && !block_id))) {
@@ -443,13 +448,15 @@ router.put('/:id', async (req, res) => {
         notes = $9,
         ticket_link = $10,
         highlighted = COALESCE($11, highlighted),
-        goout_schedule_id = $12,
-        goout_checkin_id = $13
-      WHERE id = $14
+        hidden_from_public = COALESCE($12, hidden_from_public),
+        goout_schedule_id = $13,
+        goout_checkin_id = $14
+      WHERE id = $15
       RETURNING *
     `, [
       venue_id, movie_id || null, block_id || null, cleanDate, scheduled_time, discussion_time,
       title_override_cs, title_override_en, notes, ticket_link, highlighted,
+      hidden_from_public,
       goout_schedule_id, goout_checkin_id, id
     ]);
     
