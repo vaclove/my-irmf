@@ -23,6 +23,8 @@ const Programming = () => {
   const [movieSearch, setMovieSearch] = useState('')
   const [contentType, setContentType] = useState('movie') // Default to 'movie'
   const [viewMode, setViewMode] = useState('table') // 'table' or 'timeline'
+  const [gooutTickets, setGooutTickets] = useState({}) // { programming_id: count }
+  const [loadingTickets, setLoadingTickets] = useState(false)
   const [formData, setFormData] = useState({
     venue_id: '',
     scheduled_date: '',
@@ -105,22 +107,50 @@ const Programming = () => {
 
   const fetchSchedule = async () => {
     if (!selectedEdition) return
-    
+
     try {
       // Fetch full schedule for counts
       const fullResponse = await axios.get(`/api/programming/edition/${selectedEdition.id}`)
       setFullSchedule(fullResponse.data)
-      
+
       // Fetch filtered schedule for display
       const params = new URLSearchParams()
       if (selectedDate) params.append('date', selectedDate)
       if (selectedVenue) params.append('venue_id', selectedVenue)
-      
+
       const response = await axios.get(`/api/programming/edition/${selectedEdition.id}?${params}`)
       setSchedule(response.data)
+
+      // Fetch GoOut ticket counts for displayed schedule
+      fetchGoOutTickets(response.data)
     } catch (err) {
       console.error('Error fetching schedule:', err)
       error('Failed to load schedule')
+    }
+  }
+
+  const fetchGoOutTickets = async (scheduleData) => {
+    if (!scheduleData || scheduleData.length === 0) {
+      setGooutTickets({})
+      return
+    }
+
+    try {
+      setLoadingTickets(true)
+      const programmingIds = scheduleData.map(entry => entry.id)
+
+      const response = await axios.post('/api/goout/ticket-counts', {
+        programming_ids: programmingIds
+      })
+
+      if (response.data.success) {
+        setGooutTickets(response.data.counts)
+      }
+    } catch (err) {
+      console.error('Error fetching GoOut tickets:', err)
+      // Don't show error to user, just fail silently
+    } finally {
+      setLoadingTickets(false)
     }
   }
 
@@ -1008,6 +1038,9 @@ const Programming = () => {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Duration
                   </th>
+                  <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    GoOut Tickets
+                  </th>
                   <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Actions
                   </th>
@@ -1075,6 +1108,21 @@ const Programming = () => {
                         <div className="text-xs text-gray-500">
                           +{entry.discussion_time} min discussion
                         </div>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-center">
+                      {loadingTickets ? (
+                        <div className="inline-flex items-center justify-center">
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                        </div>
+                      ) : gooutTickets[entry.id] !== undefined && gooutTickets[entry.id] !== null ? (
+                        <div className="inline-flex items-center justify-center">
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                            {gooutTickets[entry.id]}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-gray-400">—</span>
                       )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">

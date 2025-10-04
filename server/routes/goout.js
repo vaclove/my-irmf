@@ -61,7 +61,14 @@ router.post('/ticket-counts', async (req, res) => {
           'include': ''
         });
 
-        counts[programmingId] = purchases.purchases?.length || 0;
+        // Count total tickets across all purchases
+        let totalTickets = 0;
+        if (purchases.purchases) {
+          purchases.purchases.forEach(purchase => {
+            totalTickets += purchase.attributes?.ticketCount || 0;
+          });
+        }
+        counts[programmingId] = totalTickets;
       } catch (error) {
         console.error(`Error fetching tickets for programming ${programmingId}, sale ${saleId}:`, error.message);
         counts[programmingId] = null; // null indicates error
@@ -128,8 +135,16 @@ router.get('/ticket-count/:programming_id', async (req, res) => {
       'include': ''
     });
 
+    // Count total tickets across all purchases
+    let totalTickets = 0;
+    if (purchases.purchases) {
+      purchases.purchases.forEach(purchase => {
+        totalTickets += purchase.attributes?.ticketCount || 0;
+      });
+    }
+
     res.json({
-      count: purchases.purchases?.length || 0,
+      count: totalTickets,
       success: true
     });
 

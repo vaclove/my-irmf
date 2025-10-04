@@ -161,6 +161,8 @@ router.get('/edition/:editionId', async (req, res) => {
         ps.notes,
         ps.ticket_link,
         ps.highlighted,
+        ps.goout_schedule_id,
+        ps.goout_checkin_id,
         ps.created_at,
         ps.updated_at,
         v.name_cs as venue_name_cs,
@@ -231,6 +233,8 @@ router.get('/:id', async (req, res) => {
         ps.notes,
         ps.ticket_link,
         ps.highlighted,
+        ps.goout_schedule_id,
+        ps.goout_checkin_id,
         ps.created_at,
         ps.updated_at,
         v.name_cs as venue_name_cs,
@@ -299,7 +303,9 @@ router.post('/', async (req, res) => {
       title_override_en,
       notes,
       ticket_link,
-      highlighted
+      highlighted,
+      goout_schedule_id,
+      goout_checkin_id
     } = req.body;
     
     
@@ -338,15 +344,17 @@ router.post('/', async (req, res) => {
     const result = await pool.query(`
       INSERT INTO programming_schedule (
         edition_id, venue_id, movie_id, block_id, scheduled_date, scheduled_time,
-        discussion_time, title_override_cs, title_override_en, notes, ticket_link, highlighted
+        discussion_time, title_override_cs, title_override_en, notes, ticket_link, highlighted,
+        goout_schedule_id, goout_checkin_id
       )
-      VALUES ($1, $2, $3, $4, $5::date, $6::time, $7, $8, $9, $10, $11, $12)
+      VALUES ($1, $2, $3, $4, $5::date, $6::time, $7, $8, $9, $10, $11, $12, $13, $14)
       RETURNING *
     `, [
       edition_id, venue_id, movie_id || null, block_id || null,
       cleanDate, scheduled_time, discussion_time || 0,
       title_override_cs || null, title_override_en || null, notes || null, ticket_link || null,
-      highlighted || false
+      highlighted || false,
+      goout_schedule_id || null, goout_checkin_id || null
     ]);
     
     res.status(201).json(result.rows[0]);
@@ -371,7 +379,9 @@ router.put('/:id', async (req, res) => {
       title_override_en,
       notes,
       ticket_link,
-      highlighted
+      highlighted,
+      goout_schedule_id,
+      goout_checkin_id
     } = req.body;
     
     // Validate that either movie_id or block_id is provided, but not both (if either is being updated)
@@ -432,12 +442,15 @@ router.put('/:id', async (req, res) => {
         title_override_en = $8,
         notes = $9,
         ticket_link = $10,
-        highlighted = COALESCE($11, highlighted)
-      WHERE id = $12
+        highlighted = COALESCE($11, highlighted),
+        goout_schedule_id = $12,
+        goout_checkin_id = $13
+      WHERE id = $14
       RETURNING *
     `, [
       venue_id, movie_id || null, block_id || null, cleanDate, scheduled_time, discussion_time,
-      title_override_cs, title_override_en, notes, ticket_link, highlighted, id
+      title_override_cs, title_override_en, notes, ticket_link, highlighted,
+      goout_schedule_id, goout_checkin_id, id
     ]);
     
     if (result.rows.length === 0) {
