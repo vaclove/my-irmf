@@ -33,7 +33,8 @@ const Programming = () => {
     title_override_cs: '',
     title_override_en: '',
     notes: '',
-    ticket_link: ''
+    ticket_link: '',
+    highlighted: false
   })
 
   useEffect(() => {
@@ -134,7 +135,8 @@ const Programming = () => {
       title_override_cs: '',
       title_override_en: '',
       notes: '',
-      ticket_link: ''
+      ticket_link: '',
+      highlighted: false
     })
     setEditingEntry(null)
     setShowForm(false)
@@ -210,7 +212,8 @@ const Programming = () => {
       title_override_cs: '',
       title_override_en: '',
       notes: '',
-      ticket_link: ''
+      ticket_link: '',
+      highlighted: false
     })
     setShowForm(true)
   }
@@ -226,7 +229,8 @@ const Programming = () => {
       title_override_cs: '',
       title_override_en: '',
       notes: '',
-      ticket_link: ''
+      ticket_link: '',
+      highlighted: false
     })
     setShowForm(true)
   }
@@ -260,7 +264,8 @@ const Programming = () => {
       title_override_cs: entry.title_override_cs || '',
       title_override_en: entry.title_override_en || '',
       notes: entry.notes || '',
-      ticket_link: entry.ticket_link || ''
+      ticket_link: entry.ticket_link || '',
+      highlighted: entry.highlighted || false
     })
     setContentType(entry.movie_id ? 'movie' : entry.block_id ? 'block' : '')
     setEditingEntry(entry)
@@ -910,6 +915,19 @@ const Programming = () => {
                 <p className="text-xs text-gray-500 mt-1">
                   Direct link to ticket presale for this screening
                 </p>
+              </div>
+
+              <div className="flex items-center">
+                <input
+                  type="checkbox"
+                  id="highlighted"
+                  checked={formData.highlighted}
+                  onChange={(e) => setFormData({...formData, highlighted: e.target.checked})}
+                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                />
+                <label htmlFor="highlighted" className="ml-2 block text-sm font-medium text-gray-700">
+                  Highlighted screening
+                </label>
               </div>
 
               <div className="flex justify-end space-x-3 pt-4 border-t">
