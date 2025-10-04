@@ -449,8 +449,8 @@ router.put('/:id', async (req, res) => {
         ticket_link = $10,
         highlighted = COALESCE($11, highlighted),
         hidden_from_public = COALESCE($12, hidden_from_public),
-        goout_schedule_id = $13,
-        goout_checkin_id = $14
+        goout_schedule_id = COALESCE($13, goout_schedule_id),
+        goout_checkin_id = COALESCE($14, goout_checkin_id)
       WHERE id = $15
       RETURNING *
     `, [
