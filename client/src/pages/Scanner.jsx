@@ -233,7 +233,8 @@ const Scanner = () => {
         setLastScan({
           success: false,
           error: 'Already scanned',
-          guest: data.guest
+          guest: data.guest,
+          usedFor: data.usedFor
         });
         setError(`Badge ${scannedCode} already scanned for this screening`);
 
@@ -489,6 +490,11 @@ const Scanner = () => {
                 Badge #{lastScan.guest.badgeNumber}
               </div>
             </>
+          )}
+          {lastScan.usedFor && (
+            <div className="text-lg text-red-100 mt-4">
+              Used for: {lastScan.usedFor}
+            </div>
           )}
         </div>
       )}

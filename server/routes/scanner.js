@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { pool } = require('../models/database');
+const { isValidTicketCode } = require('../utils/luhn');
 
 // Get upcoming screenings for scanner
 router.get('/screenings', async (req, res) => {
@@ -80,17 +81,27 @@ router.post('/scan', async (req, res) => {
     }
 
     // Extract badge information based on scanned code format
-    // Our format: YYYY### (length 7) - e.g., 2025003
-    // External format: anything else - e.g., 1400528549781 (13 digits)
+    // Internal badge: YYYY### (length 7, not starting with 30) - e.g., 2025003
+    // One-time ticket: 30XXXXC (length 7, starts with 30) - e.g., 3012347
+    // External GoOut: anything else - e.g., 1400528549781 (13 digits)
 
     const scannedStr = String(scanned_code);
     let badgeNumber = null;
     let isInternalBadge = false;
+    let isOneTimeTicket = false;
 
     if (scannedStr.length === 7) {
-      // Our internal badge format: extract last 3 digits
-      badgeNumber = parseInt(scannedStr.slice(-3));
-      isInternalBadge = !isNaN(badgeNumber);
+      if (scannedStr.startsWith('30')) {
+        // One-time ticket - validate using Luhn algorithm
+        if (!isValidTicketCode(scannedStr)) {
+          return res.status(400).json({ error: 'Invalid ticket code' });
+        }
+        isOneTimeTicket = true;
+      } else {
+        // Our internal badge format: extract last 3 digits
+        badgeNumber = parseInt(scannedStr.slice(-3));
+        isInternalBadge = !isNaN(badgeNumber);
+      }
     }
 
     const badgeIdentifier = isInternalBadge ? badgeNumber : scannedStr;
@@ -120,33 +131,83 @@ router.post('/scan', async (req, res) => {
 
       guest = guestResult.rows[0];
       guestId = guest.guest_id;
+    } else if (isOneTimeTicket) {
+      // One-time ticket - check if already used anywhere
+      const usedQuery = `
+        SELECT
+          bs.id,
+          bs.scanned_at,
+          bs.programming_id,
+          ps.scheduled_date,
+          ps.scheduled_time,
+          ps.title_override_cs,
+          ps.title_override_en,
+          v.name_cs,
+          v.name_en,
+          m.name_cs as movie_name_cs,
+          m.name_en as movie_name_en,
+          mb.name_cs as block_name_cs,
+          mb.name_en as block_name_en
+        FROM badge_scans bs
+        JOIN programming_schedule ps ON bs.programming_id = ps.id
+        JOIN venues v ON ps.venue_id = v.id
+        LEFT JOIN movies m ON ps.movie_id = m.id
+        LEFT JOIN movie_blocks mb ON ps.block_id = mb.id
+        WHERE bs.badge_number = $1
+      `;
+
+      const usedResult = await pool.query(usedQuery, [scannedStr]);
+
+      if (usedResult.rows.length > 0) {
+        const used = usedResult.rows[0];
+        const title = used.title_override_cs || used.movie_name_cs || used.block_name_cs;
+        const venue = used.name_cs;
+        const date = used.scheduled_date;
+        const time = used.scheduled_time;
+
+        return res.status(409).json({
+          error: 'Ticket already used',
+          guest: {
+            firstName: 'One-time',
+            lastName: 'Ticket',
+            badgeNumber: scannedStr
+          },
+          usedAt: used.scanned_at,
+          usedFor: `${title} - ${venue} (${date} ${time})`
+        });
+      }
+
+      // Ticket is valid and not used - no guest record
+      guestId = null;
     } else {
       // External badge - no validation, allow scanning
       guestId = null;
     }
 
-    // Check if already scanned
-    const existingQuery = isInternalBadge
-      ? `SELECT id FROM badge_scans WHERE programming_id = $1 AND guest_id = $2`
-      : `SELECT id FROM badge_scans WHERE programming_id = $1 AND badge_number = $2`;
+    // Check if already scanned for THIS screening (internal badges and external only)
+    if (isInternalBadge || (!isOneTimeTicket && !isInternalBadge)) {
+      const existingQuery = isInternalBadge
+        ? `SELECT id FROM badge_scans WHERE programming_id = $1 AND guest_id = $2`
+        : `SELECT id FROM badge_scans WHERE programming_id = $1 AND badge_number = $2`;
 
-    const existingResult = await pool.query(existingQuery,
-      isInternalBadge ? [programming_id, guestId] : [programming_id, String(badgeIdentifier)]
-    );
+      const existingResult = await pool.query(existingQuery,
+        isInternalBadge ? [programming_id, guestId] : [programming_id, String(badgeIdentifier)]
+      );
 
-    if (existingResult.rows.length > 0) {
-      return res.status(409).json({
-        error: 'Badge already scanned for this screening',
-        guest: guest ? {
-          firstName: guest.first_name,
-          lastName: guest.last_name,
-          badgeNumber: guest.badge_number
-        } : {
-          firstName: 'External',
-          lastName: 'Guest',
-          badgeNumber: badgeIdentifier
-        }
-      });
+      if (existingResult.rows.length > 0) {
+        return res.status(409).json({
+          error: 'Badge already scanned for this screening',
+          guest: guest ? {
+            firstName: guest.first_name,
+            lastName: guest.last_name,
+            badgeNumber: guest.badge_number
+          } : {
+            firstName: 'External',
+            lastName: 'Guest',
+            badgeNumber: badgeIdentifier
+          }
+        });
+      }
     }
 
     // Insert scan record
@@ -177,6 +238,10 @@ router.post('/scan', async (req, res) => {
         firstName: guest.first_name,
         lastName: guest.last_name,
         badgeNumber: guest.badge_number
+      } : isOneTimeTicket ? {
+        firstName: 'One-time',
+        lastName: 'Ticket',
+        badgeNumber: scannedStr
       } : {
         firstName: 'External',
         lastName: 'Guest',
@@ -213,14 +278,31 @@ router.get('/scans/:programming_id', async (req, res) => {
 
     const result = await pool.query(query, [programming_id]);
 
-    const scans = result.rows.map(row => ({
-      id: row.id,
-      badgeNumber: row.badge_number,
-      firstName: row.guest_id ? row.first_name : 'External',
-      lastName: row.guest_id ? row.last_name : 'Guest',
-      scannedAt: row.scanned_at,
-      scannedBy: row.scanned_by
-    }));
+    const scans = result.rows.map(row => {
+      // Determine badge type
+      const badgeStr = String(row.badge_number);
+      let firstName = 'External';
+      let lastName = 'Guest';
+
+      if (row.guest_id) {
+        // Internal badge with guest
+        firstName = row.first_name;
+        lastName = row.last_name;
+      } else if (badgeStr.length === 7 && badgeStr.startsWith('30')) {
+        // One-time ticket
+        firstName = 'One-time';
+        lastName = 'Ticket';
+      }
+
+      return {
+        id: row.id,
+        badgeNumber: row.badge_number,
+        firstName,
+        lastName,
+        scannedAt: row.scanned_at,
+        scannedBy: row.scanned_by
+      };
+    });
 
     res.json({ scans });
   } catch (error) {
