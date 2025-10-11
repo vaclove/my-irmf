@@ -440,13 +440,17 @@ router.get('/print-data/:guestId/:editionId', async (req, res) => {
       console.error('Error updating badge print timestamp:', updateError);
       // Don't fail the request if timestamp update fails
     }
-    
+
+    // Replace Azure photo URL with proxied URL to avoid CORS issues
+    const guestWithProxiedPhoto = {
+      ...guest,
+      formatted_badge_number: formattedBadgeNumber,
+      photo: guest.photo ? `/api/guests/${guest.id}/photo` : null
+    };
+
     res.json({
       layout,
-      guest: {
-        ...guest,
-        formatted_badge_number: formattedBadgeNumber
-      }
+      guest: guestWithProxiedPhoto
     });
   } catch (error) {
     console.error('Error getting badge print data:', error);

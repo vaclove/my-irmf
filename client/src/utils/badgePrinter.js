@@ -41,18 +41,41 @@ const generateBarcode = (text, width = 100, height = 40) => {
 
 // Get guest photo as data URL (placeholder for now)
 const getGuestPhoto = async (photoUrl) => {
-  if (!photoUrl) return null;
-  
+  if (!photoUrl) {
+    console.log('No photo URL provided');
+    return null;
+  }
+
   try {
-    const response = await fetch(photoUrl);
+    console.log('Fetching photo from:', photoUrl);
+    const response = await fetch(photoUrl, {
+      mode: 'cors',
+      credentials: 'omit'
+    });
+
+    if (!response.ok) {
+      console.error('Photo fetch failed:', response.status, response.statusText);
+      return null;
+    }
+
     const blob = await response.blob();
-    return new Promise((resolve) => {
+    console.log('Photo blob loaded:', blob.size, 'bytes, type:', blob.type);
+
+    return new Promise((resolve, reject) => {
       const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
+      reader.onload = () => {
+        console.log('Photo converted to data URL successfully');
+        resolve(reader.result);
+      };
+      reader.onerror = (error) => {
+        console.error('FileReader error:', error);
+        reject(error);
+      };
       reader.readAsDataURL(blob);
     });
   } catch (error) {
     console.error('Error loading photo:', error);
+    console.error('Photo URL was:', photoUrl);
     return null;
   }
 };

@@ -449,4 +449,42 @@ router.post('/generate-greeting', async (req, res) => {
   }
 });
 
+// Proxy endpoint for guest photos (to avoid CORS issues with Azure Blob Storage)
+router.get('/:id/photo', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Get guest photo URL from database
+    const result = await pool.query('SELECT photo FROM guests WHERE id = $1', [id]);
+
+    if (result.rows.length === 0 || !result.rows[0].photo) {
+      return res.status(404).json({ error: 'Photo not found' });
+    }
+
+    const photoUrl = result.rows[0].photo;
+
+    // Fetch photo from Azure Blob Storage
+    const fetch = (await import('node-fetch')).default;
+    const photoResponse = await fetch(photoUrl);
+
+    if (!photoResponse.ok) {
+      console.error('Failed to fetch photo from Azure:', photoResponse.status, photoResponse.statusText);
+      return res.status(photoResponse.status).json({ error: 'Failed to fetch photo' });
+    }
+
+    // Get content type
+    const contentType = photoResponse.headers.get('content-type') || 'image/jpeg';
+
+    // Stream photo to client with proper headers
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache for 1 year
+    res.setHeader('Access-Control-Allow-Origin', '*'); // Allow CORS
+
+    photoResponse.body.pipe(res);
+  } catch (error) {
+    console.error('Error proxying guest photo:', error);
+    res.status(500).json({ error: 'Failed to load photo' });
+  }
+});
+
 module.exports = router;
