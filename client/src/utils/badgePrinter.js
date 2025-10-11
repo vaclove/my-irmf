@@ -80,20 +80,57 @@ const getGuestPhoto = async (photoUrl) => {
   }
 };
 
+// Render text as high-resolution image (converts to raster outlines for printer compatibility)
+const renderTextAsImage = (text, widthPt, heightPt, fontSize, fontWeight, color, align) => {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+
+  // Use very high DPI for crisp text (600 DPI equivalent) - critical for label printers
+  const scale = 8;
+  canvas.width = widthPt * scale;
+  canvas.height = heightPt * scale;
+
+  // Scale context for high DPI
+  ctx.scale(scale, scale);
+
+  // Clear with transparent background
+  ctx.clearRect(0, 0, widthPt, heightPt);
+
+  // Set font
+  const fontStyle = fontWeight === 'bold' ? 'bold' : 'normal';
+  ctx.font = `${fontStyle} ${fontSize}px Roboto, -apple-system, Arial, sans-serif`;
+  ctx.fillStyle = color || '#000000';
+  ctx.textBaseline = 'middle';
+
+  // Handle text alignment
+  let x = 0;
+  if (align === 'center') {
+    ctx.textAlign = 'center';
+    x = widthPt / 2;
+  } else if (align === 'right') {
+    ctx.textAlign = 'right';
+    x = widthPt;
+  } else {
+    ctx.textAlign = 'left';
+    x = 0;
+  }
+
+  // Draw text in the middle of the canvas vertically
+  ctx.fillText(text, x, heightPt / 2);
+
+  return canvas.toDataURL('image/png');
+};
+
 // Render text element on PDF
 const renderTextElement = (pdf, element, guestData, editionYear) => {
   const x = mmToPt(pxToMm(element.x));
   const y = mmToPt(pxToMm(element.y));
+  const width = mmToPt(pxToMm(element.width));
+  const height = mmToPt(pxToMm(element.height));
   const fontSize = element.fontSize || 14;
 
-  // Set custom Roboto font with UTF-8 support
-  const fontStyle = element.fontWeight === 'bold' ? 'bold' : 'normal';
-  pdf.setFont('Roboto', fontStyle);
-  pdf.setFontSize(fontSize);
-  pdf.setTextColor(element.color || '#000000');
-  
   let text = '';
-  
+
   switch (element.type) {
     case ELEMENT_TYPES.GUEST_NAME:
       text = `${guestData.first_name || ''} ${guestData.last_name || ''}`.trim();
@@ -110,18 +147,20 @@ const renderTextElement = (pdf, element, guestData, editionYear) => {
     default:
       text = 'Text';
   }
-  
-  // Handle text alignment
-  const align = element.textAlign || 'left';
-  const elementWidth = mmToPt(pxToMm(element.width));
-  
-  if (align === 'center') {
-    pdf.text(text, x + elementWidth / 2, y + fontSize * 0.7, { align: 'center' });
-  } else if (align === 'right') {
-    pdf.text(text, x + elementWidth, y + fontSize * 0.7, { align: 'right' });
-  } else {
-    pdf.text(text, x, y + fontSize * 0.7);
-  }
+
+  // Render text as high-resolution image for better printer compatibility
+  const textImage = renderTextAsImage(
+    text,
+    width,
+    height,
+    fontSize,
+    element.fontWeight,
+    element.color,
+    element.textAlign || 'left'
+  );
+
+  // Add the text image to PDF
+  pdf.addImage(textImage, 'PNG', x, y, width, height);
 };
 
 // Render barcode element on PDF
@@ -174,8 +213,8 @@ export const generateBadgePDF = async (layout, guestData, editionYear) => {
     unit: 'pt',
     format: [mmToPt(layout.canvas_width_mm), mmToPt(layout.canvas_height_mm)]
   });
-  
-  
+
+
   // Set background color if specified
   if (layout.background_color && layout.background_color !== '#ffffff') {
     pdf.setFillColor(layout.background_color);
