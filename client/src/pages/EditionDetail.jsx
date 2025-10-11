@@ -4,6 +4,7 @@ import { editionApi, guestApi, invitationApi } from '../utils/api'
 import { useToast } from '../contexts/ToastContext'
 import InvitationDialog from '../components/InvitationDialog'
 import Avatar from '../components/Avatar'
+import EditionPlaceholderUpload from '../components/EditionPlaceholderUpload'
 
 function EditionDetail() {
   const { id } = useParams()
@@ -61,21 +62,29 @@ function EditionDetail() {
   const handleResendInvitation = async (guest) => {
     try {
       setResendingGuestId(guest.id)
-      
+
       await invitationApi.resend({
         guest_id: guest.id,
         edition_id: id
       })
-      
+
       success(`Invitation resent to ${guest.first_name} ${guest.last_name}`)
       fetchEditionData()
-      
+
     } catch (error) {
       console.error('Error resending invitation:', error)
       showError('Failed to resend invitation: ' + (error.response?.data?.error || error.message))
     } finally {
       setResendingGuestId(null)
     }
+  }
+
+  const handlePlaceholderPhotoUpdate = (photoUrl) => {
+    // Update local edition state
+    setEdition(prev => ({
+      ...prev,
+      placeholder_photo: photoUrl
+    }))
   }
 
   // Invitation confirmation removed - will be reimplemented with new tag-based system
@@ -191,6 +200,17 @@ function EditionDetail() {
               {new Date(edition.start_date).toLocaleDateString()} - {new Date(edition.end_date).toLocaleDateString()}
             </span>
           )}
+        </div>
+      </div>
+
+      {/* Edition Settings */}
+      <div className="bg-white shadow rounded-lg p-6 mb-6">
+        <h2 className="text-lg font-medium mb-4">Edition Settings</h2>
+        <div className="max-w-xs">
+          <EditionPlaceholderUpload
+            edition={edition}
+            onPhotoUpdate={handlePlaceholderPhotoUpdate}
+          />
         </div>
       </div>
 

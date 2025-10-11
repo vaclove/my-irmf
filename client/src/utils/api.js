@@ -28,13 +28,14 @@ export const editionApi = {
   getAll: () => api.get('/editions'),
   getById: (id) => api.get(`/editions/${id}`),
   create: (edition) => api.post('/editions', edition),
+  update: (id, edition) => api.put(`/editions/${id}`, edition),
   getGuests: (id) => api.get(`/editions/${id}/guests`),
   assignGuest: (id, assignment) => api.post(`/editions/${id}/guests`, assignment),
-  updateAssignment: (editionId, assignmentId, data) => 
+  updateAssignment: (editionId, assignmentId, data) =>
     api.put(`/editions/${editionId}/guests/${assignmentId}`, data),
-  removeGuest: (editionId, assignmentId) => 
+  removeGuest: (editionId, assignmentId) =>
     api.delete(`/editions/${editionId}/guests/${assignmentId}`),
-  confirmGuest: (editionId, assignmentId) => 
+  confirmGuest: (editionId, assignmentId) =>
     api.put(`/editions/${editionId}/guests/${assignmentId}/confirm`),
 }
 

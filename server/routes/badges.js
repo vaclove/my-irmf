@@ -316,23 +316,23 @@ router.get('/print-data/:guestId/:editionId', async (req, res) => {
     // Get guest data with badge number and category for this edition
     // Check both guest_editions (confirmed guests) and guest_invitations (invited but not confirmed)
     const guestResult = await pool.query(`
-      SELECT 
+      SELECT
         g.*,
         COALESCE(
           ge.category,
           -- If guest not in guest_editions, get category from tags like in invitations
           (SELECT tag_name::guest_category FROM (
-            SELECT t2.name as tag_name, 
-                   CASE t2.name 
+            SELECT t2.name as tag_name,
+                   CASE t2.name
                      WHEN 'filmmaker' THEN 1
-                     WHEN 'press' THEN 2  
+                     WHEN 'press' THEN 2
                      WHEN 'staff' THEN 3
                      WHEN 'guest' THEN 4
                      ELSE 5
                    END as priority
-            FROM guest_tags gt2 
-            JOIN tags t2 ON gt2.tag_id = t2.id 
-            WHERE gt2.guest_id = g.id 
+            FROM guest_tags gt2
+            JOIN tags t2 ON gt2.tag_id = t2.id
+            WHERE gt2.guest_id = g.id
             AND t2.name IN ('filmmaker', 'press', 'staff', 'guest')
             ORDER BY priority
             LIMIT 1
@@ -341,7 +341,8 @@ router.get('/print-data/:guestId/:editionId', async (req, res) => {
         ) as category,
         gbn.badge_number,
         e.year,
-        CASE 
+        e.placeholder_photo,
+        CASE
           WHEN ge.id IS NOT NULL THEN 'confirmed'
           WHEN gi.id IS NOT NULL THEN 'invited'
           ELSE NULL
@@ -442,10 +443,18 @@ router.get('/print-data/:guestId/:editionId', async (req, res) => {
     }
 
     // Replace Azure photo URL with proxied URL to avoid CORS issues
+    // Use placeholder photo if guest has no photo
+    let photoUrl = null;
+    if (guest.photo) {
+      photoUrl = `/api/guests/${guest.id}/photo`;
+    } else if (guest.placeholder_photo) {
+      photoUrl = `/api/editions/${editionId}/placeholder-photo`;
+    }
+
     const guestWithProxiedPhoto = {
       ...guest,
       formatted_badge_number: formattedBadgeNumber,
-      photo: guest.photo ? `/api/guests/${guest.id}/photo` : null
+      photo: photoUrl
     };
 
     res.json({

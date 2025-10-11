@@ -2,6 +2,7 @@ const express = require('express');
 const { pool } = require('../models/database');
 const { logError } = require('../utils/logger');
 const { auditMiddleware, captureOriginalData } = require('../utils/auditLogger');
+const guestImageStorage = require('../services/guestImageStorage');
 const router = express.Router();
 
 // Apply audit middleware to all routes
@@ -65,26 +66,46 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { year, name, start_date, end_date } = req.body;
-    
+    const { year, name, start_date, end_date, placeholder_photo } = req.body;
+
     if (!name) {
       return res.status(400).json({ error: 'Name is required' });
     }
-    
+
+    // Handle placeholder photo upload to S3 if it's a base64 image
+    let photoUrl = placeholder_photo;
+    if (placeholder_photo && placeholder_photo.startsWith('data:image/')) {
+      try {
+        // Upload to S3 using the guest image storage service
+        const uploadResult = await guestImageStorage.migrateBase64Image(
+          placeholder_photo,
+          `edition-${id}-placeholder`
+        );
+        // Use the original size URL for placeholder photos
+        photoUrl = guestImageStorage.getImageUrl(uploadResult.basePath, 'original');
+        console.log('Uploaded edition placeholder photo to S3:', photoUrl);
+      } catch (uploadError) {
+        console.error('Failed to upload edition placeholder photo to S3:', uploadError);
+        // Fall back to storing base64 in database if S3 upload fails
+        console.warn('Falling back to database storage for placeholder photo');
+      }
+    }
+
     const result = await pool.query(`
-      UPDATE editions SET 
+      UPDATE editions SET
         year = COALESCE($2, year),
         name = $3,
         start_date = $4,
-        end_date = $5
+        end_date = $5,
+        placeholder_photo = COALESCE($6, placeholder_photo)
       WHERE id = $1
       RETURNING *
-    `, [id, year, name, start_date, end_date]);
-    
+    `, [id, year, name, start_date, end_date, photoUrl]);
+
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Edition not found' });
     }
-    
+
     res.json(result.rows[0]);
   } catch (error) {
     if (error.code === '23505') {
@@ -190,10 +211,48 @@ router.delete('/:id/guests/:assignmentId', async (req, res) => {
 
 // Manually confirm guest invitation (deprecated)
 router.put('/:id/guests/:assignmentId/confirm', async (req, res) => {
-  res.status(400).json({ 
+  res.status(400).json({
     error: 'Manual invitation confirmation is deprecated with tag-based assignments.',
     instructions: 'Invitation management will be reimplemented with the new tag-based system.'
   });
+});
+
+// Proxy endpoint for edition placeholder photo (to avoid CORS issues with Azure Blob Storage)
+router.get('/:id/placeholder-photo', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Get edition placeholder photo URL from database
+    const result = await pool.query('SELECT placeholder_photo FROM editions WHERE id = $1', [id]);
+
+    if (result.rows.length === 0 || !result.rows[0].placeholder_photo) {
+      return res.status(404).json({ error: 'Placeholder photo not found' });
+    }
+
+    const photoUrl = result.rows[0].placeholder_photo;
+
+    // Fetch photo from Azure Blob Storage
+    const fetch = (await import('node-fetch')).default;
+    const photoResponse = await fetch(photoUrl);
+
+    if (!photoResponse.ok) {
+      console.error('Failed to fetch placeholder photo from Azure:', photoResponse.status, photoResponse.statusText);
+      return res.status(photoResponse.status).json({ error: 'Failed to fetch placeholder photo' });
+    }
+
+    // Get content type
+    const contentType = photoResponse.headers.get('content-type') || 'image/jpeg';
+
+    // Stream photo to client with proper headers
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Cache-Control', 'public, max-age=31536000'); // Cache for 1 year
+    res.setHeader('Access-Control-Allow-Origin', '*'); // Allow CORS
+
+    photoResponse.body.pipe(res);
+  } catch (error) {
+    console.error('Error proxying edition placeholder photo:', error);
+    res.status(500).json({ error: 'Failed to load placeholder photo' });
+  }
 });
 
 module.exports = router;
