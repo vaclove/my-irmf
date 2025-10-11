@@ -128,17 +128,17 @@ router.get('/:id', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const { first_name, last_name, email, phone, language, company, notes, greeting, photo } = req.body;
-    
-    if (!first_name || !last_name || !email) {
-      return res.status(400).json({ error: 'First name, last name, and email are required' });
+
+    if (!first_name || !last_name) {
+      return res.status(400).json({ error: 'First name and last name are required' });
     }
-    
+
     // Validate language if provided
     if (language && !['czech', 'english'].includes(language)) {
       return res.status(400).json({ error: 'Language must be either "czech" or "english"' });
     }
-    
-    const guestLanguage = language || 'english';
+
+    const guestLanguage = language || 'czech';
     
     // Generate greeting if not provided
     let finalGreeting = greeting;

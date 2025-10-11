@@ -677,7 +677,7 @@ function Guests() {
                           <p className="text-xs text-gray-600 mb-2">Add tags:</p>
                           <div className="flex flex-wrap gap-1">
                             {allTags
-                              .filter(tag => !guest.tags.some(guestTag => guestTag.id === tag.id))
+                              .filter(tag => !(guest.tags || []).some(guestTag => guestTag.id === tag.id))
                               .map((tag) => (
                                 <button
                                   key={tag.id}

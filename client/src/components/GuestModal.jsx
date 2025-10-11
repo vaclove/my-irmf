@@ -18,12 +18,12 @@ function GuestModal({
   const [activeTab, setActiveTab] = useState('details')
   const [generatingGreeting, setGeneratingGreeting] = useState(false)
   const [formData, setFormData] = useState(() => ({
-    first_name: guest?.first_name || '', 
+    first_name: guest?.first_name || '',
     last_name: guest?.last_name || '',
-    email: guest?.email || '', 
-    phone: guest?.phone || '', 
-    language: guest?.language || 'english', 
-    company: guest?.company || '', 
+    email: guest?.email || '',
+    phone: guest?.phone || '',
+    language: guest?.language || 'czech',
+    company: guest?.company || '',
     notes: guest?.notes || '',
     greeting: guest?.greeting || '',
     greeting_auto_generated: guest?.greeting_auto_generated ?? true,
@@ -34,12 +34,12 @@ function GuestModal({
   React.useEffect(() => {
     if (guest) {
       setFormData({
-        first_name: guest.first_name || '', 
+        first_name: guest.first_name || '',
         last_name: guest.last_name || '',
-        email: guest.email || '', 
-        phone: guest.phone || '', 
-        language: guest.language || 'english', 
-        company: guest.company || '', 
+        email: guest.email || '',
+        phone: guest.phone || '',
+        language: guest.language || 'czech',
+        company: guest.company || '',
         notes: guest.notes || '',
         greeting: guest.greeting || '',
         greeting_auto_generated: guest.greeting_auto_generated ?? true,
@@ -48,12 +48,12 @@ function GuestModal({
     } else {
       // Reset form for new guest
       setFormData({
-        first_name: '', 
+        first_name: '',
         last_name: '',
-        email: '', 
-        phone: '', 
-        language: 'english', 
-        company: '', 
+        email: '',
+        phone: '',
+        language: 'czech',
+        company: '',
         notes: '',
         greeting: '',
         greeting_auto_generated: true,
@@ -245,7 +245,6 @@ function GuestModal({
                     <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
                     <input
                       type="email"
-                      required
                       value={formData.email}
                       onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                       className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
