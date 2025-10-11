@@ -50,7 +50,7 @@ const getGuestPhoto = async (photoUrl) => {
     console.log('Fetching photo from:', photoUrl);
     const response = await fetch(photoUrl, {
       mode: 'cors',
-      credentials: 'omit'
+      credentials: 'include'  // Include cookies for authentication
     });
 
     if (!response.ok) {
