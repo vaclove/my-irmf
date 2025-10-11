@@ -920,14 +920,15 @@ function Invitations() {
     }
   }
 
-  const categories = ['filmmaker', 'press', 'guest', 'staff'] // For filtering only
+  const categories = ['filmmaker', 'press', 'guest', 'staff', 'public'] // For filtering only
 
   const getCategoryBadge = (category) => {
     const colors = {
       filmmaker: 'bg-purple-100 text-purple-800',
       press: 'bg-blue-100 text-blue-800',
       guest: 'bg-green-100 text-green-800',
-      staff: 'bg-orange-100 text-orange-800'
+      staff: 'bg-orange-100 text-orange-800',
+      public: 'bg-yellow-100 text-yellow-800'
     }
     return (
       <span className={`px-2 py-1 rounded text-xs font-medium ${colors[category] || 'bg-blue-100 text-blue-800'}`}>
@@ -1462,7 +1463,7 @@ function Invitations() {
             </button>
 
             {/* By Category */}
-            {['filmmaker', 'press', 'guest', 'staff'].map(category => {
+            {['filmmaker', 'press', 'guest', 'staff', 'public'].map(category => {
               const count = invitations.filter(inv =>
                 (inv.status === 'confirmed' || inv.status === 'badge_printed') &&
                 inv.guest?.category === category

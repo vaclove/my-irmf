@@ -22,7 +22,7 @@ function EditionDetail() {
   const [resendingGuestId, setResendingGuestId] = useState(null)
 
   // Categories are now determined from tags automatically
-  const categories = ['filmmaker', 'press', 'guest', 'staff'] // For filtering only
+  const categories = ['filmmaker', 'press', 'guest', 'staff', 'public'] // For filtering only
 
   useEffect(() => {
     fetchEditionData()

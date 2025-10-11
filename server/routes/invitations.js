@@ -65,18 +65,19 @@ router.post('/send', async (req, res) => {
              e.name as edition_name, e.year,
              COALESCE(
                (SELECT tag_name FROM (
-                 SELECT t2.name as tag_name, 
-                        CASE t2.name 
+                 SELECT t2.name as tag_name,
+                        CASE t2.name
                           WHEN 'filmmaker' THEN 1
-                          WHEN 'press' THEN 2  
+                          WHEN 'press' THEN 2
                           WHEN 'staff' THEN 3
                           WHEN 'guest' THEN 4
-                          ELSE 5
+                          WHEN 'public' THEN 5
+                          ELSE 6
                         END as priority
-                 FROM guest_tags gt2 
-                 JOIN tags t2 ON gt2.tag_id = t2.id 
-                 WHERE gt2.guest_id = g.id 
-                 AND t2.name IN ('filmmaker', 'press', 'staff', 'guest')
+                 FROM guest_tags gt2
+                 JOIN tags t2 ON gt2.tag_id = t2.id
+                 WHERE gt2.guest_id = g.id
+                 AND t2.name IN ('filmmaker', 'press', 'staff', 'guest', 'public')
                  ORDER BY priority
                  LIMIT 1
                ) sub),
@@ -282,18 +283,19 @@ router.post('/resend', async (req, res) => {
              e.name as edition_name, e.year,
              COALESCE(
                (SELECT tag_name FROM (
-                 SELECT t2.name as tag_name, 
-                        CASE t2.name 
+                 SELECT t2.name as tag_name,
+                        CASE t2.name
                           WHEN 'filmmaker' THEN 1
-                          WHEN 'press' THEN 2  
+                          WHEN 'press' THEN 2
                           WHEN 'staff' THEN 3
                           WHEN 'guest' THEN 4
-                          ELSE 5
+                          WHEN 'public' THEN 5
+                          ELSE 6
                         END as priority
-                 FROM guest_tags gt2 
-                 JOIN tags t2 ON gt2.tag_id = t2.id 
-                 WHERE gt2.guest_id = g.id 
-                 AND t2.name IN ('filmmaker', 'press', 'staff', 'guest')
+                 FROM guest_tags gt2
+                 JOIN tags t2 ON gt2.tag_id = t2.id
+                 WHERE gt2.guest_id = g.id
+                 AND t2.name IN ('filmmaker', 'press', 'staff', 'guest', 'public')
                  ORDER BY priority
                  LIMIT 1
                ) sub),
@@ -466,25 +468,7 @@ router.get('/edition/:editionId', async (req, res) => {
         g.greeting,
         e.name as edition_name,
         e.year as edition_year,
-        COALESCE(
-          (SELECT tag_name FROM (
-            SELECT t2.name as tag_name, 
-                   CASE t2.name 
-                     WHEN 'filmmaker' THEN 1
-                     WHEN 'press' THEN 2  
-                     WHEN 'staff' THEN 3
-                     WHEN 'guest' THEN 4
-                     ELSE 5
-                   END as priority
-            FROM guest_tags gt2 
-            JOIN tags t2 ON gt2.tag_id = t2.id 
-            WHERE gt2.guest_id = g.id 
-            AND t2.name IN ('filmmaker', 'press', 'staff', 'guest')
-            ORDER BY priority
-            LIMIT 1
-          ) sub),
-          'guest'
-        ) as category,
+        COALESCE(ge.category, 'guest') as category,
         COALESCE(
           (SELECT ARRAY_AGG(TO_CHAR(acs.selected_date, 'YYYY-MM-DD') ORDER BY acs.selected_date)
            FROM accommodation_selections acs 
@@ -510,6 +494,7 @@ router.get('/edition/:editionId', async (req, res) => {
       FROM guest_invitations gi
       JOIN guests g ON gi.guest_id = g.id
       JOIN editions e ON gi.edition_id = e.id
+      LEFT JOIN guest_editions ge ON gi.guest_id = ge.guest_id AND gi.edition_id = ge.edition_id
       WHERE gi.edition_id = $1
       ORDER BY gi.invited_at DESC
     `, [editionId]);
@@ -902,18 +887,19 @@ router.post('/mass-email', async (req, res) => {
              e.name as edition_name, e.year as edition_year,
              COALESCE(
                (SELECT tag_name FROM (
-                 SELECT t2.name as tag_name, 
-                        CASE t2.name 
+                 SELECT t2.name as tag_name,
+                        CASE t2.name
                           WHEN 'filmmaker' THEN 1
-                          WHEN 'press' THEN 2  
+                          WHEN 'press' THEN 2
                           WHEN 'staff' THEN 3
                           WHEN 'guest' THEN 4
-                          ELSE 5
+                          WHEN 'public' THEN 5
+                          ELSE 6
                         END as priority
-                 FROM guest_tags gt2 
-                 JOIN tags t2 ON gt2.tag_id = t2.id 
-                 WHERE gt2.guest_id = g.id 
-                 AND t2.name IN ('filmmaker', 'press', 'staff', 'guest')
+                 FROM guest_tags gt2
+                 JOIN tags t2 ON gt2.tag_id = t2.id
+                 WHERE gt2.guest_id = g.id
+                 AND t2.name IN ('filmmaker', 'press', 'staff', 'guest', 'public')
                  ORDER BY priority
                  LIMIT 1
                ) sub),
@@ -1147,18 +1133,19 @@ router.post('/mark-as-invited', async (req, res) => {
              e.name as edition_name, e.year,
              COALESCE(
                (SELECT tag_name FROM (
-                 SELECT t2.name as tag_name, 
-                        CASE t2.name 
+                 SELECT t2.name as tag_name,
+                        CASE t2.name
                           WHEN 'filmmaker' THEN 1
-                          WHEN 'press' THEN 2  
+                          WHEN 'press' THEN 2
                           WHEN 'staff' THEN 3
                           WHEN 'guest' THEN 4
-                          ELSE 5
+                          WHEN 'public' THEN 5
+                          ELSE 6
                         END as priority
-                 FROM guest_tags gt2 
-                 JOIN tags t2 ON gt2.tag_id = t2.id 
-                 WHERE gt2.guest_id = g.id 
-                 AND t2.name IN ('filmmaker', 'press', 'staff', 'guest')
+                 FROM guest_tags gt2
+                 JOIN tags t2 ON gt2.tag_id = t2.id
+                 WHERE gt2.guest_id = g.id
+                 AND t2.name IN ('filmmaker', 'press', 'staff', 'guest', 'public')
                  ORDER BY priority
                  LIMIT 1
                ) sub),
@@ -1192,12 +1179,24 @@ router.post('/mark-as-invited', async (req, res) => {
     
     const templateId = templateResult.rows.length > 0 ? templateResult.rows[0].id : null;
     
+    // Insert or update guest_editions record with category
+    await pool.query(
+      `INSERT INTO guest_editions (guest_id, edition_id, category, invited_at, accommodation, covered_nights)
+       VALUES ($1, $2, $3, CURRENT_TIMESTAMP, $4, $5)
+       ON CONFLICT (guest_id, edition_id)
+       DO UPDATE SET
+         invited_at = CURRENT_TIMESTAMP,
+         accommodation = $4,
+         covered_nights = $5`,
+      [guest_id, edition_id, assignment.category, accommodation, covered_nights]
+    );
+
     // Insert or update invitation tracking (mark as manually invited)
     await pool.query(
       `INSERT INTO guest_invitations (guest_id, edition_id, template_id, token, invited_at, accommodation, covered_nights, manual_invitation)
        VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, $5, $6, true)
-       ON CONFLICT (guest_id, edition_id, template_id) 
-       DO UPDATE SET 
+       ON CONFLICT (guest_id, edition_id, template_id)
+       DO UPDATE SET
          invited_at = CURRENT_TIMESTAMP,
          token = $4,
          accommodation = $5,

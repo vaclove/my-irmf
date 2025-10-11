@@ -16,7 +16,7 @@ const BadgeSettings = () => {
   const [showDesigner, setShowDesigner] = useState(false);
   const [editingLayout, setEditingLayout] = useState(null);
 
-  const categories = ['filmmaker', 'press', 'guest', 'staff'];
+  const categories = ['filmmaker', 'press', 'guest', 'staff', 'public'];
 
   useEffect(() => {
     fetchData();
