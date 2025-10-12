@@ -468,7 +468,27 @@ router.get('/edition/:editionId', async (req, res) => {
         g.greeting,
         e.name as edition_name,
         e.year as edition_year,
-        COALESCE(ge.category, 'guest') as category,
+        COALESCE(
+          ge.category::text,
+          (SELECT tag_name FROM (
+            SELECT t2.name as tag_name,
+                   CASE t2.name
+                     WHEN 'filmmaker' THEN 1
+                     WHEN 'press' THEN 2
+                     WHEN 'staff' THEN 3
+                     WHEN 'guest' THEN 4
+                     WHEN 'public' THEN 5
+                     ELSE 6
+                   END as priority
+            FROM guest_tags gt2
+            JOIN tags t2 ON gt2.tag_id = t2.id
+            WHERE gt2.guest_id = g.id
+            AND t2.name IN ('filmmaker', 'press', 'staff', 'guest', 'public')
+            ORDER BY priority
+            LIMIT 1
+          ) sub),
+          'guest'
+        ) as category,
         COALESCE(
           (SELECT ARRAY_AGG(TO_CHAR(acs.selected_date, 'YYYY-MM-DD') ORDER BY acs.selected_date)
            FROM accommodation_selections acs 
