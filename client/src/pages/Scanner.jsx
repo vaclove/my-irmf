@@ -15,6 +15,9 @@ const Scanner = () => {
   const [lastScan, setLastScan] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [editionHistory, setEditionHistory] = useState([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const scannerRef = useRef(null);
   const html5QrcodeRef = useRef(null);
   const selectedScreeningRef = useRef(null);
@@ -82,6 +85,34 @@ const Scanner = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const fetchEditionHistory = async () => {
+    if (!selectedEdition) return;
+
+    setHistoryLoading(true);
+    try {
+      const response = await fetch(`/api/scanner/edition/${selectedEdition}/scans`, {
+        credentials: 'include'
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setEditionHistory(data.scans);
+      } else {
+        console.error('Failed to load edition history');
+      }
+    } catch (error) {
+      console.error('Error fetching edition history:', error);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const toggleHistory = () => {
+    if (!showHistory && editionHistory.length === 0) {
+      fetchEditionHistory();
+    }
+    setShowHistory(!showHistory);
   };
 
   const startScanning = async (screening) => {
@@ -453,6 +484,91 @@ const Scanner = () => {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* Edition History */}
+          {selectedEdition && (
+            <div className="mt-6">
+              <button
+                onClick={toggleHistory}
+                className="w-full px-4 py-3 bg-white border rounded-lg shadow-sm hover:bg-gray-50 text-left font-medium flex items-center justify-between"
+              >
+                <span>Edition Scan History</span>
+                <span className="text-sm text-gray-500">
+                  {showHistory ? '▼' : '▶'}
+                </span>
+              </button>
+
+              {showHistory && (
+                <div className="mt-3 bg-white border rounded-lg shadow-sm p-4">
+                  {historyLoading && (
+                    <div className="text-center py-4 text-gray-500">
+                      Loading history...
+                    </div>
+                  )}
+
+                  {!historyLoading && editionHistory.length === 0 && (
+                    <p className="text-sm text-gray-500 text-center py-4">
+                      No scans yet for this edition
+                    </p>
+                  )}
+
+                  {!historyLoading && editionHistory.length > 0 && (
+                    <>
+                      <div className="mb-3 pb-2 border-b">
+                        <p className="font-semibold text-lg">
+                          Total Attendees: {editionHistory.length}
+                        </p>
+                      </div>
+                      <div className="space-y-3 max-h-96 overflow-y-auto">
+                        {(() => {
+                          // Group scans by screening
+                          const screeningGroups = {};
+                          editionHistory.forEach(scan => {
+                            const key = scan.programmingId;
+                            if (!screeningGroups[key]) {
+                              screeningGroups[key] = {
+                                screening: scan.screening,
+                                count: 0,
+                                scans: []
+                              };
+                            }
+                            screeningGroups[key].count++;
+                            screeningGroups[key].scans.push(scan);
+                          });
+
+                          // Sort by date/time
+                          const sortedGroups = Object.values(screeningGroups).sort((a, b) => {
+                            const dateA = new Date(`${a.screening.date} ${a.screening.time}`);
+                            const dateB = new Date(`${b.screening.date} ${b.screening.time}`);
+                            return dateB - dateA;
+                          });
+
+                          return sortedGroups.map((group, index) => (
+                            <div key={index} className="bg-gray-50 rounded p-3">
+                              <div className="font-medium text-base mb-1">
+                                {group.screening.title.cs || group.screening.title.en}
+                              </div>
+                              <div className="text-sm text-gray-600">
+                                {formatDate(group.screening.date)} • {formatTime(group.screening.time)}
+                              </div>
+                              <div className="text-sm text-gray-600">
+                                {group.screening.venue.cs}
+                              </div>
+                              <div className="mt-2 pt-2 border-t border-gray-200">
+                                <span className="font-semibold text-blue-600">
+                                  {group.count} {group.count === 1 ? 'attendee' : 'attendees'}
+                                </span>
+                              </div>
+                            </div>
+                          ));
+                        })()}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
           )}
       </div>

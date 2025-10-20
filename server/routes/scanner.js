@@ -395,4 +395,88 @@ router.get('/badge/:guest_id/scans', async (req, res) => {
   }
 });
 
+// Get all scans for an edition (history)
+router.get('/edition/:edition_id/scans', async (req, res) => {
+  try {
+    const { edition_id } = req.params;
+
+    const query = `
+      SELECT
+        bs.id,
+        bs.programming_id,
+        bs.badge_number,
+        bs.scanned_at,
+        bs.scanned_by,
+        bs.guest_id,
+        g.first_name,
+        g.last_name,
+        ps.scheduled_date,
+        ps.scheduled_time,
+        ps.title_override_cs,
+        ps.title_override_en,
+        v.name_cs as venue_name_cs,
+        v.name_en as venue_name_en,
+        m.name_cs as movie_name_cs,
+        m.name_en as movie_name_en,
+        mb.name_cs as block_name_cs,
+        mb.name_en as block_name_en
+      FROM badge_scans bs
+      JOIN programming_schedule ps ON bs.programming_id = ps.id
+      JOIN venues v ON ps.venue_id = v.id
+      LEFT JOIN movies m ON ps.movie_id = m.id
+      LEFT JOIN movie_blocks mb ON ps.block_id = mb.id
+      LEFT JOIN guests g ON bs.guest_id = g.id
+      WHERE ps.edition_id = $1
+      ORDER BY bs.scanned_at DESC
+      LIMIT 500
+    `;
+
+    const result = await pool.query(query, [edition_id]);
+
+    const scans = result.rows.map(row => {
+      // Determine badge type
+      const badgeStr = String(row.badge_number);
+      let firstName = 'External';
+      let lastName = 'Guest';
+
+      if (row.guest_id) {
+        // Internal badge with guest
+        firstName = row.first_name;
+        lastName = row.last_name;
+      } else if (badgeStr.length === 7 && badgeStr.startsWith('30')) {
+        // One-time ticket
+        firstName = 'One-time';
+        lastName = 'Ticket';
+      }
+
+      return {
+        id: row.id,
+        programmingId: row.programming_id,
+        badgeNumber: row.badge_number,
+        firstName,
+        lastName,
+        scannedAt: row.scanned_at,
+        scannedBy: row.scanned_by,
+        screening: {
+          date: row.scheduled_date,
+          time: row.scheduled_time,
+          venue: {
+            cs: row.venue_name_cs,
+            en: row.venue_name_en
+          },
+          title: {
+            cs: row.title_override_cs || row.movie_name_cs || row.block_name_cs,
+            en: row.title_override_en || row.movie_name_en || row.block_name_en
+          }
+        }
+      };
+    });
+
+    res.json({ scans });
+  } catch (error) {
+    console.error('Error fetching edition scans:', error);
+    res.status(500).json({ error: 'Failed to fetch edition scans' });
+  }
+});
+
 module.exports = router;
