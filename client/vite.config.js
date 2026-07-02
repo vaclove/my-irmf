@@ -12,15 +12,17 @@ export default defineConfig({
   },
   server: {
     host: '0.0.0.0',
-    port: 5173,
+    // Allow the dev port and API proxy target to be overridden via env
+    // (e.g. Conductor parallel workspaces); defaults preserve local behavior.
+    port: Number(process.env.CLIENT_PORT) || 5173,
     proxy: {
       '/api': {
-        target: 'http://localhost:3001',
+        target: process.env.SERVER_URL || 'http://localhost:3001',
         changeOrigin: true,
         credentials: true
       },
       '/auth': {
-        target: 'http://localhost:3001',
+        target: process.env.SERVER_URL || 'http://localhost:3001',
         changeOrigin: true,
         credentials: true
       }
