@@ -1,6 +1,6 @@
 {
   "name": "my-irmf",
-  "version": "1.8.10",
+  "version": "1.8.11",
   "description": "International Road Movie Festival management system",
   "main": "server/index.js",
   "scripts": {
@@ -25,7 +25,7 @@
     "cors": "^2.8.5",
     "crypto": "^1.0.1",
     "dotenv": "^16.3.1",
-    "express": "^5.2.1",
+    "express": "^4.18.2",
     "express-session": "^1.18.1",
     "form-data": "^4.0.4",
     "helmet": "^7.0.0",
