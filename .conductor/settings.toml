@@ -1,0 +1,62 @@
+"$schema" = "https://conductor.build/schemas/settings.repo.schema.json"
+
+# Copy the gitignored .env (OAuth, Mailgun, session secret) into every
+# workspace. DATABASE_URL, PORT, CLIENT_URL and the Vite dev port/proxy are
+# overridden per-workspace in the scripts below so workspaces don't collide.
+file_include_globs = ".env\n"
+
+[scripts]
+# On workspace creation: install BE + FE deps, then start a dedicated Postgres
+# container on CONDUCTOR_PORT+2 and apply migrations to a fresh, isolated DB.
+# The container is named by port so it's unique per workspace.
+setup = """
+npm install
+(cd client && npm install)
+
+PGPORT=$((CONDUCTOR_PORT + 2))
+CONTAINER="irmf-pg-$PGPORT"
+docker run -d --name "$CONTAINER" \
+  -e POSTGRES_DB=festival_db \
+  -e POSTGRES_USER=festival_user \
+  -e POSTGRES_PASSWORD=festival_pass \
+  -p "$PGPORT:5432" postgres:15 2>/dev/null || docker start "$CONTAINER" || true
+
+for i in $(seq 1 30); do
+  docker exec "$CONTAINER" pg_isready -U festival_user -d festival_db >/dev/null 2>&1 && break
+  sleep 1
+done
+
+export DATABASE_URL="postgresql://festival_user:festival_pass@localhost:$PGPORT/festival_db"
+npm run db:migrate || true
+"""
+
+# Tear down this workspace's Postgres container when the workspace is archived.
+archive = 'docker rm -f "irmf-pg-$((CONDUCTOR_PORT + 2))" 2>/dev/null || true'
+
+# Each workspace gets a distinct 10-port range, so the stack can run in parallel.
+run_mode = "concurrent"
+
+[scripts.run.dev]
+# CLIENT_PORT -> Vite, PORT -> Express, SERVER_URL -> Vite's API proxy target,
+# CLIENT_URL -> server CORS allow-list, DATABASE_URL -> this workspace's DB.
+# dotenv does not override vars already set in the environment, so these win
+# over the copied .env.
+command = """
+export CLIENT_PORT=$CONDUCTOR_PORT
+export PORT=$((CONDUCTOR_PORT + 1))
+export SERVER_URL="http://localhost:$PORT"
+export CLIENT_URL="http://localhost:$CLIENT_PORT"
+export DATABASE_URL="postgresql://festival_user:festival_pass@localhost:$((CONDUCTOR_PORT + 2))/festival_db"
+docker start "irmf-pg-$((CONDUCTOR_PORT + 2))" >/dev/null 2>&1 || true
+npm run dev
+"""
+default = true
+icon = "play"
+
+[scripts.run.migrate]
+command = """
+export DATABASE_URL="postgresql://festival_user:festival_pass@localhost:$((CONDUCTOR_PORT + 2))/festival_db"
+docker start "irmf-pg-$((CONDUCTOR_PORT + 2))" >/dev/null 2>&1 || true
+npm run db:migrate
+"""
+icon = "database"
