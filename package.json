@@ -1,6 +1,6 @@
 {
   "name": "my-irmf",
-  "version": "1.8.9",
+  "version": "1.8.10",
   "description": "International Road Movie Festival management system",
   "main": "server/index.js",
   "scripts": {
@@ -19,7 +19,7 @@
   "dependencies": {
     "@azure/storage-blob": "^12.27.0",
     "axios": "^1.10.0",
-    "bcrypt": "^5.1.0",
+    "bcrypt": "^6.0.0",
     "bwip-js": "^4.7.0",
     "connect-pg-simple": "^10.0.0",
     "cors": "^2.8.5",
@@ -34,15 +34,15 @@
     "mysql2": "^3.14.2",
     "node-cron": "^4.2.1",
     "node-fetch": "^3.3.2",
-    "nodemailer": "^6.9.4",
+    "nodemailer": "^9.0.3",
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",
     "pdf-lib": "^1.17.1",
     "pg": "^8.11.3",
     "sharp": "^0.34.3",
-    "uuid": "^9.0.0",
+    "uuid": "^11.1.1",
     "winston": "^3.17.0",
-    "xlsx": "^0.18.5"
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
     "concurrently": "^8.2.0",
