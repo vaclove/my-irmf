@@ -179,8 +179,8 @@ router.post('/', async (req, res) => {
       is_public = true // Default to public if not specified
     } = req.body;
     
-    if (!edition_id || !name_cs) {
-      return res.status(400).json({ error: 'Edition ID and Czech name are required' });
+    if (!edition_id || !name_cs || !name_en) {
+      return res.status(400).json({ error: 'Edition ID, Czech name, and English name are required' });
     }
     
     // Verify edition exists
@@ -283,8 +283,8 @@ router.put('/:id', async (req, res) => {
       is_public
     } = req.body;
     
-    if (!name_cs) {
-      return res.status(400).json({ error: 'Czech name is required' });
+    if (!name_cs || !name_en) {
+      return res.status(400).json({ error: 'Czech name and English name are required' });
     }
     
     // Verify edition exists if provided
