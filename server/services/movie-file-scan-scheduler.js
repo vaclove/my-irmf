@@ -12,6 +12,7 @@ const { logger } = require('../utils/logger');
 class MovieFileScanScheduler {
   constructor() {
     this.task = null;
+    this.isRunning = false;
   }
 
   start() {
@@ -37,12 +38,21 @@ class MovieFileScanScheduler {
   }
 
   async runScan() {
+    // Skip if a previous scan is still running (a full scan can exceed the
+    // cron interval); prevents overlapping concurrent scans.
+    if (this.isRunning) {
+      logger.warn('[MovieScanScheduler] Previous scan still running; skipping this tick');
+      return;
+    }
+    this.isRunning = true;
     try {
       logger.info('[MovieScanScheduler] Starting scheduled scan');
       const result = await movieFileScanner.scanAll();
       logger.info('[MovieScanScheduler] Scan finished', result);
     } catch (error) {
       logger.error('[MovieScanScheduler] Scan failed', { error: error.message });
+    } finally {
+      this.isRunning = false;
     }
   }
 

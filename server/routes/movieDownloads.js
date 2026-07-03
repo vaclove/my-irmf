@@ -15,12 +15,33 @@ const { FILE_KINDS } = require('../utils/movieFileNaming');
 
 const router = express.Router();
 
+const TERMINAL_STATUSES = ['completed', 'failed', 'cancelled', 'interrupted'];
+
 function detectSourceType(url) {
   if (!url) return null;
   if (/^ftp:\/\//i.test(url)) return 'ftp';
   if (/drive\.google\.com|docs\.google\.com/i.test(url)) return 'gdrive';
   if (movieDownloader.extractDriveFileId(url)) return 'gdrive';
   return null;
+}
+
+/**
+ * Strip any embedded credentials from a job's source_url before returning it to
+ * clients. The raw value stays in the DB for the downloader to use internally.
+ */
+function redactJob(job) {
+  if (!job || !job.source_url) return job;
+  try {
+    const u = new URL(job.source_url);
+    if (u.username || u.password) {
+      u.username = u.username ? '***' : '';
+      u.password = u.password ? '***' : '';
+      return { ...job, source_url: u.toString() };
+    }
+    return job;
+  } catch {
+    return job;
+  }
 }
 
 // POST / — create + enqueue a download job.
@@ -46,6 +67,20 @@ router.post('/', async (req, res) => {
       return res.status(404).json({ error: 'Movie not found' });
     }
 
+    // Guard against duplicate/concurrent jobs for the same movie + file_kind:
+    // two active jobs would race on ensureMovieFolder/upsertFileRow and could
+    // orphan a Drive file.
+    const activeCheck = await pool.query(
+      `SELECT id FROM movie_download_jobs
+       WHERE movie_id = $1 AND file_kind = $2 AND status IN ('pending', 'running')`,
+      [movie_id, file_kind]
+    );
+    if (activeCheck.rows.length > 0) {
+      return res
+        .status(409)
+        .json({ error: 'A download job is already active for this file kind' });
+    }
+
     const insert = await pool.query(
       `INSERT INTO movie_download_jobs
          (movie_id, file_kind, source_type, source_url, status, created_by)
@@ -54,7 +89,7 @@ router.post('/', async (req, res) => {
     );
     const job = insert.rows[0];
     movieDownloader.enqueue(job.id);
-    res.status(201).json({ job });
+    res.status(201).json({ job: redactJob(job) });
   } catch (error) {
     logError(error, req, { operation: 'create_download_job' });
     res.status(500).json({ error: error.message });
@@ -68,7 +103,7 @@ router.get('/movie/:movieId', async (req, res) => {
       'SELECT * FROM movie_download_jobs WHERE movie_id = $1 ORDER BY created_at DESC',
       [req.params.movieId]
     );
-    res.json({ jobs: result.rows });
+    res.json({ jobs: result.rows.map(redactJob) });
   } catch (error) {
     logError(error, req, { operation: 'get_movie_download_jobs' });
     res.status(500).json({ error: error.message });
@@ -82,7 +117,7 @@ router.get('/:id', async (req, res) => {
       req.params.id,
     ]);
     if (result.rows.length === 0) return res.status(404).json({ error: 'Job not found' });
-    res.json({ job: result.rows[0] });
+    res.json({ job: redactJob(result.rows[0]) });
   } catch (error) {
     logError(error, req, { operation: 'get_download_job' });
     res.status(500).json({ error: error.message });
@@ -122,6 +157,21 @@ router.post('/:id/retry', async (req, res) => {
     ]);
     if (result.rows.length === 0) return res.status(404).json({ error: 'Job not found' });
     const old = result.rows[0];
+    if (!TERMINAL_STATUSES.includes(old.status)) {
+      return res.status(409).json({ error: 'Only terminal jobs can be retried' });
+    }
+
+    // Don't clone a retry if another active job already exists for this kind.
+    const activeCheck = await pool.query(
+      `SELECT id FROM movie_download_jobs
+       WHERE movie_id = $1 AND file_kind = $2 AND status IN ('pending', 'running')`,
+      [old.movie_id, old.file_kind]
+    );
+    if (activeCheck.rows.length > 0) {
+      return res
+        .status(409)
+        .json({ error: 'A download job is already active for this file kind' });
+    }
 
     const insert = await pool.query(
       `INSERT INTO movie_download_jobs
@@ -131,7 +181,7 @@ router.post('/:id/retry', async (req, res) => {
     );
     const job = insert.rows[0];
     movieDownloader.enqueue(job.id);
-    res.status(201).json({ job });
+    res.status(201).json({ job: redactJob(job) });
   } catch (error) {
     logError(error, req, { operation: 'retry_download_job' });
     res.status(500).json({ error: error.message });

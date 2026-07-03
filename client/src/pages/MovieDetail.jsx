@@ -49,8 +49,11 @@ function MovieDetail() {
           res.data.map((s) => ({ value: s.key, label: s.name_cs, color: s.color_code }))
         )
       )
-      .catch(() => {})
-  }, [movie?.edition_id])
+      .catch((err) => {
+        console.error('Error loading sections:', err)
+        showError('Failed to load sections')
+      })
+  }, [movie?.edition_id, showError])
 
   if (loading) {
     return <div className="text-center py-8">Loading movie…</div>

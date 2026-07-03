@@ -20,11 +20,16 @@ const { upsertFileRow } = require('./movieFileScanner');
 const CHUNK_SIZE = 32 * 1024 * 1024; // 32 MiB (multiple of 256 KiB)
 const MAX_CONCURRENT = 2;
 
+// Per-chunk upload timeout (ms). A 32 MiB PUT should complete well within this;
+// the bound stops a stalled upload from occupying a worker slot forever.
+const CHUNK_PUT_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+
 // Bare axios for raw chunk PUTs into the resumable session.
 const rawPut = axios.create({
   maxRedirects: 0,
   maxBodyLength: Infinity,
   maxContentLength: Infinity,
+  timeout: CHUNK_PUT_TIMEOUT_MS,
   transformRequest: [(d) => d],
   validateStatus: (s) => s === 200 || s === 201 || s === 308,
 });

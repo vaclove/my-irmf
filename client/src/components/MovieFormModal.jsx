@@ -56,7 +56,7 @@ function MovieFormModal({ isOpen, onClose, movie, editions = [], sections = [], 
     if (!isOpen) return
     if (movie) {
       setFormData({
-        edition_id: movie.edition_id,
+        edition_id: movie.edition_id || '',
         catalogue_year: movie.catalogue_year || '',
         name_cs: movie.name_cs || '',
         name_en: movie.name_en || '',

@@ -14,6 +14,7 @@ const { scanMovie, upsertFileRow } = require('../services/movieFileScanner');
 const {
   conventionFileName,
   extensionOf,
+  isVideoFile,
   SUBTITLE_EXTENSIONS,
   FILE_KINDS,
 } = require('../utils/movieFileNaming');
@@ -24,6 +25,22 @@ const SUBTITLE_KINDS = ['subtitles_cs', 'subtitles_en'];
 
 function notConfigured(res) {
   return res.status(503).json({ error: 'Google Drive is not configured' });
+}
+
+/**
+ * Ensure a file's type matches the kind slot it will occupy:
+ * subtitle kinds require .srt/.vtt; the movie kind requires a video file.
+ * Returns an error string, or null if valid.
+ */
+function validateKindForFile(fileKind, fileName, mimeType) {
+  const ext = extensionOf(fileName);
+  if (SUBTITLE_KINDS.includes(fileKind) && !SUBTITLE_EXTENSIONS.includes(ext)) {
+    return 'Subtitles must be .srt or .vtt';
+  }
+  if (fileKind === 'movie' && !isVideoFile(fileName, mimeType)) {
+    return 'Movie asset must be a video file';
+  }
+  return null;
 }
 
 /** Load a movie row with edition_year, or null. */
@@ -122,6 +139,9 @@ router.post('/upload-session', async (req, res) => {
     if (!FILE_KINDS.includes(file_kind)) {
       return res.status(400).json({ error: 'Invalid file_kind' });
     }
+    const kindError = validateKindForFile(file_kind, file_name, mime_type);
+    if (kindError) return res.status(400).json({ error: kindError });
+
     const movie = await loadMovie(movieId);
     if (!movie) return res.status(404).json({ error: 'Movie not found' });
 
@@ -156,7 +176,20 @@ router.post('/upload-complete', async (req, res) => {
     if (!drive_file_id) {
       return res.status(400).json({ error: 'drive_file_id is required' });
     }
+    const movie = await loadMovie(movieId);
+    if (!movie) return res.status(404).json({ error: 'Movie not found' });
+    if (!movie.drive_folder_id) {
+      return res.status(400).json({ error: 'Movie has no Drive folder' });
+    }
+
     const meta = await googleDrive.getFileMetadata(drive_file_id);
+    // Only record files that actually live in this movie's folder.
+    if (!meta.parents || !meta.parents.includes(movie.drive_folder_id)) {
+      return res.status(400).json({ error: 'File is not in this movie folder' });
+    }
+    const kindError = validateKindForFile(file_kind, meta.name, meta.mimeType);
+    if (kindError) return res.status(400).json({ error: kindError });
+
     await upsertFileRow(movieId, file_kind, meta);
     const row = await pool.query(
       'SELECT * FROM movie_files WHERE movie_id = $1 AND file_kind = $2',
@@ -235,6 +268,8 @@ router.post('/import', async (req, res) => {
         .status(400)
         .json({ error: 'File is not in this movie folder' });
     }
+    const kindError = validateKindForFile(file_kind, meta.name, meta.mimeType);
+    if (kindError) return res.status(400).json({ error: kindError });
 
     // 409 if the kind is already occupied, unless replace is requested.
     const occupied = await pool.query(
