@@ -9,30 +9,16 @@
  * 'interrupted' (retryable).
  */
 
-const axios = require('axios');
 const { PassThrough } = require('stream');
 const { pool } = require('../models/database');
 const { logger } = require('../utils/logger');
 const googleDrive = require('./googleDrive');
 const { conventionFileName, extensionOf } = require('../utils/movieFileNaming');
 const { upsertFileRow } = require('./movieFileScanner');
+const { uploadStreamToDrive } = require('./driveChunkedUpload');
+const transcodeQueue = require('./transcodeQueue');
 
-const CHUNK_SIZE = 32 * 1024 * 1024; // 32 MiB (multiple of 256 KiB)
 const MAX_CONCURRENT = 2;
-
-// Per-chunk upload timeout (ms). A 32 MiB PUT should complete well within this;
-// the bound stops a stalled upload from occupying a worker slot forever.
-const CHUNK_PUT_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
-
-// Bare axios for raw chunk PUTs into the resumable session.
-const rawPut = axios.create({
-  maxRedirects: 0,
-  maxBodyLength: Infinity,
-  maxContentLength: Infinity,
-  timeout: CHUNK_PUT_TIMEOUT_MS,
-  transformRequest: [(d) => d],
-  validateStatus: (s) => s === 200 || s === 201 || s === 308,
-});
 
 class MovieDownloader {
   constructor() {
@@ -140,7 +126,17 @@ class MovieDownloader {
         [jobId, total, targetName]
       );
 
-      const driveFileId = await this.streamToDrive(job.id, source.stream, sessionUrl, total);
+      const driveFileId = await uploadStreamToDrive({
+        readable: source.stream,
+        sessionUrl,
+        total,
+        onProgress: (n) =>
+          pool.query(
+            'UPDATE movie_download_jobs SET bytes_transferred = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $1',
+            [jobId, n]
+          ),
+        shouldCancel: () => this.isCancelled(jobId),
+      });
 
       // Record the resulting pointer row.
       const meta = await googleDrive.getFileMetadata(driveFileId);
@@ -153,6 +149,11 @@ class MovieDownloader {
         [jobId, driveFileId, total]
       );
       logger.info('[MovieDownloader] job completed', { jobId, driveFileId });
+
+      // A freshly-downloaded master gets a preview proxy generated automatically.
+      if (job.file_kind === 'movie') {
+        transcodeQueue.enqueueForMovie(job.movie_id, job.created_by);
+      }
     } catch (error) {
       if (error.cancelled) {
         await pool.query(
@@ -218,91 +219,6 @@ class MovieDownloader {
     const name = decodeURIComponent(parsed.path.split('/').pop() || 'download.bin');
     return { stream: pass, name, size, mimeType: 'application/octet-stream' };
   }
-
-  /**
-   * Consume a readable stream and PUT it into the resumable session in
-   * 32 MiB chunks, applying backpressure (we await each PUT before pulling
-   * more). Updates bytes_transferred per chunk; checks the cancel flag.
-   * @returns {Promise<string>} the Drive file id
-   */
-  async streamToDrive(jobId, readable, sessionUrl, total) {
-    const pending = [];
-    let pendingLen = 0;
-    let offset = 0;
-    let fileId = null;
-
-    const putChunk = async (buf, isLast) => {
-      const start = offset;
-      const endInclusive = offset + buf.length - 1;
-      const rangeTotal = total != null ? total : isLast ? String(offset + buf.length) : '*';
-      const res = await rawPut.put(sessionUrl, buf, {
-        headers: {
-          'Content-Range': `bytes ${start}-${endInclusive}/${rangeTotal}`,
-          'Content-Length': String(buf.length),
-        },
-      });
-      offset += buf.length;
-      await pool.query(
-        'UPDATE movie_download_jobs SET bytes_transferred = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $1',
-        [jobId, offset]
-      );
-      if (res.status === 200 || res.status === 201) {
-        fileId = res.data && res.data.id;
-      }
-    };
-
-    const flush = async (finalize) => {
-      while (pendingLen >= CHUNK_SIZE || (finalize && pendingLen > 0)) {
-        if (this.isCancelled(jobId)) {
-          const err = new Error('cancelled');
-          err.cancelled = true;
-          throw err;
-        }
-        const take = Math.min(CHUNK_SIZE, pendingLen);
-        const buf = takeBytes(pending, take);
-        pendingLen -= take;
-        const isLast = finalize && pendingLen === 0;
-        await putChunk(buf, isLast);
-      }
-    };
-
-    for await (const chunk of readable) {
-      if (this.isCancelled(jobId)) {
-        const err = new Error('cancelled');
-        err.cancelled = true;
-        throw err;
-      }
-      pending.push(chunk);
-      pendingLen += chunk.length;
-      await flush(false);
-    }
-    await flush(true);
-
-    if (!fileId) {
-      throw new Error('Upload to Drive did not return a file id');
-    }
-    return fileId;
-  }
-}
-
-/** Pull exactly `take` bytes from the head of a buffer array. */
-function takeBytes(pending, take) {
-  const out = Buffer.allocUnsafe(take);
-  let filled = 0;
-  while (filled < take) {
-    const head = pending[0];
-    const need = take - filled;
-    if (head.length <= need) {
-      head.copy(out, filled);
-      filled += head.length;
-      pending.shift();
-    } else {
-      head.copy(out, filled, 0, need);
-      pending[0] = head.subarray(need);
-      filled += need;
-    }
-  }
-  return out;
 }
 
 /** Extract a Drive file id from common share-link shapes. */

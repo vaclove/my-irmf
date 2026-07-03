@@ -1,0 +1,60 @@
+# Build and deploy the movie transcode worker image to the Azure Container Apps
+# Job. See docs/TRANSCODER_SETUP.md for the one-time resource setup.
+#
+# Reuses the repo's existing Azure OIDC credentials (same secrets as the app
+# deploy workflow). Set the ACR_NAME / RESOURCE_GROUP / JOB_NAME env values below
+# to match the resources you created.
+
+name: Build and deploy movie transcode worker
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'worker/**'
+      - 'server/services/googleDrive.js'
+      - 'server/services/driveMediaProxy.js'
+      - 'server/services/driveChunkedUpload.js'
+      - 'server/utils/movieFileNaming.js'
+      - 'server/models/database.js'
+      - '.github/workflows/transcoder.yml'
+  workflow_dispatch:
+
+env:
+  ACR_NAME: myirmfacr
+  RESOURCE_GROUP: my-irmf-rg
+  JOB_NAME: movie-transcoder
+  IMAGE_REPO: transcode-worker
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # OIDC login
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_F2B8E70EB7664C77ABB4E3C49BFFC5C6 }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_D53BD6EC494A43EC8C01D76074859440 }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_ACC1151A5EBE4CF7B0478751CA49747F }}
+
+      - name: Build image in ACR
+        run: |
+          az acr build \
+            --registry "$ACR_NAME" \
+            --image "$IMAGE_REPO:${{ github.sha }}" \
+            --image "$IMAGE_REPO:latest" \
+            --file worker/Dockerfile .
+
+      - name: Update Container Apps Job image
+        run: |
+          ACR_SERVER=$(az acr show -n "$ACR_NAME" --query loginServer -o tsv)
+          az containerapp job update \
+            -g "$RESOURCE_GROUP" -n "$JOB_NAME" \
+            --image "$ACR_SERVER/$IMAGE_REPO:${{ github.sha }}"

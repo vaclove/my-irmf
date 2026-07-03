@@ -10,6 +10,9 @@ const express = require('express');
 const { pool } = require('../models/database');
 const { logError } = require('../utils/logger');
 const googleDrive = require('../services/googleDrive');
+const { proxyDriveMedia } = require('../services/driveMediaProxy');
+const transcodeQueue = require('../services/transcodeQueue');
+const { convertSrtToVtt } = require('../utils/subtitles');
 const { scanMovie, upsertFileRow } = require('../services/movieFileScanner');
 const {
   conventionFileName,
@@ -22,6 +25,8 @@ const {
 const router = express.Router({ mergeParams: true });
 
 const SUBTITLE_KINDS = ['subtitles_cs', 'subtitles_en'];
+// File kinds that are playable video and can be streamed to the browser.
+const STREAMABLE_KINDS = ['movie', 'movie_proxy'];
 
 function notConfigured(res) {
   return res.status(503).json({ error: 'Google Drive is not configured' });
@@ -39,6 +44,9 @@ function validateKindForFile(fileKind, fileName, mimeType) {
   }
   if (fileKind === 'movie' && !isVideoFile(fileName, mimeType)) {
     return 'Movie asset must be a video file';
+  }
+  if (fileKind === 'movie_proxy' && ext !== 'mp4') {
+    return 'Preview proxy must be an .mp4';
   }
   return null;
 }
@@ -191,6 +199,10 @@ router.post('/upload-complete', async (req, res) => {
     if (kindError) return res.status(400).json({ error: kindError });
 
     await upsertFileRow(movieId, file_kind, meta);
+    // A newly-uploaded master gets a preview proxy generated automatically.
+    if (file_kind === 'movie') {
+      transcodeQueue.enqueueForMovie(movieId, req.user?.email);
+    }
     const row = await pool.query(
       'SELECT * FROM movie_files WHERE movie_id = $1 AND file_kind = $2',
       [movieId, file_kind]
@@ -290,6 +302,10 @@ router.post('/import', async (req, res) => {
     }
 
     await upsertFileRow(movieId, file_kind, meta);
+    // Importing a master as the movie kicks off proxy generation.
+    if (file_kind === 'movie') {
+      transcodeQueue.enqueueForMovie(movieId, req.user?.email);
+    }
     const row = await pool.query(
       'SELECT * FROM movie_files WHERE movie_id = $1 AND file_kind = $2',
       [movieId, file_kind]
@@ -298,6 +314,55 @@ router.post('/import', async (req, res) => {
   } catch (error) {
     logError(error, req, { operation: 'import_movie_file', movieId });
     res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /stream/:fileKind — proxy the movie/proxy file bytes with Range support.
+router.get('/stream/:fileKind', async (req, res) => {
+  const { movieId, fileKind } = req.params;
+  if (!STREAMABLE_KINDS.includes(fileKind)) {
+    return res.status(400).json({ error: 'Not a streamable file kind' });
+  }
+  if (!googleDrive.isConfigured()) return notConfigured(res);
+  try {
+    const row = await pool.query(
+      'SELECT drive_file_id, mime_type FROM movie_files WHERE movie_id = $1 AND file_kind = $2',
+      [movieId, fileKind]
+    );
+    if (row.rows.length === 0) return res.status(404).json({ error: 'File not found' });
+    await proxyDriveMedia(req, res, row.rows[0].drive_file_id, row.rows[0].mime_type || 'video/mp4');
+  } catch (error) {
+    logError(error, req, { operation: 'stream_movie_file', movieId });
+    if (!res.headersSent) res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /subtitles/:lang — download the subtitle from Drive and serve it as VTT.
+router.get('/subtitles/:lang', async (req, res) => {
+  const { movieId, lang } = req.params;
+  const cleanLang = String(lang).replace(/\.vtt$/i, '');
+  if (!['cs', 'en'].includes(cleanLang)) {
+    return res.status(400).json({ error: 'Unsupported subtitle language' });
+  }
+  if (!googleDrive.isConfigured()) return notConfigured(res);
+  try {
+    const row = await pool.query(
+      'SELECT drive_file_id, file_name FROM movie_files WHERE movie_id = $1 AND file_kind = $2',
+      [movieId, `subtitles_${cleanLang}`]
+    );
+    if (row.rows.length === 0) return res.status(404).json({ error: 'Subtitles not found' });
+
+    const stream = await googleDrive.downloadFileStream(row.rows[0].drive_file_id);
+    const chunks = [];
+    for await (const chunk of stream) chunks.push(chunk);
+    const text = Buffer.concat(chunks).toString('utf8');
+    const vtt = extensionOf(row.rows[0].file_name) === 'vtt' ? text : convertSrtToVtt(text);
+
+    res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
+    res.send(vtt);
+  } catch (error) {
+    logError(error, req, { operation: 'get_subtitles', movieId });
+    if (!res.headersSent) res.status(500).json({ error: error.message });
   }
 });
 

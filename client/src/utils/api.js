@@ -1,7 +1,7 @@
 import axios from 'axios'
 
 // Use relative URLs in production, absolute URLs in development
-const API_BASE_URL = import.meta.env.PROD 
+export const API_BASE_URL = import.meta.env.PROD
   ? '/api'  // In production, API is served from same domain
   : 'http://localhost:3001/api'  // In development, API is on different port
 
@@ -146,6 +146,9 @@ export const movieFileApi = {
   importFile: (movieId, data) => api.post(`/movies/${movieId}/files/import`, data),
   deleteFile: (movieId, fileKind, removeFromDrive = false) =>
     api.delete(`/movies/${movieId}/files/${fileKind}`, { params: { remove_from_drive: removeFromDrive } }),
+  // Raw URLs for <video>/<track> elements (not axios). withCredentials via cookies.
+  streamUrl: (movieId, fileKind) => `${API_BASE_URL}/movies/${movieId}/files/stream/${fileKind}`,
+  subtitleUrl: (movieId, lang) => `${API_BASE_URL}/movies/${movieId}/files/subtitles/${lang}.vtt`,
 }
 
 // Movie download jobs API (server-side downloader: public Drive link / FTP)
@@ -155,6 +158,15 @@ export const movieDownloadApi = {
   getById: (id) => api.get(`/movie-downloads/${id}`),
   cancel: (id) => api.post(`/movie-downloads/${id}/cancel`),
   retry: (id) => api.post(`/movie-downloads/${id}/retry`),
+}
+
+// Movie transcode jobs API (out-of-process worker generates the 720p proxy)
+export const movieTranscodeApi = {
+  create: (data) => api.post('/movie-transcodes', data),
+  getForMovie: (movieId) => api.get(`/movie-transcodes/movie/${movieId}`),
+  getById: (id) => api.get(`/movie-transcodes/${id}`),
+  cancel: (id) => api.post(`/movie-transcodes/${id}/cancel`),
+  retry: (id) => api.post(`/movie-transcodes/${id}/retry`),
 }
 
 // Sections API

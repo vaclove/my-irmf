@@ -4,10 +4,12 @@ import { movieApi, editionApi, api } from '../utils/api'
 import { useToast } from '../contexts/ToastContext'
 import MovieFormModal from '../components/MovieFormModal'
 import MovieFilesSection from '../components/movie-files/MovieFilesSection'
+import MoviePlayerSection from '../components/movie-files/MoviePlayerSection'
 
-// Registry of stacked detail sections. Future sections (preview player,
-// subtitle translator) are added as new entries here.
+// Registry of stacked detail sections. Future sections (subtitle translator)
+// are added as new entries here.
 const DETAIL_SECTIONS = [
+  { id: 'player', title: 'Preview', Component: MoviePlayerSection },
   { id: 'files', title: 'Files', Component: MovieFilesSection },
 ]
 

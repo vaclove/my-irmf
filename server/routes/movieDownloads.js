@@ -55,6 +55,9 @@ router.post('/', async (req, res) => {
     if (!FILE_KINDS.includes(file_kind)) {
       return res.status(400).json({ error: 'Invalid file_kind' });
     }
+    if (file_kind === 'movie_proxy') {
+      return res.status(400).json({ error: 'Proxies are generated, not downloaded' });
+    }
     const sourceType = detectSourceType(source_url);
     if (!sourceType) {
       return res

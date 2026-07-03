@@ -15,6 +15,7 @@ const ASSET_KINDS = [
 
 const KIND_OPTIONS = [
   { value: 'movie', label: 'Movie file' },
+  { value: 'movie_proxy', label: 'Preview proxy (mp4)' },
   { value: 'subtitles_cs', label: 'Czech subtitles' },
   { value: 'subtitles_en', label: 'English subtitles' },
 ]
