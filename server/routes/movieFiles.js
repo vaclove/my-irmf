@@ -12,7 +12,7 @@ const { logError } = require('../utils/logger');
 const googleDrive = require('../services/googleDrive');
 const { proxyDriveMedia } = require('../services/driveMediaProxy');
 const transcodeQueue = require('../services/transcodeQueue');
-const { convertSrtToVtt } = require('../utils/subtitles');
+const { convertSrtToVtt, decodeSubtitleBuffer } = require('../utils/subtitles');
 const { scanMovie, upsertFileRow } = require('../services/movieFileScanner');
 const {
   conventionFileName,
@@ -369,7 +369,7 @@ router.get('/subtitles/:lang', async (req, res) => {
       }
       chunks.push(buf);
     }
-    const text = Buffer.concat(chunks).toString('utf8');
+    const text = decodeSubtitleBuffer(Buffer.concat(chunks));
     const vtt = extensionOf(row.rows[0].file_name) === 'vtt' ? text : convertSrtToVtt(text);
 
     res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
