@@ -25,9 +25,9 @@ App Service ──insert row──> PostgreSQL <──progress── ACA Job (wo
 ## 1. Storage account + queue
 
 ```bash
-RG=my-irmf-rg
-LOC=westeurope
-STORAGE=myirmftranscode         # globally unique, lowercase
+RG=irmf-cz
+LOC=polandcentral
+STORAGE=irmftranscode           # globally unique, lowercase
 
 az storage account create -g $RG -n $STORAGE -l $LOC --sku Standard_LRS
 CONN=$(az storage account show-connection-string -g $RG -n $STORAGE -o tsv)
@@ -40,7 +40,7 @@ Set `AZURE_STORAGE_CONNECTION_STRING` (= `$CONN`) and
 ## 2. Container registry + worker image
 
 ```bash
-ACR=myirmfacr                   # globally unique, lowercase
+ACR=irmftranscodeacr            # globally unique, lowercase
 az acr create -g $RG -n $ACR --sku Basic --admin-enabled true
 
 # Build from the REPO ROOT (the Dockerfile copies shared server modules):
@@ -50,7 +50,7 @@ az acr build -r $ACR -t transcode-worker:latest -f worker/Dockerfile .
 ## 3. Container Apps environment + job
 
 ```bash
-ENV=myirmf-aca-env
+ENV=irmf-transcode-env
 az containerapp env create -g $RG -n $ENV -l $LOC
 
 ACR_SERVER=$(az acr show -n $ACR --query loginServer -o tsv)
