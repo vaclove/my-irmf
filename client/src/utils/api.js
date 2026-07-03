@@ -169,6 +169,15 @@ export const movieTranscodeApi = {
   retry: (id) => api.post(`/movie-transcodes/${id}/retry`),
 }
 
+// Subtitle translation jobs API (in-process LLM translation cs <-> en)
+export const subtitleTranslationApi = {
+  create: (data) => api.post('/subtitle-translations', data),
+  getForMovie: (movieId) => api.get(`/subtitle-translations/movie/${movieId}`),
+  getById: (id) => api.get(`/subtitle-translations/${id}`),
+  cancel: (id) => api.post(`/subtitle-translations/${id}/cancel`),
+  retry: (id) => api.post(`/subtitle-translations/${id}/retry`),
+}
+
 // Sections API
 const sectionApi = {
   getByEdition: (editionId) => api.get(`/sections/edition/${editionId}`),

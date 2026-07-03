@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { movieFileApi, movieDownloadApi } from '../../utils/api'
+import { movieFileApi, movieDownloadApi, subtitleTranslationApi } from '../../utils/api'
 import { useToast } from '../../contexts/ToastContext'
 import { formatBytes } from '../../utils/fileSize'
 import { notifyMovieFilesChanged } from '../../utils/movieFilesBus'
@@ -7,6 +7,14 @@ import FileUploadModal from './FileUploadModal'
 import DownloadFromLinkModal from './DownloadFromLinkModal'
 
 const ACTIVE_STATUSES = ['pending', 'running']
+
+// Maps a subtitle kind to the translation that produces the OTHER language.
+const TRANSLATE_FROM_KIND = {
+  subtitles_cs: { direction: 'cs_to_en', targetKind: 'subtitles_en', label: 'Translate → EN', targetLabel: 'English' },
+  subtitles_en: { direction: 'en_to_cs', targetKind: 'subtitles_cs', label: 'Translate → CS', targetLabel: 'Czech' },
+}
+
+const DIRECTION_LABELS = { cs_to_en: 'CS → EN', en_to_cs: 'EN → CS' }
 
 const ASSET_KINDS = [
   { key: 'movie', label: 'Movie file', badge: '🎬' },
@@ -48,17 +56,21 @@ function MovieFilesSection({ movieId }) {
   const [uploadKind, setUploadKind] = useState(null)
   const [showDownload, setShowDownload] = useState(false)
   const [jobs, setJobs] = useState([])
+  const [translationJobs, setTranslationJobs] = useState([])
   const subtitleInputs = useRef({})
   const wasPolling = useRef(false)
+  const wasPollingTranslations = useRef(false)
 
   const load = useCallback(async () => {
     try {
-      const [filesRes, jobsRes] = await Promise.all([
+      const [filesRes, jobsRes, translationRes] = await Promise.all([
         movieFileApi.getFiles(movieId),
         movieDownloadApi.getForMovie(movieId).catch(() => ({ data: { jobs: [] } })),
+        subtitleTranslationApi.getForMovie(movieId).catch(() => ({ data: { jobs: [] } })),
       ])
       setData(filesRes.data)
       setJobs(jobsRes.data.jobs || [])
+      setTranslationJobs(translationRes.data.jobs || [])
     } catch (error) {
       console.error('Error loading movie files:', error)
       showError('Failed to load files: ' + (error.response?.data?.error || error.message))
@@ -95,7 +107,36 @@ function MovieFilesSection({ movieId }) {
     return () => clearInterval(timer)
   }, [jobs, movieId, load])
 
+  // Poll translation jobs while any is active; toast + refresh on completion.
+  useEffect(() => {
+    const hasActive = translationJobs.some((j) => ACTIVE_STATUSES.includes(j.status))
+    if (!hasActive) {
+      if (wasPollingTranslations.current) {
+        wasPollingTranslations.current = false
+        const last = translationJobs[0]
+        if (last?.status === 'completed') {
+          success('Subtitles translated')
+        } else if (last?.status === 'failed') {
+          showError('Translation failed: ' + (last.error_message || 'unknown error'))
+        }
+        load().then(() => notifyMovieFilesChanged(movieId))
+      }
+      return undefined
+    }
+    wasPollingTranslations.current = true
+    const timer = setInterval(async () => {
+      try {
+        const res = await subtitleTranslationApi.getForMovie(movieId)
+        setTranslationJobs(res.data.jobs || [])
+      } catch {
+        // transient; keep polling
+      }
+    }, 4000)
+    return () => clearInterval(timer)
+  }, [translationJobs, movieId, load, success, showError])
+
   const fileForKind = (kind) => (data?.files || []).find((f) => f.file_kind === kind)
+  const hasActiveTranslation = translationJobs.some((j) => ACTIVE_STATUSES.includes(j.status))
 
   const createFolder = async () => {
     setBusy(true)
@@ -179,6 +220,55 @@ function MovieFilesSection({ movieId }) {
       await movieDownloadApi.retry(jobId)
       const res = await movieDownloadApi.getForMovie(movieId)
       setJobs(res.data.jobs || [])
+    } catch (error) {
+      showError('Retry failed: ' + (error.response?.data?.error || error.message))
+    }
+  }
+
+  const startTranslation = async (sourceKind) => {
+    const t = TRANSLATE_FROM_KIND[sourceKind]
+    if (!t) return
+    const targetExists = !!fileForKind(t.targetKind)
+    if (
+      targetExists &&
+      !window.confirm(
+        `${t.targetLabel} subtitles already exist. Replace them with a new machine translation?`
+      )
+    ) {
+      return
+    }
+    setBusy(true)
+    try {
+      await subtitleTranslationApi.create({
+        movie_id: movieId,
+        direction: t.direction,
+        overwrite: targetExists,
+      })
+      info('Translation started')
+      const res = await subtitleTranslationApi.getForMovie(movieId)
+      setTranslationJobs(res.data.jobs || [])
+    } catch (error) {
+      showError('Translation failed to start: ' + (error.response?.data?.error || error.message))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const cancelTranslationJob = async (jobId) => {
+    try {
+      await subtitleTranslationApi.cancel(jobId)
+      const res = await subtitleTranslationApi.getForMovie(movieId)
+      setTranslationJobs(res.data.jobs || [])
+    } catch (error) {
+      showError('Cancel failed: ' + (error.response?.data?.error || error.message))
+    }
+  }
+
+  const retryTranslationJob = async (jobId) => {
+    try {
+      await subtitleTranslationApi.retry(jobId)
+      const res = await subtitleTranslationApi.getForMovie(movieId)
+      setTranslationJobs(res.data.jobs || [])
     } catch (error) {
       showError('Retry failed: ' + (error.response?.data?.error || error.message))
     }
@@ -303,6 +393,66 @@ function MovieFilesSection({ movieId }) {
         </div>
       )}
 
+      {/* Translation jobs */}
+      {translationJobs.filter((j) => j.status !== 'completed').length > 0 && (
+        <div className="space-y-2">
+          <h4 className="text-sm font-medium text-gray-900">Translation jobs</h4>
+          {translationJobs
+            .filter((j) => j.status !== 'completed')
+            .map((job) => {
+              const pct = Math.min(100, Math.round(Number(job.progress_percent || 0)))
+              const active = ACTIVE_STATUSES.includes(job.status)
+              const retryable = ['failed', 'cancelled', 'interrupted'].includes(job.status)
+              return (
+                <div key={job.id} className="border border-gray-200 rounded-md p-3">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="truncate">
+                      {DIRECTION_LABELS[job.direction] || job.direction} ·{' '}
+                      <span className="font-medium">{job.status}</span>
+                    </span>
+                    <div className="space-x-3 shrink-0">
+                      {active && (
+                        <button
+                          onClick={() => cancelTranslationJob(job.id)}
+                          className="text-red-600 hover:text-red-800"
+                        >
+                          Cancel
+                        </button>
+                      )}
+                      {retryable && (
+                        <button
+                          onClick={() => retryTranslationJob(job.id)}
+                          className="text-blue-600 hover:text-blue-800"
+                        >
+                          Retry
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {active && (
+                    <div className="mt-2">
+                      <div className="w-full bg-gray-200 rounded-full h-2">
+                        <div
+                          className="bg-blue-600 h-2 rounded-full transition-all"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                      <div className="text-xs text-gray-500 mt-1">
+                        {job.total_cues != null
+                          ? `${job.translated_cues || 0}/${job.total_cues} cues (${pct}%)`
+                          : `${pct}%`}
+                      </div>
+                    </div>
+                  )}
+                  {job.error_message && (
+                    <div className="text-xs text-red-600 mt-1">{job.error_message}</div>
+                  )}
+                </div>
+              )
+            })}
+        </div>
+      )}
+
       {/* Asset rows */}
       <div className="divide-y divide-gray-200 border border-gray-200 rounded-md">
         {ASSET_KINDS.map((asset) => {
@@ -358,6 +508,16 @@ function MovieFilesSection({ movieId }) {
                     >
                       {row ? 'Replace' : 'Upload'}
                     </button>
+                    {row && TRANSLATE_FROM_KIND[asset.key] && (
+                      <button
+                        onClick={() => startTranslation(asset.key)}
+                        disabled={busy || hasActiveTranslation}
+                        title="Machine-translate these subtitles with an LLM"
+                        className="text-sm text-blue-600 hover:text-blue-800 disabled:opacity-50"
+                      >
+                        {TRANSLATE_FROM_KIND[asset.key].label}
+                      </button>
+                    )}
                   </>
                 )}
                 {row && (
