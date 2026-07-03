@@ -12,7 +12,7 @@
  * master and writes the proxy there).
  */
 
-const { QueueClient } = require('@azure/storage-queue');
+const { QueueServiceClient } = require('@azure/storage-queue');
 const { pool } = require('../models/database');
 const { logger } = require('../utils/logger');
 const googleDrive = require('./googleDrive');
@@ -37,7 +37,7 @@ function isConfigured() {
 
 function getQueueClient() {
   if (cachedClient) return cachedClient;
-  cachedClient = QueueClient.fromConnectionString(connectionString(), QUEUE_NAME);
+  cachedClient = QueueServiceClient.fromConnectionString(connectionString()).getQueueClient(QUEUE_NAME);
   return cachedClient;
 }
 

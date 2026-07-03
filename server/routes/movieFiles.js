@@ -200,8 +200,10 @@ router.post('/upload-complete', async (req, res) => {
 
     await upsertFileRow(movieId, file_kind, meta);
     // A newly-uploaded master gets a preview proxy generated automatically.
+    // Awaited so the job row exists before we respond (the client reloads the
+    // player right after and needs to see the pending job to start polling).
     if (file_kind === 'movie') {
-      transcodeQueue.enqueueForMovie(movieId, req.user?.email);
+      await transcodeQueue.enqueueForMovie(movieId, req.user?.email);
     }
     const row = await pool.query(
       'SELECT * FROM movie_files WHERE movie_id = $1 AND file_kind = $2',
@@ -302,9 +304,11 @@ router.post('/import', async (req, res) => {
     }
 
     await upsertFileRow(movieId, file_kind, meta);
-    // Importing a master as the movie kicks off proxy generation.
+    // Importing a master as the movie kicks off proxy generation. Awaited so the
+    // job row exists before we respond (the client reloads the player right after
+    // and needs to see the pending job to start polling).
     if (file_kind === 'movie') {
-      transcodeQueue.enqueueForMovie(movieId, req.user?.email);
+      await transcodeQueue.enqueueForMovie(movieId, req.user?.email);
     }
     const row = await pool.query(
       'SELECT * FROM movie_files WHERE movie_id = $1 AND file_kind = $2',

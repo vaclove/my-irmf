@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { movieFileApi, movieTranscodeApi } from '../../utils/api'
 import { useToast } from '../../contexts/ToastContext'
 import { formatBytes } from '../../utils/fileSize'
+import { onMovieFilesChanged } from '../../utils/movieFilesBus'
 
 const ACTIVE_STATUSES = ['pending', 'running']
 const PHASE_LABELS = {
@@ -44,6 +45,11 @@ function MoviePlayerSection({ movieId }) {
   useEffect(() => {
     load()
   }, [load])
+
+  // Reload when the Files section reports a change for this movie: adding a
+  // master there enqueues a proxy transcode server-side, which we must pick up
+  // (and start polling) without a manual page refresh.
+  useEffect(() => onMovieFilesChanged(movieId, load), [movieId, load])
 
   // Poll while a job is active; refresh files (proxy row) when it finishes.
   useEffect(() => {

@@ -18,7 +18,7 @@ const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 const express = require('express');
-const { QueueClient } = require('@azure/storage-queue');
+const { QueueServiceClient } = require('@azure/storage-queue');
 
 const { pool } = require('../server/models/database');
 const googleDrive = require('../server/services/googleDrive');
@@ -190,13 +190,33 @@ async function processJob(jobId, dequeueCount) {
     return false;
   }
 
+  // Restart from scratch (fresh pending job, or a running job whose message got
+  // redelivered after a crash). Clear stale progress/error, but DO NOT reset
+  // cancel_requested — a cancel raised while the worker was down must survive the
+  // restart and still stop the job. Fresh jobs default cancel_requested to false.
   await pool.query(
     `UPDATE movie_transcode_jobs SET status = 'running', phase = 'probing',
        attempt_count = attempt_count + 1, started_at = COALESCE(started_at, CURRENT_TIMESTAMP),
-       cancel_requested = false, error_message = NULL, progress_percent = 0
+       error_message = NULL, progress_percent = 0
      WHERE id = $1`,
     [jobId]
   );
+
+  // Honor a cancellation that was requested before this (re)start began, so we
+  // don't burn ffprobe/ffmpeg work on a job the user already cancelled.
+  const preCancel = await pool.query(
+    'SELECT cancel_requested FROM movie_transcode_jobs WHERE id = $1',
+    [jobId]
+  );
+  if (preCancel.rows[0]?.cancel_requested) {
+    await pool.query(
+      `UPDATE movie_transcode_jobs SET status = 'cancelled', phase = NULL,
+         finished_at = CURRENT_TIMESTAMP WHERE id = $1`,
+      [jobId]
+    );
+    log('job cancelled before start', { jobId });
+    return true;
+  }
 
   const tempPath = path.join(
     process.env.MOVIE_TRANSCODE_TMPDIR || os.tmpdir(),
@@ -356,7 +376,7 @@ async function main() {
   }
   sweepTempFiles();
 
-  const queue = QueueClient.fromConnectionString(conn, QUEUE_NAME);
+  const queue = QueueServiceClient.fromConnectionString(conn).getQueueClient(QUEUE_NAME);
   await queue.createIfNotExists();
 
   // Drain: process messages until the queue is empty, then exit (scale to zero).
