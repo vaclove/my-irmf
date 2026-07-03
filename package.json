@@ -1,6 +1,6 @@
 {
   "name": "my-irmf",
-  "version": "1.8.11",
+  "version": "1.9.3",
   "description": "International Road Movie Festival management system",
   "main": "server/index.js",
   "scripts": {
@@ -19,6 +19,7 @@
   "dependencies": {
     "@azure/storage-blob": "^12.27.0",
     "axios": "^1.10.0",
+    "basic-ftp": "^6.0.1",
     "bcrypt": "^6.0.0",
     "bwip-js": "^4.7.0",
     "connect-pg-simple": "^10.0.0",
@@ -28,6 +29,7 @@
     "express": "^4.18.2",
     "express-session": "^1.18.1",
     "form-data": "^4.0.4",
+    "googleapis": "^173.0.0",
     "helmet": "^7.0.0",
     "mailgun.js": "^12.0.3",
     "marked": "^16.0.0",

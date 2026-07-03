@@ -3,6 +3,7 @@ const { pool } = require('../models/database');
 const { logError } = require('../utils/logger');
 const { auditMiddleware, captureOriginalData } = require('../utils/auditLogger');
 const imageStorage = require('../services/imageStorage');
+const googleDrive = require('../services/googleDrive');
 const router = express.Router();
 
 // Apply audit middleware to all routes
@@ -15,12 +16,22 @@ router.get('/', async (req, res) => {
     const { edition_id } = req.query;
     
     let query = `
-      SELECT m.*, e.year as edition_year, e.name as edition_name 
-      FROM movies m 
+      SELECT m.*, e.year as edition_year, e.name as edition_name,
+             COALESCE(mf.has_movie_file, false) AS has_movie_file,
+             COALESCE(mf.has_subtitles_cs, false) AS has_subtitles_cs,
+             COALESCE(mf.has_subtitles_en, false) AS has_subtitles_en
+      FROM movies m
       JOIN editions e ON m.edition_id = e.id
+      LEFT JOIN (
+        SELECT movie_id,
+               BOOL_OR(file_kind = 'movie') AS has_movie_file,
+               BOOL_OR(file_kind = 'subtitles_cs') AS has_subtitles_cs,
+               BOOL_OR(file_kind = 'subtitles_en') AS has_subtitles_en
+        FROM movie_files GROUP BY movie_id
+      ) mf ON mf.movie_id = m.id
     `;
     let params = [];
-    
+
     if (edition_id) {
       query += ' WHERE m.edition_id = $1';
       params.push(edition_id);
@@ -57,9 +68,19 @@ router.get('/edition/:editionId', async (req, res) => {
     const { editionId } = req.params;
     
     const query = `
-      SELECT m.*, e.year as edition_year, e.name as edition_name 
-      FROM movies m 
+      SELECT m.*, e.year as edition_year, e.name as edition_name,
+             COALESCE(mf.has_movie_file, false) AS has_movie_file,
+             COALESCE(mf.has_subtitles_cs, false) AS has_subtitles_cs,
+             COALESCE(mf.has_subtitles_en, false) AS has_subtitles_en
+      FROM movies m
       JOIN editions e ON m.edition_id = e.id
+      LEFT JOIN (
+        SELECT movie_id,
+               BOOL_OR(file_kind = 'movie') AS has_movie_file,
+               BOOL_OR(file_kind = 'subtitles_cs') AS has_subtitles_cs,
+               BOOL_OR(file_kind = 'subtitles_en') AS has_subtitles_en
+        FROM movie_files GROUP BY movie_id
+      ) mf ON mf.movie_id = m.id
       WHERE m.edition_id = $1
       ORDER BY m.year DESC, m.name_cs ASC
     `;
@@ -92,9 +113,19 @@ router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query(`
-      SELECT m.*, e.year as edition_year, e.name as edition_name 
-      FROM movies m 
-      JOIN editions e ON m.edition_id = e.id 
+      SELECT m.*, e.year as edition_year, e.name as edition_name,
+             COALESCE(mf.has_movie_file, false) AS has_movie_file,
+             COALESCE(mf.has_subtitles_cs, false) AS has_subtitles_cs,
+             COALESCE(mf.has_subtitles_en, false) AS has_subtitles_en
+      FROM movies m
+      JOIN editions e ON m.edition_id = e.id
+      LEFT JOIN (
+        SELECT movie_id,
+               BOOL_OR(file_kind = 'movie') AS has_movie_file,
+               BOOL_OR(file_kind = 'subtitles_cs') AS has_subtitles_cs,
+               BOOL_OR(file_kind = 'subtitles_en') AS has_subtitles_en
+        FROM movie_files GROUP BY movie_id
+      ) mf ON mf.movie_id = m.id
       WHERE m.id = $1
     `, [id]);
     
@@ -148,8 +179,8 @@ router.post('/', async (req, res) => {
       is_public = true // Default to public if not specified
     } = req.body;
     
-    if (!edition_id || !name_cs) {
-      return res.status(400).json({ error: 'Edition ID and Czech name are required' });
+    if (!edition_id || !name_cs || !name_en) {
+      return res.status(400).json({ error: 'Edition ID, Czech name, and English name are required' });
     }
     
     // Verify edition exists
@@ -197,7 +228,27 @@ router.post('/', async (req, res) => {
         // Continue without image - don't fail the whole operation
       }
     }
-    
+
+    // Auto-create the movie's (empty) Drive folder. Best-effort: a Drive
+    // failure must never block movie creation — the folder can be created
+    // later on demand.
+    if (googleDrive.isConfigured()) {
+      try {
+        const editionResult = await pool.query('SELECT year FROM editions WHERE id = $1', [edition_id]);
+        const folderId = await googleDrive.ensureMovieFolder({
+          id: movie.id,
+          name_cs: movie.name_cs,
+          name_en: movie.name_en,
+          edition_year: editionResult.rows[0]?.year,
+        });
+        movie.drive_folder_id = folderId;
+      } catch (folderError) {
+        logError(folderError, req, { operation: 'auto_create_movie_folder', movieId: movie.id });
+        console.error('Drive folder creation failed:', folderError.message);
+        // Continue - folder can be created later from the detail page.
+      }
+    }
+
     res.status(201).json(movie);
   } catch (error) {
     logError(error, req, { operation: 'create_movie', body: req.body });
@@ -232,8 +283,8 @@ router.put('/:id', async (req, res) => {
       is_public
     } = req.body;
     
-    if (!name_cs) {
-      return res.status(400).json({ error: 'Czech name is required' });
+    if (!name_cs || !name_en) {
+      return res.status(400).json({ error: 'Czech name and English name are required' });
     }
     
     // Verify edition exists if provided
@@ -337,9 +388,19 @@ router.get('/section/:section', async (req, res) => {
     const { edition_id } = req.query;
     
     let query = `
-      SELECT m.*, e.year as edition_year, e.name as edition_name 
-      FROM movies m 
-      JOIN editions e ON m.edition_id = e.id 
+      SELECT m.*, e.year as edition_year, e.name as edition_name,
+             COALESCE(mf.has_movie_file, false) AS has_movie_file,
+             COALESCE(mf.has_subtitles_cs, false) AS has_subtitles_cs,
+             COALESCE(mf.has_subtitles_en, false) AS has_subtitles_en
+      FROM movies m
+      JOIN editions e ON m.edition_id = e.id
+      LEFT JOIN (
+        SELECT movie_id,
+               BOOL_OR(file_kind = 'movie') AS has_movie_file,
+               BOOL_OR(file_kind = 'subtitles_cs') AS has_subtitles_cs,
+               BOOL_OR(file_kind = 'subtitles_en') AS has_subtitles_en
+        FROM movie_files GROUP BY movie_id
+      ) mf ON mf.movie_id = m.id
       WHERE m.section = $1
     `;
     let params = [section];
