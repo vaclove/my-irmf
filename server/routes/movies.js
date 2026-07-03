@@ -3,6 +3,7 @@ const { pool } = require('../models/database');
 const { logError } = require('../utils/logger');
 const { auditMiddleware, captureOriginalData } = require('../utils/auditLogger');
 const imageStorage = require('../services/imageStorage');
+const googleDrive = require('../services/googleDrive');
 const router = express.Router();
 
 // Apply audit middleware to all routes
@@ -227,7 +228,27 @@ router.post('/', async (req, res) => {
         // Continue without image - don't fail the whole operation
       }
     }
-    
+
+    // Auto-create the movie's (empty) Drive folder. Best-effort: a Drive
+    // failure must never block movie creation — the folder can be created
+    // later on demand.
+    if (googleDrive.isConfigured()) {
+      try {
+        const editionResult = await pool.query('SELECT year FROM editions WHERE id = $1', [edition_id]);
+        const folderId = await googleDrive.ensureMovieFolder({
+          id: movie.id,
+          name_cs: movie.name_cs,
+          name_en: movie.name_en,
+          edition_year: editionResult.rows[0]?.year,
+        });
+        movie.drive_folder_id = folderId;
+      } catch (folderError) {
+        logError(folderError, req, { operation: 'auto_create_movie_folder', movieId: movie.id });
+        console.error('Drive folder creation failed:', folderError.message);
+        // Continue - folder can be created later from the detail page.
+      }
+    }
+
     res.status(201).json(movie);
   } catch (error) {
     logError(error, req, { operation: 'create_movie', body: req.body });
