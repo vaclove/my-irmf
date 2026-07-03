@@ -135,6 +135,28 @@ export const movieApi = {
   getBySection: (section, editionId) => api.get(`/movies/section/${section}`, { params: editionId ? { edition_id: editionId } : {} }),
 }
 
+// Movie files API (Google Shared Drive assets per movie)
+export const movieFileApi = {
+  getFiles: (movieId) => api.get(`/movies/${movieId}/files`),
+  ensureFolder: (movieId) => api.post(`/movies/${movieId}/files/folder`),
+  rescan: (movieId) => api.post(`/movies/${movieId}/files/rescan`),
+  createUploadSession: (movieId, data) => api.post(`/movies/${movieId}/files/upload-session`, data),
+  completeUpload: (movieId, data) => api.post(`/movies/${movieId}/files/upload-complete`, data),
+  uploadSubtitles: (movieId, data) => api.post(`/movies/${movieId}/files/subtitles`, data),
+  importFile: (movieId, data) => api.post(`/movies/${movieId}/files/import`, data),
+  deleteFile: (movieId, fileKind, removeFromDrive = false) =>
+    api.delete(`/movies/${movieId}/files/${fileKind}`, { params: { remove_from_drive: removeFromDrive } }),
+}
+
+// Movie download jobs API (server-side downloader: public Drive link / FTP)
+export const movieDownloadApi = {
+  create: (data) => api.post('/movie-downloads', data),
+  getForMovie: (movieId) => api.get(`/movie-downloads/movie/${movieId}`),
+  getById: (id) => api.get(`/movie-downloads/${id}`),
+  cancel: (id) => api.post(`/movie-downloads/${id}/cancel`),
+  retry: (id) => api.post(`/movie-downloads/${id}/retry`),
+}
+
 // Sections API
 const sectionApi = {
   getByEdition: (editionId) => api.get(`/sections/edition/${editionId}`),

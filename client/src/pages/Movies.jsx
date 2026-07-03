@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { movieApi, editionApi, api } from '../utils/api'
 import { useToast } from '../contexts/ToastContext'
 import { useEdition } from '../contexts/EditionContext'
@@ -7,6 +8,7 @@ import { formatCountryWithFlags, getCountryName } from '../utils/countryFlags'
 import { formatLanguageCodesForDisplay } from '../utils/languageCodes'
 
 function Movies() {
+  const navigate = useNavigate()
   const { error: showError } = useToast()
   const { selectedEdition } = useEdition()
   const [movies, setMovies] = useState([])
@@ -26,6 +28,7 @@ function Movies() {
     year: true,
     country: true,
     section: true,
+    files: true,
     runtime: false,
     premiere: false,
     language: false,
@@ -209,6 +212,7 @@ function Movies() {
                       { key: 'year', label: 'Year' },
                       { key: 'country', label: 'Country' },
                       { key: 'section', label: 'Section' },
+                      { key: 'files', label: 'Files' },
                       { key: 'runtime', label: 'Runtime' },
                       { key: 'premiere', label: 'Premiere' },
                       { key: 'language', label: 'Language' },
@@ -349,6 +353,11 @@ function Movies() {
                     Section
                   </th>
                 )}
+                {visibleColumns.files && (
+                  <th className={`${condensedView ? 'px-3 py-2' : 'px-6 py-3'} text-left text-xs font-medium text-gray-500 uppercase ${condensedView ? '' : 'tracking-wider'}`}>
+                    Files
+                  </th>
+                )}
                 {visibleColumns.runtime && (
                   <th className={`${condensedView ? 'px-3 py-2' : 'px-6 py-3'} text-left text-xs font-medium text-gray-500 uppercase ${condensedView ? '' : 'tracking-wider'}`}>
                     Runtime
@@ -481,6 +490,34 @@ function Movies() {
                       )}
                     </td>
                   )}
+                  {visibleColumns.files && (
+                    <td
+                      className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} text-sm cursor-pointer`}
+                      onClick={() => navigate(`/movies/${movie.id}`)}
+                      title="Open movie detail"
+                    >
+                      <div className="flex items-center space-x-1">
+                        <span
+                          className={`inline-flex items-center justify-center w-6 h-6 rounded text-xs font-medium ${movie.has_movie_file ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-400'}`}
+                          title="Movie file"
+                        >
+                          🎬
+                        </span>
+                        <span
+                          className={`inline-flex items-center justify-center px-1.5 h-6 rounded text-xs font-medium ${movie.has_subtitles_cs ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-400'}`}
+                          title="Czech subtitles"
+                        >
+                          CS
+                        </span>
+                        <span
+                          className={`inline-flex items-center justify-center px-1.5 h-6 rounded text-xs font-medium ${movie.has_subtitles_en ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-400'}`}
+                          title="English subtitles"
+                        >
+                          EN
+                        </span>
+                      </div>
+                    </td>
+                  )}
                   {visibleColumns.runtime && (
                     <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} text-sm text-gray-500`}>
                       {movie.runtime ? `${movie.runtime} min` : '-'}
@@ -506,7 +543,13 @@ function Movies() {
                       {movie.edition_year}
                     </td>
                   )}
-                  <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} text-sm text-right`}>
+                  <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} text-sm text-right space-x-3`}>
+                    <button
+                      onClick={() => navigate(`/movies/${movie.id}`)}
+                      className="text-gray-600 hover:text-gray-900 font-medium"
+                    >
+                      Detail
+                    </button>
                     <button
                       onClick={() => handleEdit(movie)}
                       className="text-blue-600 hover:text-blue-900 font-medium"

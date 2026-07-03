@@ -11,6 +11,7 @@ import EditionDetail from './pages/EditionDetail'
 import Invitations from './pages/Invitations'
 import EmailTemplates from './pages/EmailTemplates'
 import Movies from './pages/Movies'
+import MovieDetail from './pages/MovieDetail'
 import ProgrammingTabs from './pages/ProgrammingTabs'
 import Venues from './pages/Venues'
 import AuditLogs from './pages/AuditLogs'
@@ -42,6 +43,7 @@ function App() {
                   <Route path="/invitations" element={<Invitations />} />
                   <Route path="/templates" element={<EmailTemplates />} />
                   <Route path="/movies" element={<Movies />} />
+                  <Route path="/movies/:id" element={<MovieDetail />} />
                   <Route path="/programming" element={<ProgrammingTabs />} />
                   <Route path="/blocks" element={<ProgrammingTabs />} />
                   <Route path="/venues" element={<ProgrammingTabs />} />
