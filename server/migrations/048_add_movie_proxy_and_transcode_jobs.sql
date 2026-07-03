@@ -54,6 +54,9 @@ CREATE TABLE IF NOT EXISTS movie_transcode_jobs (
 
 CREATE INDEX IF NOT EXISTS idx_movie_transcode_jobs_movie_id ON movie_transcode_jobs(movie_id);
 CREATE INDEX IF NOT EXISTS idx_movie_transcode_jobs_status ON movie_transcode_jobs(status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_movie_transcode_jobs_one_active_per_movie
+  ON movie_transcode_jobs(movie_id)
+  WHERE status IN ('pending', 'running');
 
 -- 3. updated_at trigger (same pattern as 047) ----------------------------------
 CREATE OR REPLACE FUNCTION update_movie_transcode_jobs_updated_at()

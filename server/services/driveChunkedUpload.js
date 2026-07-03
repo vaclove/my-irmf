@@ -15,6 +15,23 @@ const CHUNK_SIZE = 32 * 1024 * 1024; // 32 MiB (multiple of 256 KiB)
 // the bound stops a stalled upload from hanging forever.
 const CHUNK_PUT_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
 
+// Bounded retry with backoff for transient chunk-PUT failures. On retry we ask
+// Drive how many bytes it actually received (resumable offset probe) and resume
+// from there rather than restarting the whole multi-GB upload.
+const MAX_CHUNK_ATTEMPTS = 5;
+const CHUNK_RETRY_BASE_DELAY_MS = 1000;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** True for transient conditions worth retrying (network errors, 5xx, 429). */
+function isTransientPutError(err) {
+  if (!err) return false;
+  const status = err.response && err.response.status;
+  if (status != null) return status === 429 || (status >= 500 && status <= 599);
+  // No response => network/timeout error (ECONNRESET, ETIMEDOUT, aborted, ...).
+  return true;
+}
+
 // Bare axios for raw chunk PUTs into the resumable session.
 const rawPut = axios.create({
   maxRedirects: 0,
@@ -70,20 +87,78 @@ async function uploadStreamToDrive({ readable, sessionUrl, total, onProgress, sh
     throw err;
   };
 
-  const putChunk = async (buf, isLast) => {
-    const start = offset;
-    const endInclusive = offset + buf.length - 1;
-    const rangeTotal = total != null ? total : isLast ? String(offset + buf.length) : '*';
-    const res = await rawPut.put(sessionUrl, buf, {
-      headers: {
-        'Content-Range': `bytes ${start}-${endInclusive}/${rangeTotal}`,
-        'Content-Length': String(buf.length),
-      },
+  // Ask Drive how many contiguous bytes of the session it has stored so far.
+  // Returns { received, complete } where `received` is the next expected byte
+  // offset, or complete=true (with fileId set) if the upload already finished.
+  const probeReceived = async () => {
+    const rangeTotal = total != null ? total : '*';
+    const res = await rawPut.put(sessionUrl, '', {
+      headers: { 'Content-Range': `bytes */${rangeTotal}`, 'Content-Length': '0' },
     });
-    offset += buf.length;
-    if (onProgress) await onProgress(offset);
     if (res.status === 200 || res.status === 201) {
       fileId = res.data && res.data.id;
+      return { received: null, complete: true };
+    }
+    // 308: a Range header (e.g. "bytes=0-12345") reports the last stored byte.
+    const range = res.headers && res.headers.range;
+    const match = range && /bytes=\d+-(\d+)/.exec(range);
+    return { received: match ? Number(match[1]) + 1 : 0, complete: false };
+  };
+
+  const putChunk = async (bufIn, isLast) => {
+    const chunkStart = offset;
+    let buf = bufIn;
+    let start = chunkStart;
+
+    for (let attempt = 1; ; attempt += 1) {
+      if (attempt > 1) {
+        // Re-probe the session and realign to whatever Drive actually stored,
+        // trimming bytes it already has instead of restarting the transfer.
+        const probe = await probeReceived();
+        if (probe.complete) {
+          offset = chunkStart + bufIn.length;
+          break;
+        }
+        const chunkEnd = chunkStart + bufIn.length; // exclusive
+        if (probe.received >= chunkEnd) {
+          offset = probe.received;
+          break; // whole chunk already stored
+        }
+        if (probe.received > chunkStart) {
+          buf = bufIn.subarray(probe.received - chunkStart);
+          start = probe.received;
+        } else {
+          buf = bufIn;
+          start = chunkStart;
+        }
+      }
+
+      try {
+        const endInclusive = start + buf.length - 1;
+        const rangeTotal = total != null ? total : isLast ? String(chunkStart + bufIn.length) : '*';
+        const res = await rawPut.put(sessionUrl, buf, {
+          headers: {
+            'Content-Range': `bytes ${start}-${endInclusive}/${rangeTotal}`,
+            'Content-Length': String(buf.length),
+          },
+        });
+        offset = start + buf.length;
+        if (res.status === 200 || res.status === 201) {
+          fileId = res.data && res.data.id;
+        }
+        break;
+      } catch (err) {
+        if (attempt >= MAX_CHUNK_ATTEMPTS || !isTransientPutError(err)) throw err;
+        await sleep(CHUNK_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1));
+      }
+    }
+
+    if (onProgress) {
+      try {
+        await onProgress(offset);
+      } catch {
+        // Progress reporting is best-effort; don't let a transient DB error abort the upload.
+      }
     }
   };
 

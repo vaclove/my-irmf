@@ -75,6 +75,10 @@ router.post('/', async (req, res) => {
     }
     res.status(201).json({ job });
   } catch (error) {
+    // Partial unique index: another request already created an active job.
+    if (error.code === '23505') {
+      return res.status(409).json({ error: 'A transcode job is already active for this movie' });
+    }
     logError(error, req, { operation: 'create_transcode_job' });
     res.status(500).json({ error: error.message });
   }
@@ -170,9 +174,22 @@ router.post('/:id/retry', async (req, res) => {
       [old.movie_id, masterFileId, req.user?.email || null]
     );
     const job = insert.rows[0];
-    await transcodeQueue.enqueueJob(job.id);
+    try {
+      await transcodeQueue.enqueueJob(job.id);
+    } catch (queueError) {
+      await pool.query(
+        `UPDATE movie_transcode_jobs SET status = 'failed', error_message = $2,
+           finished_at = CURRENT_TIMESTAMP WHERE id = $1`,
+        [job.id, ('Failed to enqueue: ' + queueError.message).slice(0, 1000)]
+      );
+      throw queueError;
+    }
     res.status(201).json({ job });
   } catch (error) {
+    // Partial unique index: another request already created an active job.
+    if (error.code === '23505') {
+      return res.status(409).json({ error: 'A transcode job is already active for this movie' });
+    }
     logError(error, req, { operation: 'retry_transcode_job' });
     res.status(500).json({ error: error.message });
   }

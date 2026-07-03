@@ -354,7 +354,17 @@ router.get('/subtitles/:lang', async (req, res) => {
 
     const stream = await googleDrive.downloadFileStream(row.rows[0].drive_file_id);
     const chunks = [];
-    for await (const chunk of stream) chunks.push(chunk);
+    let bytes = 0;
+    const maxSubtitleBytes = 2 * 1024 * 1024;
+    for await (const chunk of stream) {
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      bytes += buf.length;
+      if (bytes > maxSubtitleBytes) {
+        if (typeof stream.destroy === 'function') stream.destroy();
+        return res.status(413).json({ error: 'Subtitles file is too large' });
+      }
+      chunks.push(buf);
+    }
     const text = Buffer.concat(chunks).toString('utf8');
     const vtt = extensionOf(row.rows[0].file_name) === 'vtt' ? text : convertSrtToVtt(text);
 

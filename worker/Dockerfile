@@ -10,6 +10,8 @@ RUN apt-get update \
 
 WORKDIR /app
 
+RUN groupadd -r worker && useradd -r -g worker worker
+
 # Install worker deps at the image root so /app/server/* modules resolve them
 # (Node walks up from /app/server to /app/node_modules).
 COPY worker/package.json ./package.json
@@ -24,6 +26,9 @@ COPY server/utils/movieFileNaming.js ./server/utils/movieFileNaming.js
 
 # Worker code.
 COPY worker/index.js ./worker/index.js
+
+RUN chown -R worker:worker /app
+USER worker
 
 ENV NODE_ENV=production
 CMD ["node", "worker/index.js"]

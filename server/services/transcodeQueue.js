@@ -82,7 +82,16 @@ async function enqueueForMovie(movieId, createdBy) {
       [movieId, master.rows[0].drive_file_id, createdBy || null]
     );
     const job = insert.rows[0];
-    await enqueueJob(job.id);
+    try {
+      await enqueueJob(job.id);
+    } catch (queueError) {
+      await pool.query(
+        `UPDATE movie_transcode_jobs SET status = 'failed', error_message = $2,
+           finished_at = CURRENT_TIMESTAMP WHERE id = $1`,
+        [job.id, ('Failed to enqueue: ' + queueError.message).slice(0, 1000)]
+      );
+      throw queueError;
+    }
     logger.info('[TranscodeQueue] enqueued job', { jobId: job.id, movieId });
     return job;
   } catch (error) {

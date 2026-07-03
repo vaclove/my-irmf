@@ -130,11 +130,19 @@ class MovieDownloader {
         readable: source.stream,
         sessionUrl,
         total,
-        onProgress: (n) =>
-          pool.query(
-            'UPDATE movie_download_jobs SET bytes_transferred = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $1',
-            [jobId, n]
-          ),
+        onProgress: async (n) => {
+          try {
+            await pool.query(
+              'UPDATE movie_download_jobs SET bytes_transferred = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $1',
+              [jobId, n]
+            );
+          } catch (progressError) {
+            logger.warn('[MovieDownloader] progress update failed', {
+              jobId,
+              error: progressError.message,
+            });
+          }
+        },
         shouldCancel: () => this.isCancelled(jobId),
       });
 

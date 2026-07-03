@@ -16,6 +16,11 @@ const googleDrive = require('./googleDrive');
 
 const DRIVE_MEDIA_BASE = 'https://www.googleapis.com/drive/v3/files';
 
+// Hard wall-clock cap for the upstream Drive fetch. axios `timeout` is only a
+// socket-inactivity timeout for streamed responses, so use AbortSignal for a
+// deadline that covers the whole request.
+const UPSTREAM_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+
 // Copy through only the headers that describe the byte stream.
 const PASS_THROUGH_HEADERS = ['content-length', 'content-range', 'content-type'];
 
@@ -38,6 +43,7 @@ async function proxyDriveMedia(req, res, fileId, fallbackMime) {
         params: { alt: 'media', supportsAllDrives: true },
         headers,
         responseType: 'stream',
+        signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
         // 416 (range not satisfiable) is a legitimate response to mirror.
         validateStatus: (s) => s === 200 || s === 206 || s === 416,
       }

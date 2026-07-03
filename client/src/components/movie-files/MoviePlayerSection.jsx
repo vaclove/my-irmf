@@ -104,6 +104,7 @@ function MoviePlayerSection({ movieId }) {
   }
 
   const deleteProxy = async () => {
+    if (jobs.some((j) => ACTIVE_STATUSES.includes(j.status))) return
     if (!window.confirm('Delete the preview proxy (also moves it to Drive trash)?')) return
     setBusy(true)
     try {
@@ -181,7 +182,7 @@ function MoviePlayerSection({ movieId }) {
             </button>
             <button
               onClick={deleteProxy}
-              disabled={busy}
+              disabled={busy || !!activeJob}
               className="text-red-600 hover:text-red-800 disabled:opacity-50"
             >
               Delete preview
