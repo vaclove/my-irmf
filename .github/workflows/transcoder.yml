@@ -50,13 +50,14 @@ jobs:
         run: |
           az acr build \
             --registry "$ACR_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
             --image "$IMAGE_REPO:${{ github.sha }}" \
             --image "$IMAGE_REPO:latest" \
             --file worker/Dockerfile .
 
       - name: Update Container Apps Job image
         run: |
-          ACR_SERVER=$(az acr show -n "$ACR_NAME" --query loginServer -o tsv)
+          ACR_SERVER=$(az acr show -n "$ACR_NAME" -g "$RESOURCE_GROUP" --query loginServer -o tsv)
           az containerapp job update \
             -g "$RESOURCE_GROUP" -n "$JOB_NAME" \
             --image "$ACR_SERVER/$IMAGE_REPO:${{ github.sha }}"
