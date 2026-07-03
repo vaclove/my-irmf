@@ -15,12 +15,22 @@ router.get('/', async (req, res) => {
     const { edition_id } = req.query;
     
     let query = `
-      SELECT m.*, e.year as edition_year, e.name as edition_name 
-      FROM movies m 
+      SELECT m.*, e.year as edition_year, e.name as edition_name,
+             COALESCE(mf.has_movie_file, false) AS has_movie_file,
+             COALESCE(mf.has_subtitles_cs, false) AS has_subtitles_cs,
+             COALESCE(mf.has_subtitles_en, false) AS has_subtitles_en
+      FROM movies m
       JOIN editions e ON m.edition_id = e.id
+      LEFT JOIN (
+        SELECT movie_id,
+               BOOL_OR(file_kind = 'movie') AS has_movie_file,
+               BOOL_OR(file_kind = 'subtitles_cs') AS has_subtitles_cs,
+               BOOL_OR(file_kind = 'subtitles_en') AS has_subtitles_en
+        FROM movie_files GROUP BY movie_id
+      ) mf ON mf.movie_id = m.id
     `;
     let params = [];
-    
+
     if (edition_id) {
       query += ' WHERE m.edition_id = $1';
       params.push(edition_id);
@@ -57,9 +67,19 @@ router.get('/edition/:editionId', async (req, res) => {
     const { editionId } = req.params;
     
     const query = `
-      SELECT m.*, e.year as edition_year, e.name as edition_name 
-      FROM movies m 
+      SELECT m.*, e.year as edition_year, e.name as edition_name,
+             COALESCE(mf.has_movie_file, false) AS has_movie_file,
+             COALESCE(mf.has_subtitles_cs, false) AS has_subtitles_cs,
+             COALESCE(mf.has_subtitles_en, false) AS has_subtitles_en
+      FROM movies m
       JOIN editions e ON m.edition_id = e.id
+      LEFT JOIN (
+        SELECT movie_id,
+               BOOL_OR(file_kind = 'movie') AS has_movie_file,
+               BOOL_OR(file_kind = 'subtitles_cs') AS has_subtitles_cs,
+               BOOL_OR(file_kind = 'subtitles_en') AS has_subtitles_en
+        FROM movie_files GROUP BY movie_id
+      ) mf ON mf.movie_id = m.id
       WHERE m.edition_id = $1
       ORDER BY m.year DESC, m.name_cs ASC
     `;
@@ -92,9 +112,19 @@ router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query(`
-      SELECT m.*, e.year as edition_year, e.name as edition_name 
-      FROM movies m 
-      JOIN editions e ON m.edition_id = e.id 
+      SELECT m.*, e.year as edition_year, e.name as edition_name,
+             COALESCE(mf.has_movie_file, false) AS has_movie_file,
+             COALESCE(mf.has_subtitles_cs, false) AS has_subtitles_cs,
+             COALESCE(mf.has_subtitles_en, false) AS has_subtitles_en
+      FROM movies m
+      JOIN editions e ON m.edition_id = e.id
+      LEFT JOIN (
+        SELECT movie_id,
+               BOOL_OR(file_kind = 'movie') AS has_movie_file,
+               BOOL_OR(file_kind = 'subtitles_cs') AS has_subtitles_cs,
+               BOOL_OR(file_kind = 'subtitles_en') AS has_subtitles_en
+        FROM movie_files GROUP BY movie_id
+      ) mf ON mf.movie_id = m.id
       WHERE m.id = $1
     `, [id]);
     
@@ -337,9 +367,19 @@ router.get('/section/:section', async (req, res) => {
     const { edition_id } = req.query;
     
     let query = `
-      SELECT m.*, e.year as edition_year, e.name as edition_name 
-      FROM movies m 
-      JOIN editions e ON m.edition_id = e.id 
+      SELECT m.*, e.year as edition_year, e.name as edition_name,
+             COALESCE(mf.has_movie_file, false) AS has_movie_file,
+             COALESCE(mf.has_subtitles_cs, false) AS has_subtitles_cs,
+             COALESCE(mf.has_subtitles_en, false) AS has_subtitles_en
+      FROM movies m
+      JOIN editions e ON m.edition_id = e.id
+      LEFT JOIN (
+        SELECT movie_id,
+               BOOL_OR(file_kind = 'movie') AS has_movie_file,
+               BOOL_OR(file_kind = 'subtitles_cs') AS has_subtitles_cs,
+               BOOL_OR(file_kind = 'subtitles_en') AS has_subtitles_en
+        FROM movie_files GROUP BY movie_id
+      ) mf ON mf.movie_id = m.id
       WHERE m.section = $1
     `;
     let params = [section];
