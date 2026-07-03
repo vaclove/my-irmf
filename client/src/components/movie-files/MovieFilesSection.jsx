@@ -1,8 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { movieFileApi } from '../../utils/api'
+import { movieFileApi, movieDownloadApi } from '../../utils/api'
 import { useToast } from '../../contexts/ToastContext'
 import { formatBytes } from '../../utils/fileSize'
 import FileUploadModal from './FileUploadModal'
+import DownloadFromLinkModal from './DownloadFromLinkModal'
+
+const ACTIVE_STATUSES = ['pending', 'running']
 
 const ASSET_KINDS = [
   { key: 'movie', label: 'Movie file', badge: '🎬' },
@@ -41,12 +44,19 @@ function MovieFilesSection({ movieId }) {
   const [busy, setBusy] = useState(false)
   const [trashOnRemove, setTrashOnRemove] = useState(false)
   const [uploadKind, setUploadKind] = useState(null)
+  const [showDownload, setShowDownload] = useState(false)
+  const [jobs, setJobs] = useState([])
   const subtitleInputs = useRef({})
+  const wasPolling = useRef(false)
 
   const load = useCallback(async () => {
     try {
-      const res = await movieFileApi.getFiles(movieId)
-      setData(res.data)
+      const [filesRes, jobsRes] = await Promise.all([
+        movieFileApi.getFiles(movieId),
+        movieDownloadApi.getForMovie(movieId).catch(() => ({ data: { jobs: [] } })),
+      ])
+      setData(filesRes.data)
+      setJobs(jobsRes.data.jobs || [])
     } catch (error) {
       console.error('Error loading movie files:', error)
       showError('Failed to load files: ' + (error.response?.data?.error || error.message))
@@ -58,6 +68,28 @@ function MovieFilesSection({ movieId }) {
   useEffect(() => {
     load()
   }, [load])
+
+  // Poll while any job is active; when the last one finishes, refresh files.
+  useEffect(() => {
+    const hasActive = jobs.some((j) => ACTIVE_STATUSES.includes(j.status))
+    if (!hasActive) {
+      if (wasPolling.current) {
+        wasPolling.current = false
+        load()
+      }
+      return undefined
+    }
+    wasPolling.current = true
+    const timer = setInterval(async () => {
+      try {
+        const res = await movieDownloadApi.getForMovie(movieId)
+        setJobs(res.data.jobs || [])
+      } catch {
+        // transient; keep polling
+      }
+    }, 4000)
+    return () => clearInterval(timer)
+  }, [jobs, movieId, load])
 
   const fileForKind = (kind) => (data?.files || []).find((f) => f.file_kind === kind)
 
@@ -126,6 +158,26 @@ function MovieFilesSection({ movieId }) {
     }
   }
 
+  const cancelJob = async (jobId) => {
+    try {
+      await movieDownloadApi.cancel(jobId)
+      const res = await movieDownloadApi.getForMovie(movieId)
+      setJobs(res.data.jobs || [])
+    } catch (error) {
+      showError('Cancel failed: ' + (error.response?.data?.error || error.message))
+    }
+  }
+
+  const retryJob = async (jobId) => {
+    try {
+      await movieDownloadApi.retry(jobId)
+      const res = await movieDownloadApi.getForMovie(movieId)
+      setJobs(res.data.jobs || [])
+    } catch (error) {
+      showError('Retry failed: ' + (error.response?.data?.error || error.message))
+    }
+  }
+
   if (loading) {
     return <div className="text-sm text-gray-500">Loading files…</div>
   }
@@ -172,6 +224,14 @@ function MovieFilesSection({ movieId }) {
             Rescan
           </button>
         )}
+        {folder && (
+          <button
+            onClick={() => setShowDownload(true)}
+            className="bg-gray-600 text-white px-3 py-1.5 rounded-md hover:bg-gray-700 text-sm"
+          >
+            Download from link
+          </button>
+        )}
         <label className="flex items-center space-x-2 text-sm text-gray-600">
           <input
             type="checkbox"
@@ -182,6 +242,60 @@ function MovieFilesSection({ movieId }) {
           <span>Also move to Drive trash when removing</span>
         </label>
       </div>
+
+      {/* Download jobs */}
+      {jobs.filter((j) => j.status !== 'completed').length > 0 && (
+        <div className="space-y-2">
+          <h4 className="text-sm font-medium text-gray-900">Download jobs</h4>
+          {jobs
+            .filter((j) => j.status !== 'completed')
+            .map((job) => {
+              const total = job.bytes_total != null ? Number(job.bytes_total) : null
+              const transferred = Number(job.bytes_transferred || 0)
+              const pct = total ? Math.min(100, Math.round((transferred / total) * 100)) : null
+              const active = ACTIVE_STATUSES.includes(job.status)
+              const retryable = ['failed', 'cancelled', 'interrupted'].includes(job.status)
+              return (
+                <div key={job.id} className="border border-gray-200 rounded-md p-3">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="truncate">
+                      {job.file_kind} · {job.source_type} · <span className="font-medium">{job.status}</span>
+                    </span>
+                    <div className="space-x-3 shrink-0">
+                      {active && (
+                        <button onClick={() => cancelJob(job.id)} className="text-red-600 hover:text-red-800">
+                          Cancel
+                        </button>
+                      )}
+                      {retryable && (
+                        <button onClick={() => retryJob(job.id)} className="text-blue-600 hover:text-blue-800">
+                          Retry
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {active && (
+                    <div className="mt-2">
+                      <div className="w-full bg-gray-200 rounded-full h-2">
+                        <div
+                          className="bg-blue-600 h-2 rounded-full transition-all"
+                          style={{ width: `${pct != null ? pct : 0}%` }}
+                        />
+                      </div>
+                      <div className="text-xs text-gray-500 mt-1">
+                        {formatBytes(transferred)}{total != null && ` / ${formatBytes(total)}`}
+                        {pct != null && ` (${pct}%)`}
+                      </div>
+                    </div>
+                  )}
+                  {job.error_message && (
+                    <div className="text-xs text-red-600 mt-1">{job.error_message}</div>
+                  )}
+                </div>
+              )
+            })}
+        </div>
+      )}
 
       {/* Asset rows */}
       <div className="divide-y divide-gray-200 border border-gray-200 rounded-md">
@@ -300,6 +414,13 @@ function MovieFilesSection({ movieId }) {
         movieId={movieId}
         fileKind={uploadKind || 'movie'}
         onUploaded={load}
+      />
+
+      <DownloadFromLinkModal
+        isOpen={showDownload}
+        onClose={() => setShowDownload(false)}
+        movieId={movieId}
+        onCreated={load}
       />
     </div>
   )
