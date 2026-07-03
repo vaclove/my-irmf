@@ -33,6 +33,8 @@ const associationRoutes = require('./routes/associations');
 const scannerRoutes = require('./routes/scanner');
 const gooutRoutes = require('./routes/goout');
 const gooutTokenScheduler = require('./services/goout-token-scheduler');
+const movieFileScanScheduler = require('./services/movie-file-scan-scheduler');
+const movieDownloader = require('./services/movieDownloader');
 const mailgunService = require('./utils/mailgun');
 
 const app = express();
@@ -225,6 +227,10 @@ const startServer = async () => {
 
     // Start GoOut token refresh scheduler
     gooutTokenScheduler.start();
+
+    // Movie files: recover interrupted download jobs and start the Drive scanner
+    await movieDownloader.markInterruptedJobs();
+    movieFileScanScheduler.start();
 
     // Check if we should use HTTPS in development
     const isDevelopment = process.env.NODE_ENV !== 'production';
