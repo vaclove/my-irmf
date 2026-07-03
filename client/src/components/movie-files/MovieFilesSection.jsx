@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { movieFileApi, movieDownloadApi } from '../../utils/api'
 import { useToast } from '../../contexts/ToastContext'
 import { formatBytes } from '../../utils/fileSize'
+import { notifyMovieFilesChanged } from '../../utils/movieFilesBus'
 import FileUploadModal from './FileUploadModal'
 import DownloadFromLinkModal from './DownloadFromLinkModal'
 
@@ -15,6 +16,7 @@ const ASSET_KINDS = [
 
 const KIND_OPTIONS = [
   { value: 'movie', label: 'Movie file' },
+  { value: 'movie_proxy', label: 'Preview proxy (mp4)' },
   { value: 'subtitles_cs', label: 'Czech subtitles' },
   { value: 'subtitles_en', label: 'English subtitles' },
 ]
@@ -75,7 +77,9 @@ function MovieFilesSection({ movieId }) {
     if (!hasActive) {
       if (wasPolling.current) {
         wasPolling.current = false
-        load()
+        // A finished download may have enqueued a proxy transcode; let the
+        // preview section pick it up.
+        load().then(() => notifyMovieFilesChanged(movieId))
       }
       return undefined
     }
@@ -134,6 +138,7 @@ function MovieFilesSection({ movieId }) {
         })
         success('Subtitles uploaded')
         await load()
+        notifyMovieFilesChanged(movieId)
       } catch (error) {
         showError('Subtitle upload failed: ' + (error.response?.data?.error || error.message))
       } finally {
@@ -151,6 +156,7 @@ function MovieFilesSection({ movieId }) {
       await movieFileApi.deleteFile(movieId, kind, trashOnRemove)
       success('Asset removed')
       await load()
+      notifyMovieFilesChanged(movieId)
     } catch (error) {
       showError('Remove failed: ' + (error.response?.data?.error || error.message))
     } finally {
@@ -392,6 +398,7 @@ function MovieFilesSection({ movieId }) {
                     })
                     success('File imported')
                     await load()
+                    notifyMovieFilesChanged(movieId)
                   } catch (error) {
                     if (error.response?.status === 409) {
                       showError('That asset kind is already set. Enable "replace" to overwrite.')
@@ -413,14 +420,22 @@ function MovieFilesSection({ movieId }) {
         onClose={() => setUploadKind(null)}
         movieId={movieId}
         fileKind={uploadKind || 'movie'}
-        onUploaded={load}
+        onUploaded={async () => {
+          // A completed master upload enqueues a proxy transcode server-side;
+          // notify so the preview section starts polling it.
+          await load()
+          notifyMovieFilesChanged(movieId)
+        }}
       />
 
       <DownloadFromLinkModal
         isOpen={showDownload}
         onClose={() => setShowDownload(false)}
         movieId={movieId}
-        onCreated={load}
+        onCreated={async () => {
+          await load()
+          notifyMovieFilesChanged(movieId)
+        }}
       />
     </div>
   )

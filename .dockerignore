@@ -1,0 +1,13 @@
+# Keep the worker image build context (repo root) small. The worker Dockerfile
+# only copies worker/ and a few server/ modules, so exclude everything heavy.
+.git
+node_modules
+client
+certs
+docs
+.context
+.claude
+**/*.log
+*.md
+.env
+.env.*

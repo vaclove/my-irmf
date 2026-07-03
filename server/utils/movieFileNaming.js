@@ -5,6 +5,7 @@
  * Convention (see MOVIE_FILES_PLAN.md):
  *   slug = slugify(name_en || name_cs)
  *   movie:        {slug}.{ext}          ext in VIDEO_EXTENSIONS
+ *   movie proxy:  {slug}.proxy.mp4      web-playable rendition (transcoded)
  *   CZ subtitles: {slug}.cs.{srt|vtt}
  *   EN subtitles: {slug}.en.{srt|vtt}
  *   folder name:  sanitized raw name_cs
@@ -13,7 +14,7 @@
 const VIDEO_EXTENSIONS = ['mp4', 'mkv', 'mov', 'avi', 'm4v', 'ts'];
 const SUBTITLE_EXTENSIONS = ['srt', 'vtt'];
 
-const FILE_KINDS = ['movie', 'subtitles_cs', 'subtitles_en'];
+const FILE_KINDS = ['movie', 'movie_proxy', 'subtitles_cs', 'subtitles_en'];
 
 /**
  * Slugify a movie name for use in file names:
@@ -61,6 +62,8 @@ function conventionFileName(movie, fileKind, ext) {
   switch (fileKind) {
     case 'movie':
       return `${slug}.${cleanExt}`;
+    case 'movie_proxy':
+      return `${slug}.proxy.mp4`; // always mp4; ext arg ignored
     case 'subtitles_cs':
       return `${slug}.cs.${cleanExt}`;
     case 'subtitles_en':
@@ -76,23 +79,32 @@ function extensionOf(fileName) {
   return m ? m[1].toLowerCase() : '';
 }
 
+/** Is this file name the transcoded web-playable proxy ({slug}.proxy.mp4)? */
+function isProxyFile(fileName) {
+  return /\.proxy\.mp4$/i.test(String(fileName || ''));
+}
+
 /**
  * Conservative auto-classification of a single file by name/mime.
+ *   *.proxy.mp4     -> movie_proxy
  *   *.cs.(srt|vtt)  -> subtitles_cs
  *   *.en.(srt|vtt)  -> subtitles_en
- *   a video file    -> 'movie' ONLY if it is the sole video in the folder
- *                      (caller passes videoCountInFolder)
+ *   a video file    -> 'movie' ONLY if it is the sole (non-proxy) video in the
+ *                      folder (caller passes videoCountInFolder)
  * Everything else   -> null (unclassified / importable).
  *
  * @param {string} fileName
  * @param {string} [mimeType]
  * @param {object} [opts]
- * @param {number} [opts.videoCountInFolder] number of video files in the folder
- * @returns {'movie'|'subtitles_cs'|'subtitles_en'|null}
+ * @param {number} [opts.videoCountInFolder] number of non-proxy video files in the folder
+ * @returns {'movie'|'movie_proxy'|'subtitles_cs'|'subtitles_en'|null}
  */
 function classifyByName(fileName, mimeType, opts = {}) {
   const name = String(fileName || '').toLowerCase();
   const ext = extensionOf(name);
+
+  // Proxy first: it's an .mp4 and would otherwise be counted as the movie.
+  if (isProxyFile(name)) return 'movie_proxy';
 
   if (SUBTITLE_EXTENSIONS.includes(ext)) {
     if (/\.cs\.(srt|vtt)$/.test(name)) return 'subtitles_cs';
@@ -110,8 +122,12 @@ function classifyByName(fileName, mimeType, opts = {}) {
   return null;
 }
 
-/** Is this file name a video by extension? Used to count videos in a folder. */
+/**
+ * Is this file name a video by extension? Used to count videos in a folder.
+ * Excludes the transcoded proxy so it never counts against the sole-video rule.
+ */
 function isVideoFile(fileName, mimeType) {
+  if (isProxyFile(fileName)) return false;
   const ext = extensionOf(fileName);
   return (
     VIDEO_EXTENSIONS.includes(ext) ||
@@ -128,5 +144,6 @@ module.exports = {
   conventionFileName,
   classifyByName,
   isVideoFile,
+  isProxyFile,
   extensionOf,
 };

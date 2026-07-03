@@ -18,6 +18,7 @@ router.get('/', async (req, res) => {
     let query = `
       SELECT m.*, e.year as edition_year, e.name as edition_name,
              COALESCE(mf.has_movie_file, false) AS has_movie_file,
+             COALESCE(mf.has_movie_proxy, false) AS has_movie_proxy,
              COALESCE(mf.has_subtitles_cs, false) AS has_subtitles_cs,
              COALESCE(mf.has_subtitles_en, false) AS has_subtitles_en
       FROM movies m
@@ -25,6 +26,7 @@ router.get('/', async (req, res) => {
       LEFT JOIN (
         SELECT movie_id,
                BOOL_OR(file_kind = 'movie') AS has_movie_file,
+               BOOL_OR(file_kind = 'movie_proxy') AS has_movie_proxy,
                BOOL_OR(file_kind = 'subtitles_cs') AS has_subtitles_cs,
                BOOL_OR(file_kind = 'subtitles_en') AS has_subtitles_en
         FROM movie_files GROUP BY movie_id
@@ -70,6 +72,7 @@ router.get('/edition/:editionId', async (req, res) => {
     const query = `
       SELECT m.*, e.year as edition_year, e.name as edition_name,
              COALESCE(mf.has_movie_file, false) AS has_movie_file,
+             COALESCE(mf.has_movie_proxy, false) AS has_movie_proxy,
              COALESCE(mf.has_subtitles_cs, false) AS has_subtitles_cs,
              COALESCE(mf.has_subtitles_en, false) AS has_subtitles_en
       FROM movies m
@@ -77,6 +80,7 @@ router.get('/edition/:editionId', async (req, res) => {
       LEFT JOIN (
         SELECT movie_id,
                BOOL_OR(file_kind = 'movie') AS has_movie_file,
+               BOOL_OR(file_kind = 'movie_proxy') AS has_movie_proxy,
                BOOL_OR(file_kind = 'subtitles_cs') AS has_subtitles_cs,
                BOOL_OR(file_kind = 'subtitles_en') AS has_subtitles_en
         FROM movie_files GROUP BY movie_id
@@ -115,6 +119,7 @@ router.get('/:id', async (req, res) => {
     const result = await pool.query(`
       SELECT m.*, e.year as edition_year, e.name as edition_name,
              COALESCE(mf.has_movie_file, false) AS has_movie_file,
+             COALESCE(mf.has_movie_proxy, false) AS has_movie_proxy,
              COALESCE(mf.has_subtitles_cs, false) AS has_subtitles_cs,
              COALESCE(mf.has_subtitles_en, false) AS has_subtitles_en
       FROM movies m
@@ -122,6 +127,7 @@ router.get('/:id', async (req, res) => {
       LEFT JOIN (
         SELECT movie_id,
                BOOL_OR(file_kind = 'movie') AS has_movie_file,
+               BOOL_OR(file_kind = 'movie_proxy') AS has_movie_proxy,
                BOOL_OR(file_kind = 'subtitles_cs') AS has_subtitles_cs,
                BOOL_OR(file_kind = 'subtitles_en') AS has_subtitles_en
         FROM movie_files GROUP BY movie_id
@@ -390,6 +396,7 @@ router.get('/section/:section', async (req, res) => {
     let query = `
       SELECT m.*, e.year as edition_year, e.name as edition_name,
              COALESCE(mf.has_movie_file, false) AS has_movie_file,
+             COALESCE(mf.has_movie_proxy, false) AS has_movie_proxy,
              COALESCE(mf.has_subtitles_cs, false) AS has_subtitles_cs,
              COALESCE(mf.has_subtitles_en, false) AS has_subtitles_en
       FROM movies m
@@ -397,6 +404,7 @@ router.get('/section/:section', async (req, res) => {
       LEFT JOIN (
         SELECT movie_id,
                BOOL_OR(file_kind = 'movie') AS has_movie_file,
+               BOOL_OR(file_kind = 'movie_proxy') AS has_movie_proxy,
                BOOL_OR(file_kind = 'subtitles_cs') AS has_subtitles_cs,
                BOOL_OR(file_kind = 'subtitles_en') AS has_subtitles_en
         FROM movie_files GROUP BY movie_id
