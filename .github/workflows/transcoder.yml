@@ -22,8 +22,8 @@ on:
   workflow_dispatch:
 
 env:
-  ACR_NAME: myirmfacr
-  RESOURCE_GROUP: my-irmf-rg
+  ACR_NAME: irmftranscodeacr
+  RESOURCE_GROUP: irmf-cz
   JOB_NAME: movie-transcoder
   IMAGE_REPO: transcode-worker
 
