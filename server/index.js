@@ -54,6 +54,8 @@ app.use(helmet({
     directives: {
       ...helmet.contentSecurityPolicy.getDefaultDirectives(),
       "img-src": ["'self'", "data:", "https://irmf.cz", "https://lh3.googleusercontent.com", "https://s3.irmf.cz"],
+      // Browser uploads movie files straight to Google Drive resumable-session URLs
+      "connect-src": ["'self'", "https://www.googleapis.com"],
     },
   },
 }));
