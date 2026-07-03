@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { movieFileApi } from '../../utils/api'
 import { useToast } from '../../contexts/ToastContext'
 import { formatBytes } from '../../utils/fileSize'
+import FileUploadModal from './FileUploadModal'
 
 const ASSET_KINDS = [
   { key: 'movie', label: 'Movie file', badge: '🎬' },
@@ -39,6 +40,7 @@ function MovieFilesSection({ movieId }) {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [trashOnRemove, setTrashOnRemove] = useState(false)
+  const [uploadKind, setUploadKind] = useState(null)
   const subtitleInputs = useRef({})
 
   const load = useCallback(async () => {
@@ -208,6 +210,15 @@ function MovieFilesSection({ movieId }) {
               </div>
 
               <div className="flex items-center space-x-2 shrink-0">
+                {!isSubtitle && folder && (
+                  <button
+                    onClick={() => setUploadKind(asset.key)}
+                    disabled={busy}
+                    className="text-sm text-blue-600 hover:text-blue-800 disabled:opacity-50"
+                  >
+                    {row ? 'Replace' : 'Upload'}
+                  </button>
+                )}
                 {isSubtitle && folder && (
                   <>
                     <input
@@ -282,6 +293,14 @@ function MovieFilesSection({ movieId }) {
           </div>
         </div>
       )}
+
+      <FileUploadModal
+        isOpen={!!uploadKind}
+        onClose={() => setUploadKind(null)}
+        movieId={movieId}
+        fileKind={uploadKind || 'movie'}
+        onUploaded={load}
+      />
     </div>
   )
 }
