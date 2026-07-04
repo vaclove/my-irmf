@@ -143,6 +143,8 @@ export const movieFileApi = {
   createUploadSession: (movieId, data) => api.post(`/movies/${movieId}/files/upload-session`, data),
   completeUpload: (movieId, data) => api.post(`/movies/${movieId}/files/upload-complete`, data),
   uploadSubtitles: (movieId, data) => api.post(`/movies/${movieId}/files/subtitles`, data),
+  getSubtitleCues: (movieId, lang) => api.get(`/movies/${movieId}/files/subtitles/${lang}/cues`),
+  saveSubtitleCues: (movieId, lang, data) => api.put(`/movies/${movieId}/files/subtitles/${lang}/cues`, data),
   importFile: (movieId, data) => api.post(`/movies/${movieId}/files/import`, data),
   deleteFile: (movieId, fileKind, removeFromDrive = false) =>
     api.delete(`/movies/${movieId}/files/${fileKind}`, { params: { remove_from_drive: removeFromDrive } }),

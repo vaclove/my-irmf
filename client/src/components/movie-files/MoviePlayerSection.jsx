@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { Link } from 'react-router-dom'
 import { movieFileApi, movieTranscodeApi } from '../../utils/api'
 import { useToast } from '../../contexts/ToastContext'
 import { formatBytes } from '../../utils/fileSize'
@@ -179,6 +180,14 @@ function MoviePlayerSection({ movieId }) {
               {!hasCs && !hasEn && ' · no subtitles yet'}
             </span>
             <div className="flex-1" />
+            {(hasCs || hasEn) && (
+              <Link
+                to={`/movies/${movieId}/subtitles`}
+                className="text-blue-600 hover:text-blue-800"
+              >
+                Edit subtitles
+              </Link>
+            )}
             <button
               onClick={generate}
               disabled={busy || !!activeJob}
@@ -202,17 +211,37 @@ function MoviePlayerSection({ movieId }) {
             <p className="text-xs text-gray-400 mt-1">
               A preview is normally created automatically when a movie file is added.
             </p>
-            <button
-              onClick={generate}
-              disabled={busy}
-              className="mt-3 bg-blue-600 text-white px-3 py-1.5 rounded-md hover:bg-blue-700 disabled:opacity-50"
-            >
-              Generate preview
-            </button>
+            <div className="mt-3 flex items-center gap-3">
+              <button
+                onClick={generate}
+                disabled={busy}
+                className="bg-blue-600 text-white px-3 py-1.5 rounded-md hover:bg-blue-700 disabled:opacity-50"
+              >
+                Generate preview
+              </button>
+              {(hasCs || hasEn) && (
+                <Link
+                  to={`/movies/${movieId}/subtitles`}
+                  className="text-blue-600 hover:text-blue-800"
+                >
+                  Edit subtitles
+                </Link>
+              )}
+            </div>
           </div>
         ) : (
           <div className="rounded-md border border-gray-200 p-4 text-sm text-gray-500">
             Add a movie file in the Files section below to enable the preview.
+            {(hasCs || hasEn) && (
+              <div className="mt-2">
+                <Link
+                  to={`/movies/${movieId}/subtitles`}
+                  className="text-blue-600 hover:text-blue-800"
+                >
+                  Edit subtitles
+                </Link>
+              </div>
+            )}
           </div>
         )
       ) : null}

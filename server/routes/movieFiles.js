@@ -12,7 +12,13 @@ const { logError } = require('../utils/logger');
 const googleDrive = require('../services/googleDrive');
 const { proxyDriveMedia } = require('../services/driveMediaProxy');
 const transcodeQueue = require('../services/transcodeQueue');
-const { convertSrtToVtt, decodeSubtitleBuffer } = require('../utils/subtitles');
+const {
+  convertSrtToVtt,
+  decodeSubtitleBuffer,
+  parseSubtitles,
+  serializeSrt,
+  serializeVtt,
+} = require('../utils/subtitles');
 const { scanMovie, upsertFileRow } = require('../services/movieFileScanner');
 const {
   conventionFileName,
@@ -64,6 +70,39 @@ async function loadMovie(movieId) {
 
 function subtitleMime(ext) {
   return ext === 'vtt' ? 'text/vtt' : 'application/x-subrip';
+}
+
+const MAX_SUBTITLE_BYTES = 2 * 1024 * 1024;
+
+/**
+ * Download and decode a subtitle file from Drive.
+ * Throws an Error with statusCode=413 when the file exceeds the cap.
+ */
+async function downloadSubtitleText(driveFileId) {
+  const stream = await googleDrive.downloadFileStream(driveFileId);
+  const chunks = [];
+  let bytes = 0;
+  for await (const chunk of stream) {
+    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    bytes += buf.length;
+    if (bytes > MAX_SUBTITLE_BYTES) {
+      if (typeof stream.destroy === 'function') stream.destroy();
+      const err = new Error('Subtitles file is too large');
+      err.statusCode = 413;
+      throw err;
+    }
+    chunks.push(buf);
+  }
+  return decodeSubtitleBuffer(Buffer.concat(chunks));
+}
+
+/** Load the movie_files row for a subtitle language, or null. */
+async function loadSubtitleRow(movieId, lang) {
+  const row = await pool.query(
+    'SELECT * FROM movie_files WHERE movie_id = $1 AND file_kind = $2',
+    [movieId, `subtitles_${lang}`]
+  );
+  return row.rows[0] || null;
 }
 
 // GET / — DB rows always; live folder listing + unclassified when Drive is up.
@@ -350,32 +389,124 @@ router.get('/subtitles/:lang', async (req, res) => {
   }
   if (!googleDrive.isConfigured()) return notConfigured(res);
   try {
-    const row = await pool.query(
-      'SELECT drive_file_id, file_name FROM movie_files WHERE movie_id = $1 AND file_kind = $2',
-      [movieId, `subtitles_${cleanLang}`]
-    );
-    if (row.rows.length === 0) return res.status(404).json({ error: 'Subtitles not found' });
+    const row = await loadSubtitleRow(movieId, cleanLang);
+    if (!row) return res.status(404).json({ error: 'Subtitles not found' });
 
-    const stream = await googleDrive.downloadFileStream(row.rows[0].drive_file_id);
-    const chunks = [];
-    let bytes = 0;
-    const maxSubtitleBytes = 2 * 1024 * 1024;
-    for await (const chunk of stream) {
-      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-      bytes += buf.length;
-      if (bytes > maxSubtitleBytes) {
-        if (typeof stream.destroy === 'function') stream.destroy();
-        return res.status(413).json({ error: 'Subtitles file is too large' });
-      }
-      chunks.push(buf);
-    }
-    const text = decodeSubtitleBuffer(Buffer.concat(chunks));
-    const vtt = extensionOf(row.rows[0].file_name) === 'vtt' ? text : convertSrtToVtt(text);
+    const text = await downloadSubtitleText(row.drive_file_id);
+    const vtt = extensionOf(row.file_name) === 'vtt' ? text : convertSrtToVtt(text);
 
     res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
     res.send(vtt);
   } catch (error) {
+    if (error.statusCode === 413) {
+      return res.status(413).json({ error: error.message });
+    }
     logError(error, req, { operation: 'get_subtitles', movieId });
+    if (!res.headersSent) res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /subtitles/:lang/cues — parsed subtitle cues as JSON, for the editor.
+router.get('/subtitles/:lang/cues', async (req, res) => {
+  const { movieId, lang } = req.params;
+  if (!['cs', 'en'].includes(lang)) {
+    return res.status(400).json({ error: 'Unsupported subtitle language' });
+  }
+  if (!googleDrive.isConfigured()) return notConfigured(res);
+  try {
+    const row = await loadSubtitleRow(movieId, lang);
+    if (!row) return res.status(404).json({ error: 'Subtitles not found' });
+
+    const ext = extensionOf(row.file_name);
+    const text = await downloadSubtitleText(row.drive_file_id);
+    let cues;
+    try {
+      cues = parseSubtitles(text, ext);
+    } catch (parseError) {
+      return res.status(422).json({ error: parseError.message });
+    }
+
+    res.json({
+      file: {
+        file_name: row.file_name,
+        drive_file_id: row.drive_file_id,
+        md5_checksum: row.md5_checksum,
+        drive_modified_at: row.drive_modified_at,
+      },
+      format: ext === 'vtt' ? 'vtt' : 'srt',
+      cues,
+    });
+  } catch (error) {
+    if (error.statusCode === 413) {
+      return res.status(413).json({ error: error.message });
+    }
+    logError(error, req, { operation: 'get_subtitle_cues', movieId });
+    if (!res.headersSent) res.status(500).json({ error: error.message });
+  }
+});
+
+// Timing lines are copied verbatim from the parsed source, so accept the SRT
+// form with optional trailing cue settings/coordinates.
+const CUE_TIMING_RE =
+  /^\d{1,2}:\d{2}:\d{2}[,.]\d{1,3}\s+-->\s+\d{1,2}:\d{2}:\d{2}[,.]\d{1,3}(\s.*)?$/;
+
+// PUT /subtitles/:lang/cues — save edited cue texts back to the Drive file
+// in place (same file id). Timings are never changed by the editor.
+router.put('/subtitles/:lang/cues', async (req, res) => {
+  const { movieId, lang } = req.params;
+  if (!['cs', 'en'].includes(lang)) {
+    return res.status(400).json({ error: 'Unsupported subtitle language' });
+  }
+  if (!googleDrive.isConfigured()) return notConfigured(res);
+  try {
+    const { cues, base_md5 } = req.body || {};
+    if (!Array.isArray(cues) || cues.length === 0) {
+      return res.status(400).json({ error: 'cues must be a non-empty array' });
+    }
+    if (!base_md5) {
+      return res.status(400).json({ error: 'base_md5 is required' });
+    }
+    for (const cue of cues) {
+      if (
+        !cue ||
+        typeof cue.timing !== 'string' ||
+        !CUE_TIMING_RE.test(cue.timing.trim()) ||
+        typeof cue.text !== 'string'
+      ) {
+        return res
+          .status(400)
+          .json({ error: 'Each cue needs a valid timing line and a text string' });
+      }
+    }
+
+    const row = await loadSubtitleRow(movieId, lang);
+    if (!row) return res.status(404).json({ error: 'Subtitles not found' });
+
+    const meta = await googleDrive.getFileMetadata(row.drive_file_id);
+    if (meta.md5Checksum && meta.md5Checksum !== base_md5) {
+      return res.status(409).json({
+        error: 'Subtitles changed on Drive since you loaded them. Reload the editor.',
+      });
+    }
+
+    const ext = extensionOf(row.file_name);
+    const clean = cues.map((c) => ({ timing: c.timing.trim(), text: c.text }));
+    const text = ext === 'vtt' ? serializeVtt(clean) : serializeSrt(clean);
+    const body = Buffer.from(text, 'utf8');
+    if (body.length > MAX_SUBTITLE_BYTES) {
+      return res.status(413).json({ error: 'Subtitles file is too large' });
+    }
+
+    const updated = await googleDrive.updateFileContent({
+      fileId: row.drive_file_id,
+      mimeType: subtitleMime(ext),
+      body,
+    });
+    await upsertFileRow(movieId, row.file_kind, updated);
+    const fresh = await loadSubtitleRow(movieId, lang);
+    res.json({ file: fresh });
+  } catch (error) {
+    logError(error, req, { operation: 'save_subtitle_cues', movieId });
     if (!res.headersSent) res.status(500).json({ error: error.message });
   }
 });
