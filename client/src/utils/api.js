@@ -178,6 +178,7 @@ export const subtitleTranslationApi = {
   getById: (id) => api.get(`/subtitle-translations/${id}`),
   cancel: (id) => api.post(`/subtitle-translations/${id}/cancel`),
   retry: (id) => api.post(`/subtitle-translations/${id}/retry`),
+  dismiss: (id) => api.post(`/subtitle-translations/${id}/dismiss`),
 }
 
 // Sections API

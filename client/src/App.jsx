@@ -31,7 +31,14 @@ function App() {
           <Routes>
           {/* Public route for confirmation */}
           <Route path="/confirm/:token" element={<Confirmation />} />
-          
+
+          {/* Fullscreen editor — auth-protected but rendered without app chrome */}
+          <Route path="/movies/:id/subtitles" element={
+            <ProtectedRoute>
+              <SubtitleEditor />
+            </ProtectedRoute>
+          } />
+
           {/* Protected routes */}
           <Route path="/*" element={
             <ProtectedRoute>
@@ -45,7 +52,6 @@ function App() {
                   <Route path="/templates" element={<EmailTemplates />} />
                   <Route path="/movies" element={<Movies />} />
                   <Route path="/movies/:id" element={<MovieDetail />} />
-                  <Route path="/movies/:id/subtitles" element={<SubtitleEditor />} />
                   <Route path="/programming" element={<ProgrammingTabs />} />
                   <Route path="/blocks" element={<ProgrammingTabs />} />
                   <Route path="/venues" element={<ProgrammingTabs />} />

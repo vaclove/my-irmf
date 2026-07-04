@@ -15,7 +15,8 @@ const DEFAULT_SECTIONS = [
   { key: 'special', name_cs: 'Speciální projekce', name_en: 'Special Screenings', color_code: '#DF342C', sort_order: 5 },
   { key: 'workshop', name_cs: 'Workshop', name_en: 'Workshop', color_code: '#929289', sort_order: 6 },
   { key: 'concert', name_cs: 'Koncert', name_en: 'Concert', color_code: '#929289', sort_order: 7 },
-  { key: 'discussion', name_cs: 'Diskuze', name_en: 'Discussion', color_code: '#F3C09F', sort_order: 8 }
+  { key: 'discussion', name_cs: 'Diskuze', name_en: 'Discussion', color_code: '#F3C09F', sort_order: 8 },
+  { key: 'other', name_cs: 'Ostatní', name_en: 'Other', color_code: '#6B7280', sort_order: 9 }
 ];
 
 // Get all sections for an edition

@@ -111,21 +111,25 @@ function MovieDetail() {
               className="w-24 h-36 object-cover rounded border"
             />
           )}
-          <div className="min-w-0">
-            <h1 className="text-2xl font-bold text-gray-900">{movie.name_cs}</h1>
-            {movie.name_en && <div className="text-gray-500">{movie.name_en}</div>}
-            <div className="mt-2 text-sm text-gray-600 space-x-2">
-              {movie.director && <span>{movie.director}</span>}
-              {movie.year && <span>· {movie.year}</span>}
+          <div className="min-w-0 flex-1 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 items-start">
+            <div className="min-w-0">
+              <h1 className="text-2xl font-bold text-gray-900">{movie.name_cs}</h1>
+              {movie.name_en && <div className="text-gray-500">{movie.name_en}</div>}
             </div>
-            {movie.section && (
-              <span
-                className="inline-flex items-center px-2 py-1 mt-2 rounded-md text-xs font-medium"
-                style={{ backgroundColor: sectionColor + '20', color: sectionColor }}
-              >
-                {section?.label || movie.section}
-              </span>
-            )}
+            <div className="min-w-0 sm:text-right">
+              <div className="text-sm text-gray-600 space-x-2">
+                {movie.director && <span>{movie.director}</span>}
+                {movie.year && <span>· {movie.year}</span>}
+              </div>
+              {movie.section && (
+                <span
+                  className="inline-flex items-center px-2 py-1 mt-2 rounded-md text-xs font-medium"
+                  style={{ backgroundColor: sectionColor + '20', color: sectionColor }}
+                >
+                  {section?.label || movie.section}
+                </span>
+              )}
+            </div>
           </div>
         </div>
       </div>
