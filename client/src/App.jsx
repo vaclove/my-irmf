@@ -12,6 +12,7 @@ import Invitations from './pages/Invitations'
 import EmailTemplates from './pages/EmailTemplates'
 import Movies from './pages/Movies'
 import MovieDetail from './pages/MovieDetail'
+import SubtitleEditor from './pages/SubtitleEditor'
 import ProgrammingTabs from './pages/ProgrammingTabs'
 import Venues from './pages/Venues'
 import AuditLogs from './pages/AuditLogs'
@@ -44,6 +45,7 @@ function App() {
                   <Route path="/templates" element={<EmailTemplates />} />
                   <Route path="/movies" element={<Movies />} />
                   <Route path="/movies/:id" element={<MovieDetail />} />
+                  <Route path="/movies/:id/subtitles" element={<SubtitleEditor />} />
                   <Route path="/programming" element={<ProgrammingTabs />} />
                   <Route path="/blocks" element={<ProgrammingTabs />} />
                   <Route path="/venues" element={<ProgrammingTabs />} />

@@ -25,6 +25,7 @@ const movieRoutes = require('./routes/movies');
 const movieFilesRoutes = require('./routes/movieFiles');
 const movieDownloadRoutes = require('./routes/movieDownloads');
 const movieTranscodeRoutes = require('./routes/movieTranscodes');
+const subtitleTranslationRoutes = require('./routes/subtitleTranslations');
 const venueRoutes = require('./routes/venues');
 const blockRoutes = require('./routes/blocks');
 const programmingRoutes = require('./routes/programming');
@@ -36,6 +37,7 @@ const gooutRoutes = require('./routes/goout');
 const gooutTokenScheduler = require('./services/goout-token-scheduler');
 const movieFileScanScheduler = require('./services/movie-file-scan-scheduler');
 const movieDownloader = require('./services/movieDownloader');
+const subtitleTranslator = require('./services/subtitleTranslator');
 const mailgunService = require('./utils/mailgun');
 
 const app = express();
@@ -153,6 +155,7 @@ app.use('/api/badges', requireIrmfDomain, badgeRoutes);
 app.use('/api/movies/:movieId/files', requireIrmfDomain, movieFilesRoutes);
 app.use('/api/movie-downloads', requireIrmfDomain, movieDownloadRoutes);
 app.use('/api/movie-transcodes', requireIrmfDomain, movieTranscodeRoutes);
+app.use('/api/subtitle-translations', requireIrmfDomain, subtitleTranslationRoutes);
 app.use('/api/movies', requireIrmfDomain, movieRoutes);
 app.use('/api/venues', requireIrmfDomain, venueRoutes);
 app.use('/api/blocks', requireIrmfDomain, blockRoutes);
@@ -232,8 +235,9 @@ const startServer = async () => {
     // Start GoOut token refresh scheduler
     gooutTokenScheduler.start();
 
-    // Movie files: recover interrupted download jobs and start the Drive scanner
+    // Movie files: recover interrupted download/translation jobs and start the Drive scanner
     await movieDownloader.markInterruptedJobs();
+    await subtitleTranslator.markInterruptedJobs();
     movieFileScanScheduler.start();
 
     // Check if we should use HTTPS in development

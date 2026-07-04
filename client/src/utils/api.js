@@ -143,6 +143,8 @@ export const movieFileApi = {
   createUploadSession: (movieId, data) => api.post(`/movies/${movieId}/files/upload-session`, data),
   completeUpload: (movieId, data) => api.post(`/movies/${movieId}/files/upload-complete`, data),
   uploadSubtitles: (movieId, data) => api.post(`/movies/${movieId}/files/subtitles`, data),
+  getSubtitleCues: (movieId, lang) => api.get(`/movies/${movieId}/files/subtitles/${lang}/cues`),
+  saveSubtitleCues: (movieId, lang, data) => api.put(`/movies/${movieId}/files/subtitles/${lang}/cues`, data),
   importFile: (movieId, data) => api.post(`/movies/${movieId}/files/import`, data),
   deleteFile: (movieId, fileKind, removeFromDrive = false) =>
     api.delete(`/movies/${movieId}/files/${fileKind}`, { params: { remove_from_drive: removeFromDrive } }),
@@ -167,6 +169,15 @@ export const movieTranscodeApi = {
   getById: (id) => api.get(`/movie-transcodes/${id}`),
   cancel: (id) => api.post(`/movie-transcodes/${id}/cancel`),
   retry: (id) => api.post(`/movie-transcodes/${id}/retry`),
+}
+
+// Subtitle translation jobs API (in-process LLM translation cs <-> en)
+export const subtitleTranslationApi = {
+  create: (data) => api.post('/subtitle-translations', data),
+  getForMovie: (movieId) => api.get(`/subtitle-translations/movie/${movieId}`),
+  getById: (id) => api.get(`/subtitle-translations/${id}`),
+  cancel: (id) => api.post(`/subtitle-translations/${id}/cancel`),
+  retry: (id) => api.post(`/subtitle-translations/${id}/retry`),
 }
 
 // Sections API
