@@ -7,8 +7,19 @@
  * Timings are never touched: cue timing lines are copied from the source
  * verbatim, only the text is translated. Cues are sent in batches split at
  * the largest temporal gap (scene changes), with the tail of the previous
- * batch passed along as context for continuity. The model must echo each
- * cue's "#N" marker; responses failing validation get one corrective retry.
+ * batch passed along as context for continuity.
+ *
+ * Every model call carries the complete source subtitle text as a cached
+ * system block (prompt caching: written once by the brief pre-pass, read by
+ * every batch), plus the movie synopsis from the DB where available. A
+ * one-shot pre-pass produces a translation brief (names, register,
+ * tykání/vykání, terminology) injected into each batch's prompt; if it
+ * fails, the job continues without it.
+ *
+ * Replies are constrained by structured outputs to a JSON object
+ * {"cues": [{"n", "text"}, ...]} and validated against the expected cue
+ * numbers; semantically invalid replies get one corrective retry. Output
+ * truncated at max_tokens causes the batch to be split in half and retried.
  *
  * At most SUBTITLE_TRANSLATION_MAX_CONCURRENT jobs run at once (default 1).
  * Cancellation is checked between batches. On boot, any pending/running jobs
@@ -37,6 +48,10 @@ const MAX_BATCH_SIZE = 80;
 const MIN_BATCH_SIZE = 10;
 const MAX_SUBTITLE_BYTES = 2 * 1024 * 1024; // same cap as the subtitle serving route
 const CONTEXT_CUES = 3; // trailing cues of the previous batch passed as context
+const MAX_OUTPUT_TOKENS = 16000; // headroom for adaptive thinking + translated cues
+const BRIEF_MAX_TOKENS = 8000;
+const BRIEF_MAX_CHARS = 4000; // cap on the pre-pass translation brief
+const SYNOPSIS_MAX_CHARS = 2000;
 
 const DIRECTIONS = {
   cs_to_en: { sourceKind: 'subtitles_cs', targetKind: 'subtitles_en', sourceLang: 'Czech', targetLang: 'English' },
@@ -44,6 +59,7 @@ const DIRECTIONS = {
 };
 
 class TranslationFormatError extends Error {}
+class TranslationTruncatedError extends Error {}
 
 // Parsing / serialization helpers live in ../utils/subtitles (shared with the
 // subtitle editor routes); they are re-exported below for existing consumers.
@@ -82,24 +98,57 @@ function batchCues(cues, maxSize = MAX_BATCH_SIZE) {
 // Prompts
 // ---------------------------------------------------------------------------
 
-function buildSystemPrompt(direction, movie) {
-  const { sourceLang, targetLang } = DIRECTIONS[direction];
+/**
+ * The full source subtitle text as a cache-controlled system block. It comes
+ * FIRST in every call's system array and must stay byte-identical within a
+ * job: the brief pre-pass writes the cache entry, every batch call reads it.
+ */
+function buildSourceReferenceBlock(sourceText) {
+  return {
+    type: 'text',
+    text:
+      'Reference — the complete source subtitle text of the film, for context only:\n\n' +
+      sourceText,
+    cache_control: { type: 'ephemeral' },
+  };
+}
+
+function movieHeading(movie) {
   const title = movie?.name_en || movie?.name_cs || 'Unknown';
   const year = movie?.edition_year ? ` (${movie.edition_year})` : '';
-  return `You are a professional subtitle translator working for an international film festival.
-Translate movie subtitle cues from ${sourceLang} to ${targetLang}.
+  const parts = [`Movie: ${title}${year}`];
+  const synopsis = (movie?.synopsis_cs || movie?.synopsis_en || '').trim();
+  if (synopsis) parts.push(`Synopsis:\n${synopsis.slice(0, SYNOPSIS_MAX_CHARS)}`);
+  return parts.join('\n\n');
+}
 
-Movie: ${title}${year}
-
-You will receive numbered cues. Each cue starts with a marker line "#N" followed by the cue text, which may span multiple lines.
+/**
+ * @returns {Array} system content blocks: [cached source reference?, instructions]
+ */
+function buildSystemPrompt(direction, movie, { sourceText, brief } = {}) {
+  const { sourceLang, targetLang } = DIRECTIONS[direction];
+  const sections = [];
+  sections.push(`You are a professional subtitle translator working for an international film festival.
+Translate movie subtitle cues from ${sourceLang} to ${targetLang}.`);
+  sections.push(movieHeading(movie));
+  if (brief) {
+    sections.push(`Translation brief — follow it for names, register, and terminology:\n${brief}`);
+  }
+  sections.push(`You will receive numbered cues. Each cue starts with a marker line "#N" followed by the cue text, which may span multiple lines.
 
 Rules:
-1. Reply with the SAME cues: for each input cue output its "#N" marker on its own line, then the translated text. Same numbers, same order, one output cue per input cue. Never merge, split, drop, add, or reorder cues.
+1. Reply with a JSON object {"cues": [{"n": <cue number>, "text": "<translation>"}, ...]} containing exactly one entry per input cue: same numbers, same order. Never merge, split, drop, add, or reorder cues.
 2. Translate meaning, register, and tone faithfully. Slang, insults, and profanity must be translated with equivalent strength — do not censor, soften, or embellish.
 3. Preserve inline formatting tags exactly as positioned in the source (<i>, </i>, <b>, <font ...>, {\\an8} etc.), wrapping the corresponding words.
-4. Keep subtitles readable: prefer at most 42 characters per line and at most 2 lines per cue; keep a cue's internal line break if the translation also needs two lines.
+4. Keep subtitles readable: prefer at most 42 characters per line and at most 2 lines per cue; use "\\n" inside "text" for a line break, and keep a cue's internal line break if the translation also needs two lines.
 5. A cue may be a fragment of a sentence continuing into the next cue — translate so consecutive cues read naturally in sequence.
-6. Output ONLY the numbered cues. No commentary, no headers, no code fences, no notes.`;
+6. Use the reference subtitles, synopsis, and brief to keep names, terminology, and register consistent across the whole film. Where the target language distinguishes formality (tykání/vykání) or gendered forms (e.g. Czech past-tense verbs), keep them consistent for each character and each pair of characters.
+7. The "cues" array is your entire reply. No commentary, no notes.`);
+
+  const blocks = [];
+  if (sourceText) blocks.push(buildSourceReferenceBlock(sourceText));
+  blocks.push({ type: 'text', text: sections.join('\n\n') });
+  return blocks;
 }
 
 /**
@@ -146,27 +195,68 @@ function getModel() {
   return process.env.ANTHROPIC_MODEL || 'claude-opus-4-8';
 }
 
+// Structured-outputs schema for batch replies: {"cues": [{"n", "text"}, ...]}.
+const TRANSLATION_OUTPUT_FORMAT = {
+  type: 'json_schema',
+  schema: {
+    type: 'object',
+    properties: {
+      cues: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            n: { type: 'integer' },
+            text: { type: 'string' },
+          },
+          required: ['n', 'text'],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ['cues'],
+    additionalProperties: false,
+  },
+};
+
+function logModelUsage(stage, response, extra = {}) {
+  const usage = response.usage || {};
+  logger.debug('[SubtitleTranslator] model call', {
+    stage,
+    stopReason: response.stop_reason,
+    inputTokens: usage.input_tokens,
+    outputTokens: usage.output_tokens,
+    cacheReadTokens: usage.cache_read_input_tokens,
+    cacheWriteTokens: usage.cache_creation_input_tokens,
+    ...extra,
+  });
+}
+
 /**
- * Split a model reply on "#N" marker lines and validate against the expected
+ * Parse a structured-outputs JSON reply and validate against the expected
  * cue numbers: every expected number present exactly once, none unexpected,
  * no empty translations.
  * @returns {Map<number, string>} n -> translated text
  */
-function parseNumberedResponse(text, expectedNs) {
-  const result = new Map();
-  const re = /^#(\d+)\s*$/gm;
-  const markers = [];
-  let m;
-  while ((m = re.exec(text)) !== null) {
-    markers.push({ n: parseInt(m[1], 10), start: m.index, end: m.index + m[0].length });
+function parseTranslatedCues(text, expectedNs) {
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch (parseError) {
+    throw new TranslationFormatError(`reply is not valid JSON: ${parseError.message}`);
   }
-  for (let i = 0; i < markers.length; i++) {
-    const chunkEnd = i + 1 < markers.length ? markers[i + 1].start : text.length;
-    const body = text.slice(markers[i].end, chunkEnd).trim();
-    if (result.has(markers[i].n)) {
-      throw new TranslationFormatError(`duplicate cue #${markers[i].n}`);
+  if (!parsed || !Array.isArray(parsed.cues)) {
+    throw new TranslationFormatError('reply JSON has no "cues" array');
+  }
+  const result = new Map();
+  for (const cue of parsed.cues) {
+    if (!cue || !Number.isInteger(cue.n) || typeof cue.text !== 'string') {
+      throw new TranslationFormatError('cue entry missing integer "n" or string "text"');
     }
-    result.set(markers[i].n, body);
+    if (result.has(cue.n)) {
+      throw new TranslationFormatError(`duplicate cue #${cue.n}`);
+    }
+    result.set(cue.n, cue.text.trim());
   }
 
   const expected = new Set(expectedNs);
@@ -183,29 +273,85 @@ function parseNumberedResponse(text, expectedNs) {
 }
 
 /**
- * Translate one batch. On a malformed reply, retries once in the same
- * conversation with the validation error as feedback, then throws.
+ * One-shot pre-pass: have the model read the full source subtitles and write
+ * a translation brief (names, formality per character pair, genders,
+ * terminology, tone) that is then injected into every batch's prompt. Also
+ * writes the prompt-cache entry for the source reference block that all
+ * batch calls read.
+ * @returns {Promise<string|null>}
+ */
+async function buildTranslationBrief({ direction, movie, sourceText }) {
+  const { sourceLang, targetLang } = DIRECTIONS[direction];
+  const system = [
+    buildSourceReferenceBlock(sourceText),
+    {
+      type: 'text',
+      text: `You are preparing a brief for translating a film's subtitles from ${sourceLang} to ${targetLang}.
+
+${movieHeading(movie)}`,
+    },
+  ];
+  const response = await getClient().messages.create({
+    model: getModel(),
+    max_tokens: BRIEF_MAX_TOKENS,
+    thinking: { type: 'adaptive' },
+    system,
+    messages: [
+      {
+        role: 'user',
+        content: `Read the full source subtitles above and write a concise translation brief:
+1. Character names and how to render them in ${targetLang}.
+2. Who addresses whom formally vs informally (tykání/vykání), per character pair.
+3. Speaker genders where inferable (matters for gendered verb/adjective forms).
+4. Recurring terms, phrases, or wordplay, with the translation to use consistently.
+5. Overall tone and register of the film.
+
+Plain text, at most 40 lines, no preamble.`,
+      },
+    ],
+  });
+  logModelUsage('brief', response);
+  const text = response.content
+    .filter((b) => b.type === 'text')
+    .map((b) => b.text)
+    .join('')
+    .trim();
+  return text ? text.slice(0, BRIEF_MAX_CHARS) : null;
+}
+
+/**
+ * Translate one batch. On a semantically invalid reply, retries once in the
+ * same conversation with the validation error as feedback, then throws.
+ * Output truncated at max_tokens throws TranslationTruncatedError.
  * @returns {Promise<Map<number, string>>}
  */
-async function translateBatch({ batch, direction, movie, previousContext }) {
-  const system = buildSystemPrompt(direction, movie);
+async function translateBatch({ batch, direction, movie, sourceText, brief, previousContext }) {
+  const system = buildSystemPrompt(direction, movie, { sourceText, brief });
   const messages = [{ role: 'user', content: buildBatchUserMessage(batch, previousContext) }];
   const expectedNs = batch.map((c) => c.n);
 
   for (let attempt = 1; ; attempt++) {
     const response = await getClient().messages.create({
       model: getModel(),
-      max_tokens: 8192,
+      max_tokens: MAX_OUTPUT_TOKENS,
+      thinking: { type: 'adaptive' },
+      output_config: { format: TRANSLATION_OUTPUT_FORMAT },
       system,
       messages,
       // No temperature/top_p/top_k: rejected with 400 on current Opus models.
     });
+    logModelUsage('batch', response, { cues: batch.length, attempt });
+    if (response.stop_reason === 'max_tokens') {
+      throw new TranslationTruncatedError(
+        `output truncated at max_tokens for cues #${expectedNs[0]}–#${expectedNs[expectedNs.length - 1]}`
+      );
+    }
     const text = response.content
       .filter((b) => b.type === 'text')
       .map((b) => b.text)
       .join('');
     try {
-      return parseNumberedResponse(text, expectedNs);
+      return parseTranslatedCues(text, expectedNs);
     } catch (formatError) {
       if (!(formatError instanceof TranslationFormatError) || attempt >= 2) throw formatError;
       // Corrective retry: mid-conversation assistant messages are allowed
@@ -215,10 +361,41 @@ async function translateBatch({ batch, direction, movie, previousContext }) {
         role: 'user',
         content:
           `Your reply was invalid: ${formatError.message}. ` +
-          `Reply again with exactly cues #${expectedNs[0]}–#${expectedNs[expectedNs.length - 1]}, ` +
-          `each as a "#N" line followed by its translation, nothing else.`,
+          `Reply again with a JSON object whose "cues" array contains exactly cues ` +
+          `#${expectedNs[0]}–#${expectedNs[expectedNs.length - 1]}, nothing else.`,
       });
     }
+  }
+}
+
+/**
+ * translateBatch, but when the output is truncated at max_tokens the batch
+ * is split in half and each half translated separately (recursively), with
+ * cross-half context re-derived so continuity is kept.
+ */
+async function translateBatchWithSplit(args) {
+  try {
+    return await translateBatch(args);
+  } catch (error) {
+    if (!(error instanceof TranslationTruncatedError) || args.batch.length < 2) throw error;
+    const mid = Math.ceil(args.batch.length / 2);
+    const first = args.batch.slice(0, mid);
+    const second = args.batch.slice(mid);
+    logger.warn('[SubtitleTranslator] batch output truncated; splitting in half', {
+      cues: args.batch.length,
+    });
+    const firstResult = await translateBatchWithSplit({ ...args, batch: first });
+    const secondContext = first.slice(-CONTEXT_CUES).map((c) => ({
+      n: c.n,
+      source: c.text,
+      translation: firstResult.get(c.n) || '',
+    }));
+    const secondResult = await translateBatchWithSplit({
+      ...args,
+      batch: second,
+      previousContext: secondContext,
+    });
+    return new Map([...firstResult, ...secondResult]);
   }
 }
 
@@ -226,6 +403,9 @@ async function translateBatch({ batch, direction, movie, previousContext }) {
 function describeError(error) {
   if (error instanceof TranslationFormatError) {
     return `Model produced invalid output after retry: ${error.message}`;
+  }
+  if (error instanceof TranslationTruncatedError) {
+    return `Model output was truncated: ${error.message}`;
   }
   if (error instanceof Anthropic.AuthenticationError) {
     return 'Anthropic API key is invalid';
@@ -346,7 +526,8 @@ class SubtitleTranslator {
 
     try {
       const movieRes = await pool.query(
-        `SELECT m.id, m.name_cs, m.name_en, m.drive_folder_id, e.year AS edition_year
+        `SELECT m.id, m.name_cs, m.name_en, m.synopsis_cs, m.synopsis_en, m.drive_folder_id,
+           e.year AS edition_year
          FROM movies m JOIN editions e ON m.edition_id = e.id WHERE m.id = $1`,
         [job.movie_id]
       );
@@ -376,6 +557,25 @@ class SubtitleTranslator {
         [jobId, cues.length, batches.length]
       );
 
+      // Pre-pass: translation brief for cross-film consistency. Optional —
+      // the job carries on without one. Also warms the prompt cache for the
+      // source reference block the batch calls reuse.
+      let brief = null;
+      if (!(await this.checkCancelled(jobId))) {
+        try {
+          brief = await buildTranslationBrief({
+            direction: job.direction,
+            movie,
+            sourceText,
+          });
+        } catch (briefError) {
+          logger.warn('[SubtitleTranslator] translation brief pre-pass failed; continuing without it', {
+            jobId,
+            error: briefError.message,
+          });
+        }
+      }
+
       const translations = new Map();
       let previousContext = [];
       let done = 0;
@@ -386,10 +586,12 @@ class SubtitleTranslator {
           throw err;
         }
 
-        const batchResult = await translateBatch({
+        const batchResult = await translateBatchWithSplit({
           batch,
           direction: job.direction,
           movie,
+          sourceText,
+          brief,
           previousContext,
         });
         for (const [n, text] of batchResult) translations.set(n, text);
@@ -505,6 +707,7 @@ class SubtitleTranslator {
 module.exports = new SubtitleTranslator();
 module.exports.DIRECTIONS = DIRECTIONS;
 module.exports.TranslationFormatError = TranslationFormatError;
+module.exports.TranslationTruncatedError = TranslationTruncatedError;
 // Pure helpers exported for unit tests.
 module.exports.parseSrt = parseSrt;
 module.exports.parseVtt = parseVtt;
@@ -514,4 +717,4 @@ module.exports.msFromTimestamp = msFromTimestamp;
 module.exports.batchCues = batchCues;
 module.exports.buildSystemPrompt = buildSystemPrompt;
 module.exports.buildBatchUserMessage = buildBatchUserMessage;
-module.exports.parseNumberedResponse = parseNumberedResponse;
+module.exports.parseTranslatedCues = parseTranslatedCues;
