@@ -141,6 +141,8 @@ function MoviePlayerSection({ movieId }) {
   const master = fileForKind('movie')
   const hasCs = !!fileForKind('subtitles_cs')
   const hasEn = !!fileForKind('subtitles_en')
+  const hasCsSynced = !!fileForKind('subtitles_cs_synced')
+  const hasEnSynced = !!fileForKind('subtitles_en_synced')
   const activeJob = jobs.find((j) => ACTIVE_STATUSES.includes(j.status))
   const latest = jobs[0]
 
@@ -171,6 +173,22 @@ function MoviePlayerSection({ movieId }) {
                 srcLang="en"
                 label="English"
                 src={movieFileApi.subtitleUrl(movieId, 'en')}
+              />
+            )}
+            {hasCsSynced && (
+              <track
+                kind="subtitles"
+                srcLang="cs"
+                label="Čeština (synced)"
+                src={movieFileApi.subtitleUrl(movieId, 'cs_synced')}
+              />
+            )}
+            {hasEnSynced && (
+              <track
+                kind="subtitles"
+                srcLang="en"
+                label="English (synced)"
+                src={movieFileApi.subtitleUrl(movieId, 'en_synced')}
               />
             )}
           </video>

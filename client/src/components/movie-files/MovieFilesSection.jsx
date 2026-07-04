@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Link } from 'react-router-dom'
-import { movieFileApi, movieDownloadApi, subtitleTranslationApi } from '../../utils/api'
+import { movieFileApi, movieDownloadApi, subtitleTranslationApi, subtitleSyncApi } from '../../utils/api'
 import { useToast } from '../../contexts/ToastContext'
 import { formatBytes } from '../../utils/fileSize'
 import { notifyMovieFilesChanged } from '../../utils/movieFilesBus'
@@ -17,10 +17,27 @@ const TRANSLATE_FROM_KIND = {
 
 const DIRECTION_LABELS = { cs_to_en: 'CS → EN', en_to_cs: 'EN → CS' }
 
+// Maps a subtitle kind to its alass-synced variant.
+const SYNCED_KIND = {
+  subtitles_cs: 'subtitles_cs_synced',
+  subtitles_en: 'subtitles_en_synced',
+}
+
+const SYNC_KIND_LABELS = { subtitles_cs: 'CS', subtitles_en: 'EN' }
+const SYNC_PHASE_LABELS = {
+  probing: 'Analyzing…',
+  extracting_audio: 'Extracting audio…',
+  aligning: 'Aligning…',
+  uploading: 'Uploading',
+}
+
 const ASSET_KINDS = [
   { key: 'movie', label: 'Movie file', badge: '🎬' },
   { key: 'subtitles_cs', label: 'Czech subtitles', badge: 'CS' },
   { key: 'subtitles_en', label: 'English subtitles', badge: 'EN' },
+  // Synced variants are machine-generated; rows show only when present.
+  { key: 'subtitles_cs_synced', label: 'Czech subtitles (synced)', badge: 'CS✓', synced: true },
+  { key: 'subtitles_en_synced', label: 'English subtitles (synced)', badge: 'EN✓', synced: true },
 ]
 
 const KIND_OPTIONS = [
@@ -28,6 +45,8 @@ const KIND_OPTIONS = [
   { value: 'movie_proxy', label: 'Preview proxy (mp4)' },
   { value: 'subtitles_cs', label: 'Czech subtitles' },
   { value: 'subtitles_en', label: 'English subtitles' },
+  { value: 'subtitles_cs_synced', label: 'Czech subtitles (synced)' },
+  { value: 'subtitles_en_synced', label: 'English subtitles (synced)' },
 ]
 
 function StatusBadge({ present }) {
@@ -58,20 +77,24 @@ function MovieFilesSection({ movieId }) {
   const [showDownload, setShowDownload] = useState(false)
   const [jobs, setJobs] = useState([])
   const [translationJobs, setTranslationJobs] = useState([])
+  const [syncJobs, setSyncJobs] = useState([])
   const subtitleInputs = useRef({})
   const wasPolling = useRef(false)
   const wasPollingTranslations = useRef(false)
+  const wasPollingSyncs = useRef(false)
 
   const load = useCallback(async () => {
     try {
-      const [filesRes, jobsRes, translationRes] = await Promise.all([
+      const [filesRes, jobsRes, translationRes, syncRes] = await Promise.all([
         movieFileApi.getFiles(movieId),
         movieDownloadApi.getForMovie(movieId).catch(() => ({ data: { jobs: [] } })),
         subtitleTranslationApi.getForMovie(movieId).catch(() => ({ data: { jobs: [] } })),
+        subtitleSyncApi.getForMovie(movieId).catch(() => ({ data: { jobs: [] } })),
       ])
       setData(filesRes.data)
       setJobs(jobsRes.data.jobs || [])
       setTranslationJobs(translationRes.data.jobs || [])
+      setSyncJobs(syncRes.data.jobs || [])
     } catch (error) {
       console.error('Error loading movie files:', error)
       showError('Failed to load files: ' + (error.response?.data?.error || error.message))
@@ -136,8 +159,39 @@ function MovieFilesSection({ movieId }) {
     return () => clearInterval(timer)
   }, [translationJobs, movieId, load, success, showError])
 
+  // Poll sync jobs while any is active; toast + refresh on completion.
+  useEffect(() => {
+    const hasActive = syncJobs.some((j) => ACTIVE_STATUSES.includes(j.status))
+    if (!hasActive) {
+      if (wasPollingSyncs.current) {
+        wasPollingSyncs.current = false
+        const last = syncJobs[0]
+        if (last?.status === 'completed') {
+          success('Subtitles synced')
+        } else if (last?.status === 'failed') {
+          showError('Subtitle sync failed: ' + (last.error_message || 'unknown error'))
+        }
+        load().then(() => notifyMovieFilesChanged(movieId))
+      }
+      return undefined
+    }
+    wasPollingSyncs.current = true
+    const timer = setInterval(async () => {
+      try {
+        const res = await subtitleSyncApi.getForMovie(movieId)
+        setSyncJobs(res.data.jobs || [])
+      } catch {
+        // transient; keep polling
+      }
+    }, 4000)
+    return () => clearInterval(timer)
+  }, [syncJobs, movieId, load, success, showError])
+
   const fileForKind = (kind) => (data?.files || []).find((f) => f.file_kind === kind)
   const hasActiveTranslation = translationJobs.some((j) => ACTIVE_STATUSES.includes(j.status))
+  const hasActiveSyncFor = (kind) =>
+    syncJobs.some((j) => j.subtitle_kind === kind && ACTIVE_STATUSES.includes(j.status))
+  const hasVideoFile = !!fileForKind('movie_proxy') || !!fileForKind('movie')
 
   const createFolder = async () => {
     setBusy(true)
@@ -280,6 +334,57 @@ function MovieFilesSection({ movieId }) {
       await subtitleTranslationApi.dismiss(jobId)
       const res = await subtitleTranslationApi.getForMovie(movieId)
       setTranslationJobs(res.data.jobs || [])
+    } catch (error) {
+      showError('Hide failed: ' + (error.response?.data?.error || error.message))
+    }
+  }
+
+  const startSync = async (sourceKind) => {
+    const syncedExists = !!fileForKind(SYNCED_KIND[sourceKind])
+    if (
+      syncedExists &&
+      !window.confirm('A synced copy already exists. Replace it with a new sync run?')
+    ) {
+      return
+    }
+    setBusy(true)
+    try {
+      await subtitleSyncApi.create({ movie_id: movieId, subtitle_kind: sourceKind })
+      info('Subtitle sync started')
+      const res = await subtitleSyncApi.getForMovie(movieId)
+      setSyncJobs(res.data.jobs || [])
+    } catch (error) {
+      showError('Sync failed to start: ' + (error.response?.data?.error || error.message))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const cancelSyncJob = async (jobId) => {
+    try {
+      await subtitleSyncApi.cancel(jobId)
+      const res = await subtitleSyncApi.getForMovie(movieId)
+      setSyncJobs(res.data.jobs || [])
+    } catch (error) {
+      showError('Cancel failed: ' + (error.response?.data?.error || error.message))
+    }
+  }
+
+  const retrySyncJob = async (jobId) => {
+    try {
+      await subtitleSyncApi.retry(jobId)
+      const res = await subtitleSyncApi.getForMovie(movieId)
+      setSyncJobs(res.data.jobs || [])
+    } catch (error) {
+      showError('Retry failed: ' + (error.response?.data?.error || error.message))
+    }
+  }
+
+  const dismissSyncJob = async (jobId) => {
+    try {
+      await subtitleSyncApi.dismiss(jobId)
+      const res = await subtitleSyncApi.getForMovie(movieId)
+      setSyncJobs(res.data.jobs || [])
     } catch (error) {
       showError('Hide failed: ' + (error.response?.data?.error || error.message))
     }
@@ -480,11 +585,88 @@ function MovieFilesSection({ movieId }) {
         </div>
       )}
 
+      {/* Sync jobs */}
+      {syncJobs.filter((j) => j.status !== 'completed').length > 0 && (
+        <div className="space-y-2">
+          <h4 className="text-sm font-medium text-gray-900">Sync jobs</h4>
+          {syncJobs
+            .filter((j) => j.status !== 'completed')
+            .map((job) => {
+              const pct = Math.min(100, Math.round(Number(job.progress_percent || 0)))
+              const active = ACTIVE_STATUSES.includes(job.status)
+              const retryable = ['failed', 'cancelled'].includes(job.status)
+              const timestamp = job.finished_at || job.created_at
+              return (
+                <div key={job.id} className="border border-gray-200 rounded-md p-3">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="truncate">
+                      Sync {SYNC_KIND_LABELS[job.subtitle_kind] || job.subtitle_kind} ·{' '}
+                      <span className="font-medium">{job.status}</span>
+                      {active && job.phase && (
+                        <span className="text-gray-500"> · {SYNC_PHASE_LABELS[job.phase] || job.phase}</span>
+                      )}
+                      {timestamp && (
+                        <span className="text-gray-500">
+                          {' · '}
+                          {new Date(timestamp).toLocaleString()}
+                        </span>
+                      )}
+                    </span>
+                    <div className="space-x-3 shrink-0">
+                      {active && (
+                        <button
+                          onClick={() => cancelSyncJob(job.id)}
+                          className="text-red-600 hover:text-red-800"
+                        >
+                          Cancel
+                        </button>
+                      )}
+                      {retryable && (
+                        <button
+                          onClick={() => retrySyncJob(job.id)}
+                          className="text-blue-600 hover:text-blue-800"
+                        >
+                          Retry
+                        </button>
+                      )}
+                      {!active && (
+                        <button
+                          onClick={() => dismissSyncJob(job.id)}
+                          className="text-gray-500 hover:text-gray-700"
+                          title="Hide this job"
+                        >
+                          Hide
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {active && (
+                    <div className="mt-2">
+                      <div className="w-full bg-gray-200 rounded-full h-2">
+                        <div
+                          className="bg-blue-600 h-2 rounded-full transition-all"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                      <div className="text-xs text-gray-500 mt-1">{pct}%</div>
+                    </div>
+                  )}
+                  {job.error_message && (
+                    <div className="text-xs text-red-600 mt-1">{job.error_message}</div>
+                  )}
+                </div>
+              )
+            })}
+        </div>
+      )}
+
       {/* Asset rows */}
       <div className="divide-y divide-gray-200 border border-gray-200 rounded-md">
         {ASSET_KINDS.map((asset) => {
           const row = fileForKind(asset.key)
           const isSubtitle = asset.key !== 'movie'
+          // Synced variants are machine-generated: hide the row until one exists.
+          if (asset.synced && !row) return null
           return (
             <div key={asset.key} className="flex items-center justify-between p-3">
               <div className="flex items-center space-x-3 min-w-0">
@@ -518,23 +700,27 @@ function MovieFilesSection({ movieId }) {
                 )}
                 {isSubtitle && folder && (
                   <>
-                    <input
-                      ref={(el) => (subtitleInputs.current[asset.key] = el)}
-                      type="file"
-                      accept=".srt,.vtt"
-                      className="hidden"
-                      onChange={(e) => {
-                        uploadSubtitle(asset.key, e.target.files[0])
-                        e.target.value = ''
-                      }}
-                    />
-                    <button
-                      onClick={() => subtitleInputs.current[asset.key]?.click()}
-                      disabled={busy}
-                      className="text-sm text-blue-600 hover:text-blue-800 disabled:opacity-50"
-                    >
-                      {row ? 'Replace' : 'Upload'}
-                    </button>
+                    {!asset.synced && (
+                      <>
+                        <input
+                          ref={(el) => (subtitleInputs.current[asset.key] = el)}
+                          type="file"
+                          accept=".srt,.vtt"
+                          className="hidden"
+                          onChange={(e) => {
+                            uploadSubtitle(asset.key, e.target.files[0])
+                            e.target.value = ''
+                          }}
+                        />
+                        <button
+                          onClick={() => subtitleInputs.current[asset.key]?.click()}
+                          disabled={busy}
+                          className="text-sm text-blue-600 hover:text-blue-800 disabled:opacity-50"
+                        >
+                          {row ? 'Replace' : 'Upload'}
+                        </button>
+                      </>
+                    )}
                     {row && TRANSLATE_FROM_KIND[asset.key] && (
                       <button
                         onClick={() => startTranslation(asset.key)}
@@ -543,6 +729,20 @@ function MovieFilesSection({ movieId }) {
                         className="text-sm text-blue-600 hover:text-blue-800 disabled:opacity-50"
                       >
                         {TRANSLATE_FROM_KIND[asset.key].label}
+                      </button>
+                    )}
+                    {row && SYNCED_KIND[asset.key] && (
+                      <button
+                        onClick={() => startSync(asset.key)}
+                        disabled={busy || hasActiveSyncFor(asset.key) || !hasVideoFile}
+                        title={
+                          hasVideoFile
+                            ? 'Align subtitle timings to the movie audio (alass)'
+                            : 'Add a movie file or preview first'
+                        }
+                        className="text-sm text-blue-600 hover:text-blue-800 disabled:opacity-50"
+                      >
+                        Sync timing
                       </button>
                     )}
                     {row && (

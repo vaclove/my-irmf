@@ -1,16 +1,22 @@
 /**
- * Movie transcode worker — runs as an Azure Container Apps Job triggered by a
- * storage-queue message. One execution drains the queue: for each {job_id}
- * message it streams the master from Drive, transcodes a 720p H.264/AAC proxy
- * with ffmpeg, uploads it back to the movie's Drive folder, and records the
- * pointer row. Then it exits so the platform scales to zero.
+ * Movie worker — runs as an Azure Container Apps Job triggered by a
+ * storage-queue message. One execution drains the queue, then exits so the
+ * platform scales to zero. Two job types share the queue, discriminated by the
+ * message's `type` field (absent = transcode, for back-compat):
+ *
+ *   transcode      streams the master from Drive, transcodes a 720p H.264/AAC
+ *                  proxy with ffmpeg, uploads it back to the movie's folder
+ *   subtitle_sync  extracts mono audio from the proxy/master, re-times a
+ *                  subtitle track to it with alass, uploads the synced SRT as
+ *                  a new file next to the untouched original
  *
  * Reuses the app's Drive service and chunked-upload sink (shared server modules)
  * so naming, auth, and upload behavior stay identical to the in-app paths.
  *
  * Env: DATABASE_URL, GOOGLE_SERVICE_ACCOUNT_KEY (or _PATH), GOOGLE_SHARED_DRIVE_ID,
  *      AZURE_STORAGE_CONNECTION_STRING, TRANSCODE_QUEUE_NAME,
- *      MOVIE_TRANSCODE_HEIGHT/CRF/PRESET, FFMPEG_PATH/FFPROBE_PATH (optional).
+ *      MOVIE_TRANSCODE_HEIGHT/CRF/PRESET, FFMPEG_PATH/FFPROBE_PATH (optional),
+ *      ALASS_PATH, ALASS_NO_SPLIT, ALASS_SPLIT_PENALTY (optional).
  */
 
 const os = require('os');
@@ -25,6 +31,7 @@ const googleDrive = require('../server/services/googleDrive');
 const { proxyDriveMedia } = require('../server/services/driveMediaProxy');
 const { uploadStreamToDrive } = require('../server/services/driveChunkedUpload');
 const { conventionFileName } = require('../server/utils/movieFileNaming');
+const { decodeSubtitleBuffer, parseSubtitles, serializeSrt } = require('../server/utils/subtitles');
 
 const QUEUE_NAME = process.env.TRANSCODE_QUEUE_NAME || 'movie-transcodes';
 const VISIBILITY_TIMEOUT_S = 8 * 60 * 60; // 8h — matches the job replica timeout
@@ -33,6 +40,8 @@ const CANCEL_POLL_MS = 5000;
 
 const FFMPEG = process.env.FFMPEG_PATH || 'ffmpeg';
 const FFPROBE = process.env.FFPROBE_PATH || 'ffprobe';
+const ALASS = process.env.ALASS_PATH || 'alass';
+const MAX_SUBTITLE_BYTES = 2 * 1024 * 1024;
 const HEIGHT = parseInt(process.env.MOVIE_TRANSCODE_HEIGHT || '720', 10);
 const CRF = process.env.MOVIE_TRANSCODE_CRF || '23';
 const PRESET = process.env.MOVIE_TRANSCODE_PRESET || 'veryfast';
@@ -43,14 +52,14 @@ function log(msg, extra) {
   console.log(`[transcode-worker] ${msg}`, extra ? JSON.stringify(extra) : '');
 }
 
-/** Refresh/insert the movie_proxy pointer row from Drive metadata. */
-async function upsertProxyRow(movieId, meta) {
+/** Refresh/insert a movie_files pointer row from Drive metadata. */
+async function upsertFileKindRow(movieId, fileKind, meta, defaultMime) {
   const size = meta.size != null ? parseInt(meta.size, 10) : null;
   await pool.query(
     `INSERT INTO movie_files
        (movie_id, file_kind, drive_file_id, file_name, file_size, mime_type,
         md5_checksum, drive_modified_at, last_synced_at)
-     VALUES ($1, 'movie_proxy', $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)
      ON CONFLICT (movie_id, file_kind) DO UPDATE SET
        drive_file_id = EXCLUDED.drive_file_id,
        file_name = EXCLUDED.file_name,
@@ -61,10 +70,11 @@ async function upsertProxyRow(movieId, meta) {
        last_synced_at = CURRENT_TIMESTAMP`,
     [
       movieId,
+      fileKind,
       meta.id,
       meta.name,
       size,
-      meta.mimeType || 'video/mp4',
+      meta.mimeType || defaultMime,
       meta.md5Checksum || null,
       meta.modifiedTime || null,
     ]
@@ -109,25 +119,13 @@ function probeDuration(inputUrl) {
 }
 
 /**
- * Run ffmpeg to produce the proxy at tempPath. Reports progress via onProgress
- * (0–99). Resolves when done, rejects on nonzero exit. Exposes the child via
- * onSpawn so the caller can kill it on cancel.
+ * Spawn ffmpeg with the given args (must end with '-progress pipe:1' and the
+ * output path). Reports progress via onProgress (0–99, from out_time_us vs
+ * durationSeconds). Resolves when done, rejects on nonzero exit. Exposes the
+ * child via onSpawn so the caller can kill it on cancel.
  */
-function runFfmpeg({ inputUrl, tempPath, durationSeconds, onProgress, onSpawn }) {
+function spawnFfmpegWithProgress({ args, durationSeconds, onProgress, onSpawn }) {
   return new Promise((resolve, reject) => {
-    const args = [
-      '-hide_banner', '-nostdin', '-y', '-loglevel', 'error',
-      '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '30',
-      '-i', inputUrl,
-      '-map', '0:v:0', '-map', '0:a:0?',
-      '-vf', `scale=-2:'min(${HEIGHT},ih)'`,
-      '-c:v', 'libx264', '-preset', PRESET, '-crf', String(CRF), '-pix_fmt', 'yuv420p',
-      '-c:a', 'aac', '-b:a', '128k', '-ac', '2',
-      '-movflags', '+faststart',
-    ];
-    if (MAX_THREADS) args.push('-threads', String(MAX_THREADS));
-    args.push('-progress', 'pipe:1', tempPath);
-
     const child = spawn(FFMPEG, args);
     if (onSpawn) onSpawn(child);
 
@@ -162,6 +160,95 @@ function runFfmpeg({ inputUrl, tempPath, durationSeconds, onProgress, onSpawn })
       }
     });
   });
+}
+
+/** Run ffmpeg to produce the proxy at tempPath. */
+function runFfmpeg({ inputUrl, tempPath, durationSeconds, onProgress, onSpawn }) {
+  const args = [
+    '-hide_banner', '-nostdin', '-y', '-loglevel', 'error',
+    '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '30',
+    '-i', inputUrl,
+    '-map', '0:v:0', '-map', '0:a:0?',
+    '-vf', `scale=-2:'min(${HEIGHT},ih)'`,
+    '-c:v', 'libx264', '-preset', PRESET, '-crf', String(CRF), '-pix_fmt', 'yuv420p',
+    '-c:a', 'aac', '-b:a', '128k', '-ac', '2',
+    '-movflags', '+faststart',
+  ];
+  if (MAX_THREADS) args.push('-threads', String(MAX_THREADS));
+  args.push('-progress', 'pipe:1', tempPath);
+  return spawnFfmpegWithProgress({ args, durationSeconds, onProgress, onSpawn });
+}
+
+/** Run ffmpeg to extract mono 16 kHz PCM audio (what alass's VAD wants). */
+function extractAudio({ inputUrl, tempPath, durationSeconds, onProgress, onSpawn }) {
+  const args = [
+    '-hide_banner', '-nostdin', '-y', '-loglevel', 'error',
+    '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '30',
+    '-i', inputUrl,
+    '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le',
+    '-progress', 'pipe:1', tempPath,
+  ];
+  return spawnFfmpegWithProgress({ args, durationSeconds, onProgress, onSpawn });
+}
+
+/**
+ * Run alass to align inSrtPath against the audio at wavPath, writing
+ * outSrtPath. No parseable progress output — the phase is indeterminate.
+ */
+function runAlass({ wavPath, inSrtPath, outSrtPath, onSpawn }) {
+  return new Promise((resolve, reject) => {
+    const args = [];
+    if (process.env.ALASS_NO_SPLIT === 'true') args.push('--no-split');
+    if (process.env.ALASS_SPLIT_PENALTY) {
+      args.push('--split-penalty', String(process.env.ALASS_SPLIT_PENALTY));
+    }
+    args.push(wavPath, inSrtPath, outSrtPath);
+
+    const child = spawn(ALASS, args, {
+      env: {
+        ...process.env,
+        // alass shells out to ffmpeg for audio decoding.
+        ALASS_FFMPEG_PATH: process.env.ALASS_FFMPEG_PATH || FFMPEG,
+        ALASS_FFPROBE_PATH: process.env.ALASS_FFPROBE_PATH || FFPROBE,
+      },
+    });
+    if (onSpawn) onSpawn(child);
+
+    let outputTail = '';
+    const capture = (d) => {
+      outputTail = (outputTail + d.toString()).slice(-2000);
+    };
+    child.stdout.on('data', capture);
+    child.stderr.on('data', capture);
+    child.on('error', (err) => {
+      if (err.code === 'ENOENT') {
+        reject(new Error('alass binary not found — set ALASS_PATH or install alass-cli'));
+      } else {
+        reject(err);
+      }
+    });
+    child.on('close', (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(outputTail.trim() || `alass exited with code ${code}`));
+    });
+  });
+}
+
+/** Download a Drive subtitle file into a bounded buffer and decode it. */
+async function downloadSubtitleText(driveFileId) {
+  const stream = await googleDrive.downloadFileStream(driveFileId);
+  const chunks = [];
+  let bytes = 0;
+  for await (const chunk of stream) {
+    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    bytes += buf.length;
+    if (bytes > MAX_SUBTITLE_BYTES) {
+      if (typeof stream.destroy === 'function') stream.destroy();
+      throw new Error('Subtitles file is too large');
+    }
+    chunks.push(buf);
+  }
+  return decodeSubtitleBuffer(Buffer.concat(chunks));
 }
 
 /** Process a single job. Returns true if the message should be deleted. */
@@ -320,7 +407,7 @@ async function processJob(jobId, dequeueCount) {
     }
 
     const meta = await googleDrive.getFileMetadata(driveFileId);
-    await upsertProxyRow(job.movie_id, meta);
+    await upsertFileKindRow(job.movie_id, 'movie_proxy', meta, 'video/mp4');
 
     await pool.query(
       `UPDATE movie_transcode_jobs SET status = 'completed', phase = NULL,
@@ -354,12 +441,219 @@ async function processJob(jobId, dequeueCount) {
   }
 }
 
-/** Remove any orphaned temp proxy files from crashed prior executions. */
+/** Process a single subtitle sync job. Returns true if the message should be deleted. */
+async function processSubtitleSyncJob(jobId, dequeueCount) {
+  if (dequeueCount > MAX_DEQUEUE) {
+    await pool.query(
+      `UPDATE subtitle_sync_jobs SET status = 'failed',
+         error_message = 'Subtitle sync crashed repeatedly and was abandoned',
+         finished_at = CURRENT_TIMESTAMP WHERE id = $1 AND status <> 'completed'`,
+      [jobId]
+    );
+    log('poison sync message abandoned', { jobId, dequeueCount });
+    return true;
+  }
+
+  const jobRes = await pool.query('SELECT * FROM subtitle_sync_jobs WHERE id = $1', [jobId]);
+  if (jobRes.rows.length === 0) return true; // row gone (movie deleted) — drop message
+  const job = jobRes.rows[0];
+  if (!['pending', 'running'].includes(job.status)) {
+    log('sync job not runnable, skipping', { jobId, status: job.status });
+    return true;
+  }
+  if (!googleDrive.isConfigured()) {
+    log('Drive not configured; leaving sync message for redelivery', { jobId });
+    return false;
+  }
+
+  // Restart from scratch on redelivery; keep cancel_requested (see processJob).
+  await pool.query(
+    `UPDATE subtitle_sync_jobs SET status = 'running', phase = 'probing',
+       attempt_count = attempt_count + 1, started_at = COALESCE(started_at, CURRENT_TIMESTAMP),
+       error_message = NULL, progress_percent = 0
+     WHERE id = $1`,
+    [jobId]
+  );
+  const preCancel = await pool.query(
+    'SELECT cancel_requested FROM subtitle_sync_jobs WHERE id = $1',
+    [jobId]
+  );
+  if (preCancel.rows[0]?.cancel_requested) {
+    await pool.query(
+      `UPDATE subtitle_sync_jobs SET status = 'cancelled', phase = NULL,
+         finished_at = CURRENT_TIMESTAMP WHERE id = $1`,
+      [jobId]
+    );
+    log('sync job cancelled before start', { jobId });
+    return true;
+  }
+
+  const tmpDir = process.env.MOVIE_TRANSCODE_TMPDIR || os.tmpdir();
+  const wavPath = path.join(tmpDir, `irmf-sync-${jobId}.wav`);
+  const inSrtPath = path.join(tmpDir, `irmf-sync-${jobId}.in.srt`);
+  const outSrtPath = path.join(tmpDir, `irmf-sync-${jobId}.out.srt`);
+  let proxyServer = null;
+  let activeChild = null;
+  let cancelled = false;
+
+  const cancelTimer = setInterval(async () => {
+    try {
+      const r = await pool.query(
+        'SELECT cancel_requested FROM subtitle_sync_jobs WHERE id = $1',
+        [jobId]
+      );
+      if (r.rows[0]?.cancel_requested) {
+        cancelled = true;
+        if (activeChild) activeChild.kill('SIGKILL');
+      }
+    } catch {
+      // transient; try again next tick
+    }
+  }, CANCEL_POLL_MS);
+
+  try {
+    const movieRes = await pool.query(
+      `SELECT m.id, m.name_cs, m.name_en, m.drive_folder_id, e.year AS edition_year
+       FROM movies m JOIN editions e ON m.edition_id = e.id WHERE m.id = $1`,
+      [job.movie_id]
+    );
+    if (movieRes.rows.length === 0) throw new Error('Movie not found');
+    const movie = movieRes.rows[0];
+
+    const { server, port } = await startInputProxy();
+    proxyServer = server;
+    const inputUrl = `http://127.0.0.1:${port}/${encodeURIComponent(job.reference_drive_file_id)}`;
+
+    // Probe the reference video.
+    const durationSeconds = await probeDuration(inputUrl);
+    if (durationSeconds != null) {
+      await pool.query('UPDATE subtitle_sync_jobs SET duration_seconds = $2 WHERE id = $1', [
+        jobId,
+        durationSeconds,
+      ]);
+    }
+
+    // Extract mono audio (the bulk of the wall time — streams the whole video).
+    await pool.query(
+      "UPDATE subtitle_sync_jobs SET phase = 'extracting_audio' WHERE id = $1",
+      [jobId]
+    );
+    let lastPctWrite = 0;
+    await extractAudio({
+      inputUrl,
+      tempPath: wavPath,
+      durationSeconds,
+      onSpawn: (c) => (activeChild = c),
+      onProgress: (pct) => {
+        const now = Date.now();
+        if (now - lastPctWrite > 2000) {
+          lastPctWrite = now;
+          pool
+            .query('UPDATE subtitle_sync_jobs SET progress_percent = $2 WHERE id = $1', [
+              jobId,
+              Math.round(pct * 0.7), // extraction owns 0–70 of the bar
+            ])
+            .catch(() => {});
+        }
+      },
+    });
+    activeChild = null;
+    if (cancelled) throw Object.assign(new Error('cancelled'), { cancelled: true });
+
+    // Fetch + normalize the subtitle to SRT (parseSubtitles converts VTT
+    // timings to SRT form; serializeSrt renumbers and enforces LF endings).
+    const sourceText = await downloadSubtitleText(job.source_drive_file_id);
+    const sourceCues = parseSubtitles(sourceText);
+    fs.writeFileSync(inSrtPath, serializeSrt(sourceCues), 'utf8');
+    if (cancelled) throw Object.assign(new Error('cancelled'), { cancelled: true });
+
+    // Align.
+    await pool.query(
+      "UPDATE subtitle_sync_jobs SET phase = 'aligning', progress_percent = 75 WHERE id = $1",
+      [jobId]
+    );
+    await runAlass({
+      wavPath,
+      inSrtPath,
+      outSrtPath,
+      onSpawn: (c) => (activeChild = c),
+    });
+    activeChild = null;
+    if (cancelled) throw Object.assign(new Error('cancelled'), { cancelled: true });
+
+    // Sanity-check the output before uploading.
+    const syncedText = fs.readFileSync(outSrtPath, 'utf8');
+    const syncedCues = parseSubtitles(syncedText, 'srt'); // throws when no cues
+    const body = Buffer.from(serializeSrt(syncedCues), 'utf8');
+
+    // Upload the synced SRT as a new file next to the original.
+    const syncedKind = `${job.subtitle_kind}_synced`;
+    const targetName = conventionFileName(movie, syncedKind, 'srt');
+    await pool.query(
+      `UPDATE subtitle_sync_jobs SET phase = 'uploading', progress_percent = 99,
+         target_file_name = $2 WHERE id = $1`,
+      [jobId, targetName]
+    );
+    const folderId = await googleDrive.ensureMovieFolder(movie);
+    const created = await googleDrive.uploadSmallFile({
+      folderId,
+      name: targetName,
+      mimeType: 'application/x-subrip',
+      body,
+    });
+
+    // Dedup: trash any prior synced file pointing at a different Drive file.
+    const prior = await pool.query(
+      'SELECT drive_file_id FROM movie_files WHERE movie_id = $1 AND file_kind = $2',
+      [job.movie_id, syncedKind]
+    );
+    if (prior.rows[0] && prior.rows[0].drive_file_id !== created.id) {
+      await googleDrive.trashFile(prior.rows[0].drive_file_id).catch(() => {});
+    }
+
+    // uploadSmallFile already returns full metadata (id, name, size, md5, mtime).
+    await upsertFileKindRow(job.movie_id, syncedKind, created, 'application/x-subrip');
+
+    await pool.query(
+      `UPDATE subtitle_sync_jobs SET status = 'completed', phase = NULL,
+         progress_percent = 100, drive_file_id = $2, finished_at = CURRENT_TIMESTAMP
+       WHERE id = $1`,
+      [jobId, created.id]
+    );
+    log('sync job completed', { jobId, driveFileId: created.id });
+    return true;
+  } catch (error) {
+    if (cancelled || error.cancelled) {
+      await pool.query(
+        `UPDATE subtitle_sync_jobs SET status = 'cancelled', phase = NULL,
+           finished_at = CURRENT_TIMESTAMP WHERE id = $1`,
+        [jobId]
+      );
+      log('sync job cancelled', { jobId });
+    } else {
+      await pool.query(
+        `UPDATE subtitle_sync_jobs SET status = 'failed', phase = NULL,
+           error_message = $2, finished_at = CURRENT_TIMESTAMP WHERE id = $1`,
+        [jobId, (error.message || 'Unknown error').slice(0, 1000)]
+      );
+      log('sync job failed', { jobId, error: error.message });
+    }
+    return true; // terminal — drop the message (retry is user-driven)
+  } finally {
+    clearInterval(cancelTimer);
+    if (proxyServer) proxyServer.close();
+    for (const p of [wavPath, inSrtPath, outSrtPath]) {
+      fs.promises.unlink(p).catch(() => {});
+    }
+  }
+}
+
+/** Remove any orphaned temp files from crashed prior executions. */
 function sweepTempFiles() {
   const dir = process.env.MOVIE_TRANSCODE_TMPDIR || os.tmpdir();
   try {
     for (const name of fs.readdirSync(dir)) {
-      if (/^irmf-proxy-.*\.mp4$/.test(name)) {
+      if (/^irmf-proxy-.*\.mp4$/.test(name) || /^irmf-sync-.*\.(wav|srt)$/.test(name)) {
         fs.promises.unlink(path.join(dir, name)).catch(() => {});
       }
     }
@@ -392,9 +686,12 @@ async function main() {
     }
 
     let jobId = null;
+    let jobType = 'transcode';
     try {
       const decoded = Buffer.from(msg.messageText, 'base64').toString('utf8');
-      jobId = JSON.parse(decoded).job_id;
+      const parsed = JSON.parse(decoded);
+      jobId = parsed.job_id;
+      jobType = parsed.type || 'transcode'; // absent type = transcode (back-compat)
     } catch (e) {
       log('undecodable message dropped', { error: e.message });
       await queue.deleteMessage(msg.messageId, msg.popReceipt);
@@ -403,7 +700,10 @@ async function main() {
 
     let deleteMessage = true;
     try {
-      deleteMessage = await processJob(jobId, msg.dequeueCount);
+      deleteMessage =
+        jobType === 'subtitle_sync'
+          ? await processSubtitleSyncJob(jobId, msg.dequeueCount)
+          : await processJob(jobId, msg.dequeueCount);
     } catch (e) {
       // Unexpected crash: leave the message so it redelivers (dequeueCount rises).
       log('unexpected job error; leaving message', { jobId, error: e.message });

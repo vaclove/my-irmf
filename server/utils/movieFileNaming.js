@@ -8,13 +8,21 @@
  *   movie proxy:  {slug}.proxy.mp4      web-playable rendition (transcoded)
  *   CZ subtitles: {slug}.cs.{srt|vtt}
  *   EN subtitles: {slug}.en.{srt|vtt}
+ *   synced subs:  {slug}.cs.synced.srt / {slug}.en.synced.srt (alass re-timed)
  *   folder name:  sanitized raw name_cs
  */
 
 const VIDEO_EXTENSIONS = ['mp4', 'mkv', 'mov', 'avi', 'm4v', 'ts'];
 const SUBTITLE_EXTENSIONS = ['srt', 'vtt'];
 
-const FILE_KINDS = ['movie', 'movie_proxy', 'subtitles_cs', 'subtitles_en'];
+const FILE_KINDS = [
+  'movie',
+  'movie_proxy',
+  'subtitles_cs',
+  'subtitles_en',
+  'subtitles_cs_synced',
+  'subtitles_en_synced',
+];
 
 /**
  * Slugify a movie name for use in file names:
@@ -68,6 +76,10 @@ function conventionFileName(movie, fileKind, ext) {
       return `${slug}.cs.${cleanExt}`;
     case 'subtitles_en':
       return `${slug}.en.${cleanExt}`;
+    case 'subtitles_cs_synced':
+      return `${slug}.cs.synced.srt`; // always srt; ext arg ignored
+    case 'subtitles_en_synced':
+      return `${slug}.en.synced.srt`;
     default:
       throw new Error(`Unknown file kind: ${fileKind}`);
   }
@@ -107,6 +119,9 @@ function classifyByName(fileName, mimeType, opts = {}) {
   if (isProxyFile(name)) return 'movie_proxy';
 
   if (SUBTITLE_EXTENSIONS.includes(ext)) {
+    // Synced variants first: '.cs.synced.srt' must not fall through unclassified.
+    if (/\.cs\.synced\.(srt|vtt)$/.test(name)) return 'subtitles_cs_synced';
+    if (/\.en\.synced\.(srt|vtt)$/.test(name)) return 'subtitles_en_synced';
     if (/\.cs\.(srt|vtt)$/.test(name)) return 'subtitles_cs';
     if (/\.en\.(srt|vtt)$/.test(name)) return 'subtitles_en';
     return null; // subtitle file without a language marker -> unclassified

@@ -30,13 +30,20 @@ function SubtitleEditor() {
   const [hasProxy, setHasProxy] = useState(false)
   const [loading, setLoading] = useState(true)
   const [tracks, setTracks] = useState({ en: emptyTrack, cs: emptyTrack })
+  // Per-language subtitle variant: the original upload or the alass-synced copy.
+  const [variants, setVariants] = useState({ en: 'original', cs: 'original' })
+  const [syncedAvailable, setSyncedAvailable] = useState({ en: false, cs: false })
   const [currentTimeMs, setCurrentTimeMs] = useState(0)
   const videoRef = useRef(null)
+  const variantsRef = useRef(variants)
+  variantsRef.current = variants
 
-  const loadTrack = useCallback(async (lang) => {
+  const loadTrack = useCallback(async (lang, variantArg) => {
+    const variant = variantArg || variantsRef.current[lang]
+    const langKey = variant === 'synced' ? `${lang}_synced` : lang
     setTracks((t) => ({ ...t, [lang]: { ...emptyTrack } }))
     try {
-      const res = await movieFileApi.getSubtitleCues(id, lang)
+      const res = await movieFileApi.getSubtitleCues(id, langKey)
       const { file, cues } = res.data
       setTracks((t) => ({
         ...t,
@@ -63,7 +70,12 @@ function SubtitleEditor() {
           movieFileApi.getFiles(id).catch(() => null),
         ])
         setMovie(movieRes.data)
-        setHasProxy(!!(filesRes?.data?.files || []).find((f) => f.file_kind === 'movie_proxy'))
+        const files = filesRes?.data?.files || []
+        setHasProxy(!!files.find((f) => f.file_kind === 'movie_proxy'))
+        setSyncedAvailable({
+          en: !!files.find((f) => f.file_kind === 'subtitles_en_synced'),
+          cs: !!files.find((f) => f.file_kind === 'subtitles_cs_synced'),
+        })
       } catch (error) {
         showError('Failed to load movie: ' + (error.response?.data?.error || error.message))
       } finally {
@@ -104,12 +116,25 @@ function SubtitleEditor() {
     return () => window.removeEventListener('beforeunload', handler)
   }, [anyDirty])
 
+  const switchVariant = (lang, variant) => {
+    if (variants[lang] === variant) return
+    if (
+      isDirty(tracks[lang]) &&
+      !window.confirm('You have unsaved edits in this track. Discard them and switch?')
+    ) {
+      return
+    }
+    setVariants((v) => ({ ...v, [lang]: variant }))
+    loadTrack(lang, variant)
+  }
+
   const save = async (lang) => {
     const tr = tracks[lang]
     if (tr.status !== 'ready' || tr.saving) return
+    const langKey = variants[lang] === 'synced' ? `${lang}_synced` : lang
     setTracks((t) => ({ ...t, [lang]: { ...t[lang], saving: true } }))
     try {
-      const res = await movieFileApi.saveSubtitleCues(id, lang, {
+      const res = await movieFileApi.saveSubtitleCues(id, langKey, {
         cues: tr.cues.map(({ timing, text }) => ({ timing, text: text.trim() })),
         base_md5: tr.baseMd5,
       })
@@ -225,18 +250,39 @@ function SubtitleEditor() {
         <div className="flex-1" />
         {LANGS.map((lang) => {
           const tr = tracks[lang]
-          if (tr.status !== 'ready') return null
           const dirty = lang === 'en' ? dirtyEn : dirtyCs
+          if (tr.status !== 'ready' && !syncedAvailable[lang]) return null
           return (
-            <button
-              key={lang}
-              onClick={() => save(lang)}
-              disabled={!dirty || tr.saving}
-              className="bg-blue-600 text-white px-3 py-1.5 rounded-md text-sm hover:bg-blue-700 disabled:opacity-50"
-            >
-              {tr.saving ? 'Saving…' : `Save ${LANG_LABELS[lang]}`}
-              {dirty && !tr.saving && ' *'}
-            </button>
+            <div key={lang} className="flex items-center gap-1.5">
+              {syncedAvailable[lang] && (
+                <div className="flex rounded-md border border-gray-300 overflow-hidden text-xs">
+                  {['original', 'synced'].map((variant) => (
+                    <button
+                      key={variant}
+                      onClick={() => switchVariant(lang, variant)}
+                      title={`Edit the ${variant} ${LANG_LABELS[lang]} subtitles`}
+                      className={`px-2 py-1 ${
+                        variants[lang] === variant
+                          ? 'bg-gray-700 text-white'
+                          : 'bg-white text-gray-600 hover:bg-gray-50'
+                      }`}
+                    >
+                      {variant}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {tr.status === 'ready' && (
+                <button
+                  onClick={() => save(lang)}
+                  disabled={!dirty || tr.saving}
+                  className="bg-blue-600 text-white px-3 py-1.5 rounded-md text-sm hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {tr.saving ? 'Saving…' : `Save ${LANG_LABELS[lang]}`}
+                  {dirty && !tr.saving && ' *'}
+                </button>
+              )}
+            </div>
           )
         })}
       </div>
