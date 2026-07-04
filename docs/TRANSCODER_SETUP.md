@@ -15,6 +15,21 @@ App Service ──insert row──> PostgreSQL <──progress── ACA Job (wo
    └─enqueue {job_id}──> Storage Queue ──KEDA──> spawn ffmpeg, upload proxy → Drive
 ```
 
+The same worker and queue also handle **subtitle sync jobs** (message
+`{job_id, type: 'subtitle_sync'}`): the worker extracts mono audio from the
+proxy (or master), re-times a subtitle track to it with
+[alass](https://github.com/kaegi/alass), and uploads the synced SRT as a new
+`{slug}.{lang}.synced.srt` file next to the untouched original. No extra Azure
+resources are needed — the image bundles the alass binary, and messages without
+a `type` field remain transcodes.
+
+For **local development** of subtitle sync, install alass (`cargo install
+alass-cli` on macOS — there is no prebuilt mac binary) or point `ALASS_PATH` at
+a binary; a missing binary fails the job with a clear error message. Optional
+worker knobs: `ALASS_NO_SPLIT=true` disables alass's cut detection,
+`ALASS_SPLIT_PENALTY` tunes it, and `SUBTITLE_SYNC_ENABLED=false` disables
+enqueueing app-side.
+
 ## Prerequisites
 
 - Google Drive service account already set up (see `GOOGLE_DRIVE_SETUP.md`).

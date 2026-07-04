@@ -3,10 +3,17 @@
 #   docker build -f worker/Dockerfile -t irmf-transcode-worker .
 FROM node:20-slim
 
-# ffmpeg + ffprobe for transcoding.
+# ffmpeg + ffprobe for transcoding and audio extraction.
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ffmpeg ca-certificates \
   && rm -rf /var/lib/apt/lists/*
+
+# alass for subtitle timing alignment (static linux binary, pinned release).
+ADD https://github.com/kaegi/alass/releases/download/v2.0.0/alass-linux64 /usr/local/bin/alass
+RUN chmod 0755 /usr/local/bin/alass
+# alass shells out to ffmpeg/ffprobe for audio decoding.
+ENV ALASS_FFMPEG_PATH=/usr/bin/ffmpeg \
+    ALASS_FFPROBE_PATH=/usr/bin/ffprobe
 
 WORKDIR /app
 
@@ -23,6 +30,7 @@ COPY server/services/googleDrive.js ./server/services/googleDrive.js
 COPY server/services/driveMediaProxy.js ./server/services/driveMediaProxy.js
 COPY server/services/driveChunkedUpload.js ./server/services/driveChunkedUpload.js
 COPY server/utils/movieFileNaming.js ./server/utils/movieFileNaming.js
+COPY server/utils/subtitles.js ./server/utils/subtitles.js
 
 # Worker code.
 COPY worker/index.js ./worker/index.js

@@ -17,6 +17,7 @@ on:
       - 'server/services/driveMediaProxy.js'
       - 'server/services/driveChunkedUpload.js'
       - 'server/utils/movieFileNaming.js'
+      - 'server/utils/subtitles.js'
       - 'server/models/database.js'
       - '.github/workflows/transcoder.yml'
   workflow_dispatch:
