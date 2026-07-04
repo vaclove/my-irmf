@@ -141,7 +141,7 @@ function SubtitleEditor() {
 
   const goBack = () => {
     if (anyDirty && !window.confirm('You have unsaved subtitle changes. Leave anyway?')) return
-    navigate(`/movies/${id}`)
+    navigate(`/movies/${id}?tab=preview`)
   }
 
   const en = tracks.en.status === 'ready' ? tracks.en : null
@@ -253,7 +253,7 @@ function SubtitleEditor() {
         <div className="flex-1 flex items-center justify-center">
           <div className="rounded-md border border-gray-200 p-6 text-sm text-gray-500 text-center">
             This movie has no subtitles yet. Upload or translate them on the{' '}
-            <Link to={`/movies/${id}`} className="text-blue-600 hover:text-blue-800">movie page</Link>.
+            <Link to={`/movies/${id}?tab=files`} className="text-blue-600 hover:text-blue-800">movie page</Link>.
           </div>
         </div>
       ) : (
