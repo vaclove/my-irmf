@@ -12,9 +12,10 @@ export default defineConfig({
   },
   server: {
     host: '0.0.0.0',
-    // Allow the dev port and API proxy target to be overridden via env
-    // (e.g. Conductor parallel workspaces); defaults preserve local behavior.
-    port: Number(process.env.CLIENT_PORT) || 5173,
+    // Fixed dev port: always 5173, never fall back to 5174+. If 5173 is taken,
+    // Vite errors out instead of silently picking another port.
+    port: 5173,
+    strictPort: true,
     proxy: {
       '/api': {
         target: process.env.SERVER_URL || 'http://localhost:3001',

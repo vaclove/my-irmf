@@ -1,53 +1,61 @@
 "$schema" = "https://conductor.build/schemas/settings.repo.schema.json"
 
-# Copy the gitignored .env (OAuth, Mailgun, session secret) into every
-# workspace. DATABASE_URL, PORT, CLIENT_URL and the Vite dev port/proxy are
-# overridden per-workspace in the scripts below so workspaces don't collide.
+# Copy the gitignored .env (OAuth, Mailgun, session secret, DB URL) into every
+# workspace. Fixed, non-dynamic local stack:
+#   - Vite FE always on 5173, Express BE always on 3001 (matching the client's
+#     hardcoded dev API base and the server CORS allow-list).
+#   - ONE shared Postgres container `irmf-pg-shared` (named volume
+#     `irmf-pg-data`, port 5432) used by every workspace and persisted across
+#     restarts/archival — no throwaway per-workspace database.
+# Trade-off: only one workspace's dev stack runs at a time (shared FE/BE ports);
+# the shared DB means all workspaces see the same data.
 file_include_globs = ".env\n"
 
 [scripts]
-# On workspace creation: install BE + FE deps, then start a dedicated Postgres
-# container on CONDUCTOR_PORT+2 and apply migrations to a fresh, isolated DB.
-# The container is named by port so it's unique per workspace.
+# On workspace creation: install BE + FE deps, ensure the single shared Postgres
+# container is up (create with a named volume the first time, otherwise start),
+# then apply migrations. The shared DB is never torn down here.
 setup = """
 npm install
 (cd client && npm install)
 
-PGPORT=$((CONDUCTOR_PORT + 2))
-CONTAINER="irmf-pg-$PGPORT"
-docker run -d --name "$CONTAINER" \
-  -e POSTGRES_DB=festival_db \
-  -e POSTGRES_USER=festival_user \
-  -e POSTGRES_PASSWORD=festival_pass \
-  -p "$PGPORT:5432" postgres:15 2>/dev/null || docker start "$CONTAINER" || true
+export DATABASE_URL="postgresql://festival_user:festival_pass@localhost:5432/festival_db"
+if docker ps -a --format '{{.Names}}' | grep -qx irmf-pg-shared; then
+  docker start irmf-pg-shared >/dev/null 2>&1 || true
+else
+  docker run -d --name irmf-pg-shared \
+    -e POSTGRES_DB=festival_db \
+    -e POSTGRES_USER=festival_user \
+    -e POSTGRES_PASSWORD=festival_pass \
+    -v irmf-pg-data:/var/lib/postgresql/data \
+    -p 5432:5432 postgres:15 >/dev/null 2>&1 || true
+fi
 
 for i in $(seq 1 30); do
-  docker exec "$CONTAINER" pg_isready -U festival_user -d festival_db >/dev/null 2>&1 && break
+  docker exec irmf-pg-shared pg_isready -U festival_user -d festival_db >/dev/null 2>&1 && break
   sleep 1
 done
 
-export DATABASE_URL="postgresql://festival_user:festival_pass@localhost:$PGPORT/festival_db"
 npm run db:migrate || true
 """
 
-# Tear down this workspace's Postgres container when the workspace is archived.
-archive = 'docker rm -f "irmf-pg-$((CONDUCTOR_PORT + 2))" 2>/dev/null || true'
+# The shared DB is intentionally left running when a workspace is archived —
+# other workspaces (and its named volume) depend on it. Nothing to tear down.
+archive = "true"
 
-# Each workspace gets a distinct 10-port range, so the stack can run in parallel.
+# Each run script is its own process group.
 run_mode = "concurrent"
 
 [scripts.run.dev]
-# CLIENT_PORT -> Vite, PORT -> Express, SERVER_URL -> Vite's API proxy target,
-# CLIENT_URL -> server CORS allow-list, DATABASE_URL -> this workspace's DB.
-# dotenv does not override vars already set in the environment, so these win
-# over the copied .env.
+# Fixed ports (FE 5173, BE 3001) and the shared DB on 5432. dotenv does not
+# override vars already set in the environment, so these win over the .env copy.
 command = """
-export CLIENT_PORT=$CONDUCTOR_PORT
-export PORT=$((CONDUCTOR_PORT + 1))
-export SERVER_URL="http://localhost:$PORT"
-export CLIENT_URL="http://localhost:$CLIENT_PORT"
-export DATABASE_URL="postgresql://festival_user:festival_pass@localhost:$((CONDUCTOR_PORT + 2))/festival_db"
-docker start "irmf-pg-$((CONDUCTOR_PORT + 2))" >/dev/null 2>&1 || true
+export CLIENT_PORT=5173
+export PORT=3001
+export SERVER_URL="http://localhost:3001"
+export CLIENT_URL="http://localhost:5173"
+export DATABASE_URL="postgresql://festival_user:festival_pass@localhost:5432/festival_db"
+docker start irmf-pg-shared >/dev/null 2>&1 || true
 npm run dev
 """
 default = true
@@ -55,8 +63,8 @@ icon = "play"
 
 [scripts.run.migrate]
 command = """
-export DATABASE_URL="postgresql://festival_user:festival_pass@localhost:$((CONDUCTOR_PORT + 2))/festival_db"
-docker start "irmf-pg-$((CONDUCTOR_PORT + 2))" >/dev/null 2>&1 || true
+export DATABASE_URL="postgresql://festival_user:festival_pass@localhost:5432/festival_db"
+docker start irmf-pg-shared >/dev/null 2>&1 || true
 npm run db:migrate
 """
 icon = "database"
