@@ -1,4 +1,30 @@
 /**
+ * Decode a subtitle file buffer to a string, tolerating legacy encodings.
+ *
+ * Order of preference:
+ *   1. UTF-16 LE/BE when a BOM says so
+ *   2. strict UTF-8 (the common case — passes through unchanged)
+ *   3. Windows-1250, the de-facto legacy encoding for Czech .srt files
+ *
+ * Without the fallback, CP1250 bytes like 0xED (í) / 0x9E (ž) are invalid
+ * UTF-8 and every diacritic renders as the U+FFFD � replacement character.
+ */
+function decodeSubtitleBuffer(buffer) {
+  const buf = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer || '');
+  if (buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xfe) {
+    return buf.toString('utf16le').replace(/^\uFEFF/, '');
+  }
+  if (buf.length >= 2 && buf[0] === 0xfe && buf[1] === 0xff) {
+    return new TextDecoder('utf-16be').decode(buf);
+  }
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(buf);
+  } catch {
+    return new TextDecoder('windows-1250').decode(buf);
+  }
+}
+
+/**
  * Convert SubRip (.srt) subtitle text to WebVTT (.vtt), which is what the
  * HTML5 <track> element requires. Pure, no I/O.
  *
@@ -39,4 +65,4 @@ function convertSrtToVtt(srtText) {
   return 'WEBVTT\n\n' + text.replace(/^\n+/, '');
 }
 
-module.exports = { convertSrtToVtt };
+module.exports = { convertSrtToVtt, decodeSubtitleBuffer };
