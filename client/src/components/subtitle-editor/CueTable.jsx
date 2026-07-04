@@ -1,5 +1,10 @@
-import { memo, useEffect, useRef } from 'react'
+import { memo, useCallback, useEffect, useRef } from 'react'
 import { formatCueTime } from '../../utils/cueAlignment'
+
+// After a keystroke, hold auto-scroll for this long so the line being typed
+// isn't yanked out from under the cursor. Focus alone no longer pauses it, so
+// clicking a cue to seek still lets the list follow playback.
+const TYPING_PAUSE_MS = 2500
 
 /**
  * Side-by-side editable cue list: timecode | EN | CS. Rows come from
@@ -7,12 +12,13 @@ import { formatCueTime } from '../../utils/cueAlignment'
  * be missing one side. Rows are memoized — during playback only the rows whose
  * `active` flag flips re-render.
  */
-function CueCell({ lang, index, text, dirty, onEdit }) {
+function CueCell({ lang, index, text, dirty, onEdit, onFocusSeek }) {
   return (
     <textarea
       value={text}
       onChange={(e) => onEdit(lang, index, e.target.value)}
       onClick={(e) => e.stopPropagation()}
+      onFocus={onFocusSeek}
       rows={Math.max(1, text.split('\n').length)}
       spellCheck={false}
       className={`w-full resize-none rounded border px-2 py-1 text-sm leading-snug focus:outline-none focus:ring-1 focus:ring-blue-400 ${
@@ -48,6 +54,8 @@ const CueRow = memo(function CueRow({
     : gapBelow
     ? 'shadow-[inset_0_-2px_0_0_#3b82f6]'
     : ''
+  // Focusing a cue's textarea jumps the movie to that cue's start time.
+  const seekToCue = () => canSeek && onSeek(startMs)
   return (
     <div
       data-row-index={index}
@@ -68,7 +76,7 @@ const CueRow = memo(function CueRow({
       {showEn && (
         <div className="flex-1 min-w-0">
           {enIndex != null ? (
-            <CueCell lang="en" index={enIndex} text={enText} dirty={enDirty} onEdit={onEdit} />
+            <CueCell lang="en" index={enIndex} text={enText} dirty={enDirty} onEdit={onEdit} onFocusSeek={seekToCue} />
           ) : (
             <div className="text-xs text-gray-300 italic pt-1.5">—</div>
           )}
@@ -77,7 +85,7 @@ const CueRow = memo(function CueRow({
       {showCs && (
         <div className="flex-1 min-w-0">
           {csIndex != null ? (
-            <CueCell lang="cs" index={csIndex} text={csText} dirty={csDirty} onEdit={onEdit} />
+            <CueCell lang="cs" index={csIndex} text={csText} dirty={csDirty} onEdit={onEdit} onFocusSeek={seekToCue} />
           ) : (
             <div className="text-xs text-gray-300 italic pt-1.5">—</div>
           )}
@@ -89,14 +97,24 @@ const CueRow = memo(function CueRow({
 
 function CueTable({ rows, en, cs, activeRowIndex, gapIndex, canSeek, onSeek, onEdit }) {
   const containerRef = useRef(null)
-  const editingRef = useRef(false)
+  const lastTypedRef = useRef(0)
 
-  // Follow playback, but never yank the view while the user is typing. Center
-  // the active row — or, when the playhead sits in a gap, the row on the near
-  // side of the boundary marker — so at least one row above and below stays
-  // visible.
+  // Stamp the last keystroke so the effect below can hold off briefly.
+  const handleEdit = useCallback(
+    (lang, index, text) => {
+      lastTypedRef.current = Date.now()
+      onEdit(lang, index, text)
+    },
+    [onEdit]
+  )
+
+  // Follow playback, centering the active row — or, when the playhead sits in a
+  // gap, the row on the near side of the boundary marker — so at least one row
+  // above and below stays visible. Paused only right after a keystroke; because
+  // playback fires this effect a few times a second, it resumes on its own once
+  // typing stops.
   useEffect(() => {
-    if (editingRef.current) return
+    if (Date.now() - lastTypedRef.current < TYPING_PAUSE_MS) return
     let idx = activeRowIndex
     if (idx < 0 && gapIndex >= 0) idx = Math.min(gapIndex, rows.length - 1)
     if (idx < 0) return
@@ -109,16 +127,7 @@ function CueTable({ rows, en, cs, activeRowIndex, gapIndex, canSeek, onSeek, onE
   const lastIndex = rows.length - 1
 
   return (
-    <div
-      ref={containerRef}
-      onFocusCapture={(e) => {
-        if (e.target.tagName === 'TEXTAREA') editingRef.current = true
-      }}
-      onBlurCapture={(e) => {
-        if (e.target.tagName === 'TEXTAREA') editingRef.current = false
-      }}
-      className="space-y-0.5"
-    >
+    <div ref={containerRef} className="space-y-0.5">
       {/* Sticks to the top of the cue list's own scroll container. */}
       <div className="flex items-center gap-2 px-2 py-1 text-xs font-medium text-gray-500 uppercase sticky top-0 bg-white border-b border-gray-200 z-10">
         <div className="w-14 shrink-0">Time</div>
@@ -146,7 +155,7 @@ function CueTable({ rows, en, cs, activeRowIndex, gapIndex, canSeek, onSeek, onE
             csText={csCue ? csCue.text : ''}
             csDirty={!!csCue && csCue.text !== cs.origCues[row.cs].text}
             onSeek={onSeek}
-            onEdit={onEdit}
+            onEdit={handleEdit}
           />
         )
       })}
