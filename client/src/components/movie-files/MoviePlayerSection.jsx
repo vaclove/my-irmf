@@ -183,6 +183,7 @@ function MoviePlayerSection({ movieId }) {
             {(hasCs || hasEn) && (
               <Link
                 to={`/movies/${movieId}/subtitles`}
+                state={{ from: 'preview' }}
                 className="text-blue-600 hover:text-blue-800"
               >
                 Edit subtitles
@@ -222,6 +223,7 @@ function MoviePlayerSection({ movieId }) {
               {(hasCs || hasEn) && (
                 <Link
                   to={`/movies/${movieId}/subtitles`}
+                  state={{ from: 'preview' }}
                   className="text-blue-600 hover:text-blue-800"
                 >
                   Edit subtitles
@@ -231,11 +233,12 @@ function MoviePlayerSection({ movieId }) {
           </div>
         ) : (
           <div className="rounded-md border border-gray-200 p-4 text-sm text-gray-500">
-            Add a movie file in the Files section below to enable the preview.
+            Add a movie file in the Files &amp; Subtitles tab to enable the preview.
             {(hasCs || hasEn) && (
               <div className="mt-2">
                 <Link
                   to={`/movies/${movieId}/subtitles`}
+                  state={{ from: 'preview' }}
                   className="text-blue-600 hover:text-blue-800"
                 >
                   Edit subtitles

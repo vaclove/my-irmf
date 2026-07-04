@@ -15,7 +15,6 @@ function Movies() {
   const [editions, setEditions] = useState([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
-  const [editingMovie, setEditingMovie] = useState(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [condensedView, setCondensedView] = useState(() => {
     return localStorage.getItem('moviesCondensedView') === 'true'
@@ -114,11 +113,6 @@ function Movies() {
     }
   }
 
-  const handleEdit = (movie) => {
-    setEditingMovie(movie)
-    setShowForm(true)
-  }
-
   const toggleColumnVisibility = (column) => {
     setVisibleColumns(prev => ({
       ...prev,
@@ -166,7 +160,6 @@ function Movies() {
   }
 
   const closeForm = () => {
-    setEditingMovie(null)
     setShowForm(false)
   }
 
@@ -236,10 +229,7 @@ function Movies() {
             )}
           </div>
           <button
-            onClick={() => {
-              setEditingMovie(null)
-              setShowForm(true)
-            }}
+            onClick={() => setShowForm(true)}
             className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700"
           >
             Add Movie
@@ -310,12 +300,11 @@ function Movies() {
       <MovieFormModal
         isOpen={showForm}
         onClose={closeForm}
-        movie={editingMovie}
+        movie={null}
         editions={editions}
         sections={sections}
         defaultEditionId={selectedEdition?.id}
-        onSaved={fetchMovies}
-        onDeleted={fetchMovies}
+        onSaved={(saved) => (saved?.id ? navigate(`/movies/${saved.id}`) : fetchMovies())}
       />
 
       <div className="bg-white shadow rounded-lg">
@@ -383,45 +372,41 @@ function Movies() {
                     Edition
                   </th>
                 )}
-                <th className={`${condensedView ? 'px-3 py-2' : 'px-6 py-3'} text-right text-xs font-medium text-gray-500 uppercase ${condensedView ? '' : 'tracking-wider'}`}>
-                  Actions
-                </th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {getFilteredMovies().map((movie) => (
-                <tr key={movie.id} className={`hover:bg-gray-50 ${!movie.is_public ? 'bg-red-50' : ''}`}>
+                <tr
+                  key={movie.id}
+                  onClick={() => navigate(`/movies/${movie.id}`)}
+                  className={`hover:bg-gray-50 cursor-pointer ${!movie.is_public ? 'bg-red-50' : ''}`}
+                  title="Open movie detail"
+                >
                   <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} text-sm font-medium text-gray-900`}>
-                    <button
-                      onClick={() => handleEdit(movie)}
-                      className="text-left hover:text-blue-600 transition-colors"
-                      title="Click to edit movie"
-                    >
-                      <div className="flex items-center space-x-3">
-                        {movie.image_urls?.thumbnail && (
-                          <img
-                            src={movie.image_urls?.thumbnail}
-                            alt={movie.name_cs}
-                            className={`${condensedView ? 'w-8 h-12' : 'w-12 h-16'} object-cover rounded`}
-                          />
-                        )}
-                        <div>
-                          <div className="font-medium flex items-center space-x-2">
-                            <span>{movie.name_cs}</span>
-                            {!movie.is_public && (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">
-                                Hidden
-                              </span>
-                            )}
-                          </div>
-                          {movie.name_en && (
-                            <div className={`${condensedView ? 'text-xs' : 'text-sm'} text-gray-500`}>
-                              {movie.name_en}
-                            </div>
+                    <div className="flex items-center space-x-3">
+                      {movie.image_urls?.thumbnail && (
+                        <img
+                          src={movie.image_urls?.thumbnail}
+                          alt={movie.name_cs}
+                          className={`${condensedView ? 'w-8 h-12' : 'w-12 h-16'} object-cover rounded`}
+                        />
+                      )}
+                      <div>
+                        <div className="font-medium flex items-center space-x-2">
+                          <span>{movie.name_cs}</span>
+                          {!movie.is_public && (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">
+                              Hidden
+                            </span>
                           )}
                         </div>
+                        {movie.name_en && (
+                          <div className={`${condensedView ? 'text-xs' : 'text-sm'} text-gray-500`}>
+                            {movie.name_en}
+                          </div>
+                        )}
                       </div>
-                    </button>
+                    </div>
                   </td>
                   {visibleColumns.director && (
                     <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} text-sm text-gray-500`}>
@@ -493,8 +478,11 @@ function Movies() {
                   {visibleColumns.files && (
                     <td
                       className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} text-sm cursor-pointer`}
-                      onClick={() => navigate(`/movies/${movie.id}`)}
-                      title="Open movie detail"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        navigate(`/movies/${movie.id}?tab=files`)
+                      }}
+                      title="Open files & subtitles"
                     >
                       <div className="flex items-center space-x-1">
                         <span
@@ -543,20 +531,6 @@ function Movies() {
                       {movie.edition_year}
                     </td>
                   )}
-                  <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} text-sm text-right space-x-3`}>
-                    <button
-                      onClick={() => navigate(`/movies/${movie.id}`)}
-                      className="text-gray-600 hover:text-gray-900 font-medium"
-                    >
-                      Detail
-                    </button>
-                    <button
-                      onClick={() => handleEdit(movie)}
-                      className="text-blue-600 hover:text-blue-900 font-medium"
-                    >
-                      Edit
-                    </button>
-                  </td>
                 </tr>
               ))}
             </tbody>

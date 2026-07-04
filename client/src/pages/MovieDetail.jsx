@@ -1,27 +1,41 @@
-import { useState, useEffect, useCallback } from 'react'
-import { useParams, useNavigate, Link } from 'react-router-dom'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { movieApi, editionApi, api } from '../utils/api'
 import { useToast } from '../contexts/ToastContext'
-import MovieFormModal from '../components/MovieFormModal'
+import MovieForm from '../components/MovieForm'
 import MovieFilesSection from '../components/movie-files/MovieFilesSection'
 import MoviePlayerSection from '../components/movie-files/MoviePlayerSection'
 
-// Registry of stacked detail sections. Future sections (subtitle translator)
-// are added as new entries here.
-const DETAIL_SECTIONS = [
-  { id: 'player', title: 'Preview', Component: MoviePlayerSection },
-  { id: 'files', title: 'Files', Component: MovieFilesSection },
+// Tabs shown on the detail page. Future sections are added as new entries here.
+const TABS = [
+  { id: 'details', label: 'Details' },
+  { id: 'files', label: 'Files & Subtitles' },
+  { id: 'preview', label: 'Preview' },
 ]
 
 function MovieDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { error: showError } = useToast()
   const [movie, setMovie] = useState(null)
   const [editions, setEditions] = useState([])
   const [sections, setSections] = useState([])
   const [loading, setLoading] = useState(true)
-  const [showEdit, setShowEdit] = useState(false)
+  const [detailsDirty, setDetailsDirty] = useState(false)
+  const previewRef = useRef(null)
+
+  // Confirm before leaving the page (in-app navigation) with unsaved edits.
+  const confirmLeave = (e) => {
+    if (detailsDirty && !window.confirm('You have unsaved changes. Leave anyway?')) {
+      e.preventDefault()
+    }
+  }
+
+  const tabParam = searchParams.get('tab')
+  const activeTab = TABS.some((t) => t.id === tabParam) ? tabParam : 'details'
+  const selectTab = (tabId) =>
+    setSearchParams(tabId === 'details' ? {} : { tab: tabId }, { replace: true })
 
   const fetchMovie = useCallback(async () => {
     try {
@@ -57,6 +71,14 @@ function MovieDetail() {
       })
   }, [movie?.edition_id, showError])
 
+  // Pause any playing preview video when leaving the Preview tab so audio does
+  // not keep going from a hidden panel.
+  useEffect(() => {
+    if (activeTab !== 'preview') {
+      previewRef.current?.querySelector('video')?.pause()
+    }
+  }, [activeTab])
+
   if (loading) {
     return <div className="text-center py-8">Loading movie…</div>
   }
@@ -74,26 +96,28 @@ function MovieDetail() {
   return (
     <div className="space-y-6">
       <div>
-        <Link to="/movies" className="text-sm text-blue-600 hover:text-blue-800">
+        <Link to="/movies" onClick={confirmLeave} className="text-sm text-blue-600 hover:text-blue-800">
           ← Back to movies
         </Link>
       </div>
 
       {/* Header */}
       <div className="bg-white shadow rounded-lg p-6">
-        <div className="flex items-start justify-between">
-          <div className="flex items-start space-x-4 min-w-0">
-            {movie.image_urls?.medium && (
-              <img
-                src={movie.image_urls.medium}
-                alt={movie.name_cs}
-                className="w-24 h-36 object-cover rounded border"
-              />
-            )}
+        <div className="flex items-start space-x-4 min-w-0">
+          {movie.image_urls?.medium && (
+            <img
+              src={movie.image_urls.medium}
+              alt={movie.name_cs}
+              className="w-24 h-36 object-cover rounded border"
+            />
+          )}
+          <div className="min-w-0 flex-1 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 items-start">
             <div className="min-w-0">
               <h1 className="text-2xl font-bold text-gray-900">{movie.name_cs}</h1>
               {movie.name_en && <div className="text-gray-500">{movie.name_en}</div>}
-              <div className="mt-2 text-sm text-gray-600 space-x-2">
+            </div>
+            <div className="min-w-0 sm:text-right">
+              <div className="text-sm text-gray-600 space-x-2">
                 {movie.director && <span>{movie.director}</span>}
                 {movie.year && <span>· {movie.year}</span>}
               </div>
@@ -107,32 +131,55 @@ function MovieDetail() {
               )}
             </div>
           </div>
-          <button
-            onClick={() => setShowEdit(true)}
-            className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 text-sm font-medium shrink-0"
-          >
-            Edit
-          </button>
         </div>
       </div>
 
-      {/* Stacked sections */}
-      {DETAIL_SECTIONS.map(({ id: sectionId, title, Component }) => (
-        <div key={sectionId} className="bg-white shadow rounded-lg p-6">
-          <h2 className="text-lg font-medium text-gray-900 mb-4">{title}</h2>
-          <Component movieId={movie.id} movie={movie} />
-        </div>
-      ))}
+      {/* Tabs */}
+      <div className="border-b border-gray-200">
+        <nav className="-mb-px flex space-x-8">
+          {TABS.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => selectTab(tab.id)}
+              className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                activeTab === tab.id
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </nav>
+      </div>
 
-      <MovieFormModal
-        isOpen={showEdit}
-        onClose={() => setShowEdit(false)}
-        movie={movie}
-        editions={editions}
-        sections={sections}
-        onSaved={fetchMovie}
-        onDeleted={() => navigate('/movies')}
-      />
+      {/* Tab panels — all mounted, inactive ones hidden so in-flight uploads,
+          transcode polling and unsaved edits survive tab switches. */}
+      <div className={activeTab === 'details' ? '' : 'hidden'}>
+        <div className="bg-white shadow rounded-lg p-6">
+          <MovieForm
+            movie={movie}
+            editions={editions}
+            sections={sections}
+            variant="page"
+            onSaved={fetchMovie}
+            onDeleted={() => navigate('/movies')}
+            onDirtyChange={setDetailsDirty}
+          />
+        </div>
+      </div>
+
+      <div className={activeTab === 'files' ? '' : 'hidden'}>
+        <div className="bg-white shadow rounded-lg p-6">
+          <MovieFilesSection movieId={movie.id} movie={movie} />
+        </div>
+      </div>
+
+      <div ref={previewRef} className={activeTab === 'preview' ? '' : 'hidden'}>
+        <div className="bg-white shadow rounded-lg p-6">
+          <MoviePlayerSection movieId={movie.id} movie={movie} />
+        </div>
+      </div>
     </div>
   )
 }

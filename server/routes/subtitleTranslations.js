@@ -120,11 +120,13 @@ router.post('/', async (req, res) => {
   }
 });
 
-// GET /movie/:movieId — all jobs for a movie (newest first).
+// GET /movie/:movieId — all non-dismissed jobs for a movie (newest first).
 router.get('/movie/:movieId', async (req, res) => {
   try {
     const result = await pool.query(
-      'SELECT * FROM subtitle_translation_jobs WHERE movie_id = $1 ORDER BY created_at DESC',
+      `SELECT * FROM subtitle_translation_jobs
+         WHERE movie_id = $1 AND dismissed_at IS NULL
+         ORDER BY created_at DESC`,
       [req.params.movieId]
     );
     res.json({ jobs: result.rows });
@@ -205,6 +207,39 @@ router.post('/:id/retry', async (req, res) => {
       return res.status(409).json({ error: 'A translation job is already active for this movie' });
     }
     logError(error, req, { operation: 'retry_subtitle_translation_job' });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /:id/dismiss — hide a terminal job from the movie's job list.
+router.post('/:id/dismiss', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM subtitle_translation_jobs WHERE id = $1', [
+      req.params.id,
+    ]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Job not found' });
+    const job = result.rows[0];
+
+    if (!TERMINAL_STATUSES.includes(job.status)) {
+      return res.status(409).json({ error: 'Only finished jobs can be dismissed' });
+    }
+
+    await pool.query(
+      'UPDATE subtitle_translation_jobs SET dismissed_at = CURRENT_TIMESTAMP WHERE id = $1',
+      [req.params.id]
+    );
+
+    await logAuditEvent({
+      req,
+      action: 'update',
+      resource: 'subtitle_translation_job',
+      resourceId: job.id,
+      newData: { dismissed: true },
+    });
+
+    res.json({ message: 'Job dismissed' });
+  } catch (error) {
+    logError(error, req, { operation: 'dismiss_subtitle_translation_job' });
     res.status(500).json({ error: error.message });
   }
 });

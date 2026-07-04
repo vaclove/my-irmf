@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { Link } from 'react-router-dom'
 import { movieFileApi, movieDownloadApi, subtitleTranslationApi } from '../../utils/api'
 import { useToast } from '../../contexts/ToastContext'
 import { formatBytes } from '../../utils/fileSize'
@@ -274,6 +275,16 @@ function MovieFilesSection({ movieId }) {
     }
   }
 
+  const dismissTranslationJob = async (jobId) => {
+    try {
+      await subtitleTranslationApi.dismiss(jobId)
+      const res = await subtitleTranslationApi.getForMovie(movieId)
+      setTranslationJobs(res.data.jobs || [])
+    } catch (error) {
+      showError('Hide failed: ' + (error.response?.data?.error || error.message))
+    }
+  }
+
   if (loading) {
     return <div className="text-sm text-gray-500">Loading files…</div>
   }
@@ -403,12 +414,19 @@ function MovieFilesSection({ movieId }) {
               const pct = Math.min(100, Math.round(Number(job.progress_percent || 0)))
               const active = ACTIVE_STATUSES.includes(job.status)
               const retryable = ['failed', 'cancelled', 'interrupted'].includes(job.status)
+              const timestamp = job.finished_at || job.created_at
               return (
                 <div key={job.id} className="border border-gray-200 rounded-md p-3">
                   <div className="flex items-center justify-between text-sm">
                     <span className="truncate">
                       {DIRECTION_LABELS[job.direction] || job.direction} ·{' '}
                       <span className="font-medium">{job.status}</span>
+                      {timestamp && (
+                        <span className="text-gray-500">
+                          {' · '}
+                          {new Date(timestamp).toLocaleString()}
+                        </span>
+                      )}
                     </span>
                     <div className="space-x-3 shrink-0">
                       {active && (
@@ -425,6 +443,15 @@ function MovieFilesSection({ movieId }) {
                           className="text-blue-600 hover:text-blue-800"
                         >
                           Retry
+                        </button>
+                      )}
+                      {!active && (
+                        <button
+                          onClick={() => dismissTranslationJob(job.id)}
+                          className="text-gray-500 hover:text-gray-700"
+                          title="Hide this job"
+                        >
+                          Hide
                         </button>
                       )}
                     </div>
@@ -517,6 +544,16 @@ function MovieFilesSection({ movieId }) {
                       >
                         {TRANSLATE_FROM_KIND[asset.key].label}
                       </button>
+                    )}
+                    {row && (
+                      <Link
+                        to={`/movies/${movieId}/subtitles`}
+                        state={{ from: 'files' }}
+                        title="Edit subtitle text in the visual editor"
+                        className="text-sm text-blue-600 hover:text-blue-800"
+                      >
+                        Edit
+                      </Link>
                     )}
                   </>
                 )}

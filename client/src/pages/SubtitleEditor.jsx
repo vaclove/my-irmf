@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { useParams, useNavigate, Link } from 'react-router-dom'
+import { useParams, useNavigate, useLocation, Link } from 'react-router-dom'
 import { movieApi, movieFileApi } from '../utils/api'
 import { useToast } from '../contexts/ToastContext'
 import { notifyMovieFilesChanged } from '../utils/movieFilesBus'
@@ -21,6 +21,10 @@ const emptyTrack = { status: 'loading', file: null, baseMd5: null, origCues: nul
 function SubtitleEditor() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const location = useLocation()
+  // Which movie-detail tab the user came from, so Back returns them there.
+  // Defaults to 'preview' (covers direct URL visits with no origin state).
+  const backTab = location.state?.from === 'files' ? 'files' : 'preview'
   const { success, error: showError } = useToast()
   const [movie, setMovie] = useState(null)
   const [hasProxy, setHasProxy] = useState(false)
@@ -139,10 +143,23 @@ function SubtitleEditor() {
     if (video && ms != null) video.currentTime = ms / 1000
   }, [])
 
-  const goBack = () => {
+  const goBack = useCallback(() => {
     if (anyDirty && !window.confirm('You have unsaved subtitle changes. Leave anyway?')) return
-    navigate(`/movies/${id}`)
-  }
+    navigate(`/movies/${id}?tab=${backTab}`)
+  }, [anyDirty, id, navigate, backTab])
+
+  // Esc leaves the fullscreen editor — the quick way back to the movie. Ignore
+  // it while typing in a cue so it can't yank the user out mid-edit.
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.key !== 'Escape') return
+      const tag = e.target?.tagName
+      if (tag === 'TEXTAREA' || tag === 'INPUT') return
+      goBack()
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [goBack])
 
   const en = tracks.en.status === 'ready' ? tracks.en : null
   const cs = tracks.cs.status === 'ready' ? tracks.cs : null
@@ -187,16 +204,19 @@ function SubtitleEditor() {
 
   const bothMissing = tracks.en.status === 'missing' && tracks.cs.status === 'missing'
 
-  // Viewport-locked layout: the header, banners and video stay fixed while only
-  // the cue list scrolls, so the movie is visible at all times. The negative
-  // margins cancel Layout's <main> py-6 so the column can fill the viewport
-  // below the h-16 navbar.
+  // Fullscreen, chrome-free layout: the editor owns the whole viewport (rendered
+  // outside the app's Layout/navbar). Header, banners and video stay fixed while
+  // only the cue list scrolls, so the movie is visible at all times.
   return (
-    <div className="flex flex-col h-[calc(100vh-4rem)] -mt-6 -mb-6">
-      {/* Header: title, dirty state, saves */}
-      <div className="shrink-0 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 py-2 bg-white border-b border-gray-200 flex flex-wrap items-center gap-3">
-        <button onClick={goBack} className="text-blue-600 hover:text-blue-800 text-sm">
+    <div className="fixed inset-0 flex flex-col bg-white">
+      {/* Header: back, title, dirty state, saves */}
+      <div className="shrink-0 px-4 py-2 bg-white border-b border-gray-200 flex flex-wrap items-center gap-3">
+        <button
+          onClick={goBack}
+          className="inline-flex items-center gap-2 rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 hover:border-gray-400"
+        >
           ← Back to movie
+          <kbd className="hidden sm:inline text-xs font-normal text-gray-400 border border-gray-200 rounded px-1">Esc</kbd>
         </button>
         <h1 className="text-lg font-semibold text-gray-900 truncate">
           {movie.name_cs || movie.name_en}
@@ -253,7 +273,7 @@ function SubtitleEditor() {
         <div className="flex-1 flex items-center justify-center">
           <div className="rounded-md border border-gray-200 p-6 text-sm text-gray-500 text-center">
             This movie has no subtitles yet. Upload or translate them on the{' '}
-            <Link to={`/movies/${id}`} className="text-blue-600 hover:text-blue-800">movie page</Link>.
+            <Link to={`/movies/${id}?tab=files`} className="text-blue-600 hover:text-blue-800">movie page</Link>.
           </div>
         </div>
       ) : (
