@@ -175,6 +175,7 @@ export const movieTranscodeApi = {
 export const subtitleTranslationApi = {
   create: (data) => api.post('/subtitle-translations', data),
   getForMovie: (movieId) => api.get(`/subtitle-translations/movie/${movieId}`),
+  getLastContext: (movieId) => api.get(`/subtitle-translations/movie/${movieId}/last-context`),
   getById: (id) => api.get(`/subtitle-translations/${id}`),
   cancel: (id) => api.post(`/subtitle-translations/${id}/cancel`),
   retry: (id) => api.post(`/subtitle-translations/${id}/retry`),

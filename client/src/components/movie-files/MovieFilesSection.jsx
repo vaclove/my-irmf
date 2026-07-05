@@ -6,6 +6,7 @@ import { formatBytes } from '../../utils/fileSize'
 import { notifyMovieFilesChanged } from '../../utils/movieFilesBus'
 import FileUploadModal from './FileUploadModal'
 import DownloadFromLinkModal from './DownloadFromLinkModal'
+import TranslateSubtitlesModal from './TranslateSubtitlesModal'
 
 const ACTIVE_STATUSES = ['pending', 'running']
 
@@ -75,6 +76,7 @@ function MovieFilesSection({ movieId }) {
   const [trashOnRemove, setTrashOnRemove] = useState(false)
   const [uploadKind, setUploadKind] = useState(null)
   const [showDownload, setShowDownload] = useState(false)
+  const [translateKind, setTranslateKind] = useState(null)
   const [jobs, setJobs] = useState([])
   const [translationJobs, setTranslationJobs] = useState([])
   const [syncJobs, setSyncJobs] = useState([])
@@ -280,33 +282,9 @@ function MovieFilesSection({ movieId }) {
     }
   }
 
-  const startTranslation = async (sourceKind) => {
-    const t = TRANSLATE_FROM_KIND[sourceKind]
-    if (!t) return
-    const targetExists = !!fileForKind(t.targetKind)
-    if (
-      targetExists &&
-      !window.confirm(
-        `${t.targetLabel} subtitles already exist. Replace them with a new machine translation?`
-      )
-    ) {
-      return
-    }
-    setBusy(true)
-    try {
-      await subtitleTranslationApi.create({
-        movie_id: movieId,
-        direction: t.direction,
-        overwrite: targetExists,
-      })
-      info('Translation started')
-      const res = await subtitleTranslationApi.getForMovie(movieId)
-      setTranslationJobs(res.data.jobs || [])
-    } catch (error) {
-      showError('Translation failed to start: ' + (error.response?.data?.error || error.message))
-    } finally {
-      setBusy(false)
-    }
+  const refreshTranslationJobs = async () => {
+    const res = await subtitleTranslationApi.getForMovie(movieId)
+    setTranslationJobs(res.data.jobs || [])
   }
 
   const cancelTranslationJob = async (jobId) => {
@@ -576,6 +554,11 @@ function MovieFilesSection({ movieId }) {
                       </div>
                     </div>
                   )}
+                  {job.context_note && (
+                    <div className="text-xs text-gray-500 mt-1 line-clamp-2" title={job.context_note}>
+                      Context: {job.context_note}
+                    </div>
+                  )}
                   {job.error_message && (
                     <div className="text-xs text-red-600 mt-1">{job.error_message}</div>
                   )}
@@ -723,7 +706,7 @@ function MovieFilesSection({ movieId }) {
                     )}
                     {row && TRANSLATE_FROM_KIND[asset.key] && (
                       <button
-                        onClick={() => startTranslation(asset.key)}
+                        onClick={() => setTranslateKind(asset.key)}
                         disabled={busy || hasActiveTranslation}
                         title="Machine-translate these subtitles with an LLM"
                         className="text-sm text-blue-600 hover:text-blue-800 disabled:opacity-50"
@@ -833,6 +816,15 @@ function MovieFilesSection({ movieId }) {
           await load()
           notifyMovieFilesChanged(movieId)
         }}
+      />
+
+      <TranslateSubtitlesModal
+        isOpen={!!translateKind}
+        onClose={() => setTranslateKind(null)}
+        movieId={movieId}
+        translation={translateKind ? TRANSLATE_FROM_KIND[translateKind] : null}
+        targetExists={!!(translateKind && fileForKind(TRANSLATE_FROM_KIND[translateKind].targetKind))}
+        onCreated={refreshTranslationJobs}
       />
     </div>
   )

@@ -14,7 +14,10 @@
  * every batch), plus the movie synopsis from the DB where available. A
  * one-shot pre-pass produces a translation brief (names, register,
  * tykání/vykání, terminology) injected into each batch's prompt; if it
- * fails, the job continues without it.
+ * fails, the job continues without it. An optional user-provided context
+ * note (job.context_note — e.g. who addresses whom formally, character
+ * genders, terminology) is treated as authoritative and fed to both the
+ * pre-pass and every batch prompt.
  *
  * Replies are constrained by structured outputs to a JSON object
  * {"cues": [{"n", "text"}, ...]} and validated against the expected cue
@@ -122,15 +125,23 @@ function movieHeading(movie) {
   return parts.join('\n\n');
 }
 
+/** The user-provided context note as an authoritative prompt section. */
+function contextNoteSection(contextNote) {
+  return `Notes from the festival team — authoritative; where they conflict with the brief or your own inference, the notes win:\n${contextNote}`;
+}
+
 /**
  * @returns {Array} system content blocks: [cached source reference?, instructions]
  */
-function buildSystemPrompt(direction, movie, { sourceText, brief } = {}) {
+function buildSystemPrompt(direction, movie, { sourceText, brief, contextNote } = {}) {
   const { sourceLang, targetLang } = DIRECTIONS[direction];
   const sections = [];
   sections.push(`You are a professional subtitle translator working for an international film festival.
 Translate movie subtitle cues from ${sourceLang} to ${targetLang}.`);
   sections.push(movieHeading(movie));
+  if (contextNote) {
+    sections.push(contextNoteSection(contextNote));
+  }
   if (brief) {
     sections.push(`Translation brief — follow it for names, register, and terminology:\n${brief}`);
   }
@@ -277,10 +288,11 @@ function parseTranslatedCues(text, expectedNs) {
  * a translation brief (names, formality per character pair, genders,
  * terminology, tone) that is then injected into every batch's prompt. Also
  * writes the prompt-cache entry for the source reference block that all
- * batch calls read.
+ * batch calls read. A user context note is passed in as authoritative facts
+ * the brief must incorporate.
  * @returns {Promise<string|null>}
  */
-async function buildTranslationBrief({ direction, movie, sourceText }) {
+async function buildTranslationBrief({ direction, movie, sourceText, contextNote }) {
   const { sourceLang, targetLang } = DIRECTIONS[direction];
   const system = [
     buildSourceReferenceBlock(sourceText),
@@ -299,7 +311,7 @@ ${movieHeading(movie)}`,
     messages: [
       {
         role: 'user',
-        content: `Read the full source subtitles above and write a concise translation brief:
+        content: `${contextNote ? contextNoteSection(contextNote) + '\n\n' : ''}Read the full source subtitles above and write a concise translation brief:
 1. Character names and how to render them in ${targetLang}.
 2. Who addresses whom formally vs informally (tykání/vykání), per character pair.
 3. Speaker genders where inferable (matters for gendered verb/adjective forms).
@@ -325,8 +337,8 @@ Plain text, at most 40 lines, no preamble.`,
  * Output truncated at max_tokens throws TranslationTruncatedError.
  * @returns {Promise<Map<number, string>>}
  */
-async function translateBatch({ batch, direction, movie, sourceText, brief, previousContext }) {
-  const system = buildSystemPrompt(direction, movie, { sourceText, brief });
+async function translateBatch({ batch, direction, movie, sourceText, brief, contextNote, previousContext }) {
+  const system = buildSystemPrompt(direction, movie, { sourceText, brief, contextNote });
   const messages = [{ role: 'user', content: buildBatchUserMessage(batch, previousContext) }];
   const expectedNs = batch.map((c) => c.n);
 
@@ -567,6 +579,7 @@ class SubtitleTranslator {
             direction: job.direction,
             movie,
             sourceText,
+            contextNote: job.context_note,
           });
         } catch (briefError) {
           logger.warn('[SubtitleTranslator] translation brief pre-pass failed; continuing without it', {
@@ -592,6 +605,7 @@ class SubtitleTranslator {
           movie,
           sourceText,
           brief,
+          contextNote: job.context_note,
           previousContext,
         });
         for (const [n, text] of batchResult) translations.set(n, text);
