@@ -35,8 +35,10 @@ const accommodationRoutes = require('./routes/accommodation');
 const associationRoutes = require('./routes/associations');
 const scannerRoutes = require('./routes/scanner');
 const gooutRoutes = require('./routes/goout');
+const dbBackupRoutes = require('./routes/dbBackup');
 const gooutTokenScheduler = require('./services/goout-token-scheduler');
 const movieFileScanScheduler = require('./services/movie-file-scan-scheduler');
+const dbBackupScheduler = require('./services/db-backup-scheduler');
 const movieDownloader = require('./services/movieDownloader');
 const subtitleTranslator = require('./services/subtitleTranslator');
 const mailgunService = require('./utils/mailgun');
@@ -167,6 +169,7 @@ app.use('/api/accommodation', requireIrmfDomain, accommodationRoutes);
 app.use('/api/associations', requireIrmfDomain, associationRoutes);
 app.use('/api/scanner', requireIrmfDomain, scannerRoutes);
 app.use('/api/goout', requireIrmfDomain, gooutRoutes);
+app.use('/api/db-backup', requireIrmfDomain, dbBackupRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
@@ -241,6 +244,9 @@ const startServer = async () => {
     await movieDownloader.markInterruptedJobs();
     await subtitleTranslator.markInterruptedJobs();
     movieFileScanScheduler.start();
+
+    // Nightly DB backup (production only): enqueues a db_backup worker message
+    dbBackupScheduler.start();
 
     // Check if we should use HTTPS in development
     const isDevelopment = process.env.NODE_ENV !== 'production';

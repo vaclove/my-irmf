@@ -1,6 +1,6 @@
 {
   "name": "my-irmf-transcode-worker",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "Out-of-process movie transcode worker (Azure Container Apps Job). Reads a job from a storage queue, transcodes the master to a 720p proxy with ffmpeg, uploads it to Google Drive.",
   "main": "index.js",

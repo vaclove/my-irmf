@@ -204,6 +204,20 @@ psql "postgresql://festival_admin:your-password@my-irmf.private.postgres.databas
 psql "postgresql://festival_admin:your-password@my-irmf.private.postgres.database.azure.com:5432/festival_db?sslmode=require" -f server/scripts/create_audit_logs.sql
 ```
 
+### Database Backups
+
+In production the app enqueues a nightly `db_backup` message (3 AM
+Europe/Prague, `DB_BACKUP_CRON`) on the transcode storage queue; the Container
+Apps worker runs `pg_dump --format=custom`, uploads the dump to the shared
+Google Drive's top-level `Backups` folder, and keeps only the newest 7
+(`DB_BACKUP_RETENTION`; older ones are permanently deleted). See
+`docs/TRANSCODER_SETUP.md`. Trigger one manually with `POST /api/db-backup`.
+Restore a dump with:
+
+```bash
+pg_restore --no-owner -d "postgresql://.../festival_db_restore?sslmode=require" festival_db_<stamp>.dump
+```
+
 ### Network Security
 
 Since you're using **Private Access (VNet Integration)**:

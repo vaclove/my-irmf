@@ -1,14 +1,16 @@
 /**
  * Movie worker — runs as an Azure Container Apps Job triggered by a
  * storage-queue message. One execution drains the queue, then exits so the
- * platform scales to zero. Two job types share the queue, discriminated by the
- * message's `type` field (absent = transcode, for back-compat):
+ * platform scales to zero. Three job types share the queue, discriminated by
+ * the message's `type` field (absent = transcode, for back-compat):
  *
  *   transcode      streams the master from Drive, transcodes a 720p H.264/AAC
  *                  proxy with ffmpeg, uploads it back to the movie's folder
  *   subtitle_sync  extracts mono audio from the proxy/master, re-times a
  *                  subtitle track to it with alass, uploads the synced SRT as
  *                  a new file next to the untouched original
+ *   db_backup      runs pg_dump against DATABASE_URL, uploads the dump to the
+ *                  shared drive's Backups folder, prunes to the newest N
  *
  * Reuses the app's Drive service and chunked-upload sink (shared server modules)
  * so naming, auth, and upload behavior stay identical to the in-app paths.
@@ -16,7 +18,8 @@
  * Env: DATABASE_URL, GOOGLE_SERVICE_ACCOUNT_KEY (or _PATH), GOOGLE_SHARED_DRIVE_ID,
  *      AZURE_STORAGE_CONNECTION_STRING, TRANSCODE_QUEUE_NAME,
  *      MOVIE_TRANSCODE_HEIGHT/CRF/PRESET, FFMPEG_PATH/FFPROBE_PATH (optional),
- *      ALASS_PATH, ALASS_NO_SPLIT, ALASS_SPLIT_PENALTY (optional).
+ *      ALASS_PATH, ALASS_NO_SPLIT, ALASS_SPLIT_PENALTY (optional),
+ *      PG_DUMP_PATH, DB_BACKUP_FOLDER_NAME (optional).
  */
 
 const os = require('os');
@@ -41,6 +44,9 @@ const CANCEL_POLL_MS = 5000;
 const FFMPEG = process.env.FFMPEG_PATH || 'ffmpeg';
 const FFPROBE = process.env.FFPROBE_PATH || 'ffprobe';
 const ALASS = process.env.ALASS_PATH || 'alass';
+const PG_DUMP = process.env.PG_DUMP_PATH || 'pg_dump';
+const BACKUP_FOLDER_NAME = process.env.DB_BACKUP_FOLDER_NAME || 'Backups';
+const BACKUP_NAME_RE = /^festival_db_\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z\.dump$/;
 const MAX_SUBTITLE_BYTES = 2 * 1024 * 1024;
 const HEIGHT = parseInt(process.env.MOVIE_TRANSCODE_HEIGHT || '720', 10);
 const CRF = process.env.MOVIE_TRANSCODE_CRF || '23';
@@ -232,6 +238,127 @@ function runAlass({ wavPath, inSrtPath, outSrtPath, onSpawn }) {
       else reject(new Error(outputTail.trim() || `alass exited with code ${code}`));
     });
   });
+}
+
+/** Run pg_dump in custom format (compressed, pg_restore-able) to outPath. */
+function runPgDump({ dbUrl, outPath }) {
+  return new Promise((resolve, reject) => {
+    const args = [
+      '--format=custom',
+      '--no-owner',
+      '--no-privileges',
+      '--file', outPath,
+      '--dbname', dbUrl,
+    ];
+    const child = spawn(PG_DUMP, args);
+    let stderrTail = '';
+    child.stderr.on('data', (d) => {
+      stderrTail = (stderrTail + d.toString()).slice(-2000);
+    });
+    child.on('error', (err) => {
+      if (err.code === 'ENOENT') {
+        reject(new Error('pg_dump binary not found — is postgresql-client installed in the image?'));
+      } else {
+        reject(err);
+      }
+    });
+    child.on('close', (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(stderrTail.trim() || `pg_dump exited with code ${code}`));
+    });
+  });
+}
+
+/**
+ * Keep only the newest `retain` backups in the Backups folder. Matching is
+ * restricted to the festival_db_<stamp>.dump naming so anything else living in
+ * the folder (manual exports, subfolders) is never touched. Timestamped names
+ * sort chronologically, so lexicographic desc = newest first. Deletes are
+ * PERMANENT (no trash) per backup-rotation policy; per-file failures are
+ * logged but don't fail the run (a concurrent execution may already have
+ * deleted the same file).
+ */
+async function pruneOldBackups(folderId, retain) {
+  const children = await googleDrive.listFolderChildren(folderId);
+  const backups = children
+    .filter((f) => f.mimeType !== 'application/vnd.google-apps.folder' && BACKUP_NAME_RE.test(f.name))
+    .sort((a, b) => b.name.localeCompare(a.name));
+  for (const stale of backups.slice(retain)) {
+    try {
+      await googleDrive.deleteFile(stale.id);
+      log('pruned old backup', { id: stale.id, name: stale.name });
+    } catch (e) {
+      log('failed to prune backup', { id: stale.id, name: stale.name, error: e.message });
+    }
+  }
+}
+
+/**
+ * db_backup message: pg_dump the whole database, upload the dump to the
+ * shared drive's Backups folder, prune to the newest `retain`. Returns true
+ * when the message should be deleted from the queue.
+ */
+async function processDbBackup(message, dequeueCount) {
+  if (dequeueCount > MAX_DEQUEUE) {
+    log('poison db_backup abandoned', { dequeueCount });
+    return true;
+  }
+  if (!googleDrive.isConfigured()) {
+    log('Drive not configured; leaving db_backup for redelivery');
+    return false;
+  }
+  if (!process.env.DATABASE_URL) {
+    log('DATABASE_URL not set — dropping db_backup');
+    return true;
+  }
+
+  const retain = Number.isInteger(message.retain) && message.retain > 0 ? message.retain : 7;
+  const stamp = new Date().toISOString().replace(/:/g, '-').replace(/\.\d{3}Z$/, 'Z');
+  const fileName = `festival_db_${stamp}.dump`;
+  const tempPath = path.join(
+    process.env.MOVIE_TRANSCODE_TMPDIR || os.tmpdir(),
+    `irmf-dbbackup-${Date.now()}.dump`
+  );
+
+  try {
+    log('db backup starting', { fileName, retain, requestedBy: message.requested_by || null });
+    await runPgDump({ dbUrl: process.env.DATABASE_URL, outPath: tempPath });
+    const stat = fs.statSync(tempPath);
+    if (stat.size === 0) throw new Error('pg_dump produced an empty file');
+
+    const folderId = await googleDrive.findOrCreateChildFolder(
+      googleDrive.getDriveId(),
+      BACKUP_FOLDER_NAME
+    );
+    const sessionUrl = await googleDrive.createResumableSession({
+      folderId,
+      name: fileName,
+      mimeType: 'application/octet-stream',
+      size: stat.size,
+    });
+    const driveFileId = await uploadStreamToDrive({
+      readable: fs.createReadStream(tempPath),
+      sessionUrl,
+      total: stat.size,
+    });
+    log('db backup uploaded', { driveFileId, fileName, bytes: stat.size });
+
+    try {
+      await pruneOldBackups(folderId, retain);
+    } catch (e) {
+      // Backup itself already succeeded; don't fail/redeliver the whole job
+      // over a pruning hiccup — the next scheduled run will retry pruning.
+      log('prune step failed after successful backup', { error: e.message });
+    }
+    return true;
+  } catch (error) {
+    // Leave for redelivery; MAX_DEQUEUE bounds retries and the next scheduled
+    // run tries again anyway. Errors land in Container Apps execution logs.
+    log('db backup failed', { error: error.message, dequeueCount });
+    return false;
+  } finally {
+    fs.promises.unlink(tempPath).catch(() => {});
+  }
 }
 
 /** Download a Drive subtitle file into a bounded buffer and decode it. */
@@ -653,7 +780,11 @@ function sweepTempFiles() {
   const dir = process.env.MOVIE_TRANSCODE_TMPDIR || os.tmpdir();
   try {
     for (const name of fs.readdirSync(dir)) {
-      if (/^irmf-proxy-.*\.mp4$/.test(name) || /^irmf-sync-.*\.(wav|srt)$/.test(name)) {
+      if (
+        /^irmf-proxy-.*\.mp4$/.test(name) ||
+        /^irmf-sync-.*\.(wav|srt)$/.test(name) ||
+        /^irmf-dbbackup-.*\.dump$/.test(name)
+      ) {
         fs.promises.unlink(path.join(dir, name)).catch(() => {});
       }
     }
@@ -687,9 +818,10 @@ async function main() {
 
     let jobId = null;
     let jobType = 'transcode';
+    let parsed = null;
     try {
       const decoded = Buffer.from(msg.messageText, 'base64').toString('utf8');
-      const parsed = JSON.parse(decoded);
+      parsed = JSON.parse(decoded);
       jobId = parsed.job_id;
       jobType = parsed.type || 'transcode'; // absent type = transcode (back-compat)
     } catch (e) {
@@ -701,9 +833,11 @@ async function main() {
     let deleteMessage = true;
     try {
       deleteMessage =
-        jobType === 'subtitle_sync'
-          ? await processSubtitleSyncJob(jobId, msg.dequeueCount)
-          : await processJob(jobId, msg.dequeueCount);
+        jobType === 'db_backup'
+          ? await processDbBackup(parsed, msg.dequeueCount)
+          : jobType === 'subtitle_sync'
+            ? await processSubtitleSyncJob(jobId, msg.dequeueCount)
+            : await processJob(jobId, msg.dequeueCount);
     } catch (e) {
       // Unexpected crash: leave the message so it redelivers (dequeueCount rises).
       log('unexpected job error; leaving message', { jobId, error: e.message });
