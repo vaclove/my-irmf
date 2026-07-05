@@ -343,7 +343,13 @@ async function processDbBackup(message, dequeueCount) {
     });
     log('db backup uploaded', { driveFileId, fileName, bytes: stat.size });
 
-    await pruneOldBackups(folderId, retain);
+    try {
+      await pruneOldBackups(folderId, retain);
+    } catch (e) {
+      // Backup itself already succeeded; don't fail/redeliver the whole job
+      // over a pruning hiccup — the next scheduled run will retry pruning.
+      log('prune step failed after successful backup', { error: e.message });
+    }
     return true;
   } catch (error) {
     // Leave for redelivery; MAX_DEQUEUE bounds retries and the next scheduled
