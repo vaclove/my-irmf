@@ -18,6 +18,21 @@ const { DIRECTIONS } = require('../services/subtitleTranslator');
 const router = express.Router();
 
 const TERMINAL_STATUSES = ['completed', 'failed', 'cancelled', 'interrupted'];
+const CONTEXT_NOTE_MAX_CHARS = 4000;
+
+/**
+ * Normalize the optional user context note from a request body: trimmed
+ * string or null. Returns { error } when it is not a string or too long.
+ */
+function parseContextNote(context) {
+  if (context === undefined || context === null) return { value: null };
+  if (typeof context !== 'string') return { error: 'context must be a string' };
+  const trimmed = context.trim();
+  if (trimmed.length > CONTEXT_NOTE_MAX_CHARS) {
+    return { error: `context must be at most ${CONTEXT_NOTE_MAX_CHARS} characters` };
+  }
+  return { value: trimmed || null };
+}
 
 function notConfigured(res) {
   if (!subtitleTranslator.isConfigured()) {
@@ -47,7 +62,7 @@ async function getSubtitleRows(movieId, direction) {
 }
 
 /** Shared validation + insert + enqueue used by create and retry. */
-async function createJob(req, res, { movieId, direction, overwrite, operation }) {
+async function createJob(req, res, { movieId, direction, overwrite, operation, contextNote }) {
   const movieRes = await pool.query('SELECT id FROM movies WHERE id = $1', [movieId]);
   if (movieRes.rows.length === 0) {
     return res.status(404).json({ error: 'Movie not found' });
@@ -77,9 +92,9 @@ async function createJob(req, res, { movieId, direction, overwrite, operation })
   }
 
   const insert = await pool.query(
-    `INSERT INTO subtitle_translation_jobs (movie_id, direction, source_drive_file_id, model, status, created_by)
-     VALUES ($1, $2, $3, $4, 'pending', $5) RETURNING *`,
-    [movieId, direction, source.drive_file_id, subtitleTranslator.getModel(), req.user?.email || null]
+    `INSERT INTO subtitle_translation_jobs (movie_id, direction, source_drive_file_id, model, status, created_by, context_note)
+     VALUES ($1, $2, $3, $4, 'pending', $5, $6) RETURNING *`,
+    [movieId, direction, source.drive_file_id, subtitleTranslator.getModel(), req.user?.email || null, contextNote || null]
   );
   const job = insert.rows[0];
   subtitleTranslator.enqueue(job.id);
@@ -89,7 +104,7 @@ async function createJob(req, res, { movieId, direction, overwrite, operation })
     action: 'create',
     resource: 'subtitle_translation_job',
     resourceId: job.id,
-    newData: { movie_id: movieId, direction, overwrite: !!overwrite, operation },
+    newData: { movie_id: movieId, direction, overwrite: !!overwrite, operation, context_note: contextNote || null },
   });
 
   res.status(201).json({ job });
@@ -99,16 +114,19 @@ async function createJob(req, res, { movieId, direction, overwrite, operation })
 router.post('/', async (req, res) => {
   if (!isReady()) return notConfigured(res);
   try {
-    const { movie_id, direction, overwrite } = req.body;
+    const { movie_id, direction, overwrite, context } = req.body;
     if (!movie_id) return res.status(400).json({ error: 'movie_id is required' });
     if (!DIRECTIONS[direction]) {
       return res.status(400).json({ error: "direction must be 'cs_to_en' or 'en_to_cs'" });
     }
+    const contextNote = parseContextNote(context);
+    if (contextNote.error) return res.status(400).json({ error: contextNote.error });
     await createJob(req, res, {
       movieId: movie_id,
       direction,
       overwrite: overwrite === true,
       operation: 'create',
+      contextNote: contextNote.value,
     });
   } catch (error) {
     // Partial unique index: another request already created an active job.
@@ -132,6 +150,22 @@ router.get('/movie/:movieId', async (req, res) => {
     res.json({ jobs: result.rows });
   } catch (error) {
     logError(error, req, { operation: 'get_movie_subtitle_translation_jobs' });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /movie/:movieId/last-context — context note of the movie's newest job
+// (dismissed included, unlike the job list above), to prefill the start dialog.
+router.get('/movie/:movieId/last-context', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT context_note FROM subtitle_translation_jobs
+         WHERE movie_id = $1 ORDER BY created_at DESC LIMIT 1`,
+      [req.params.movieId]
+    );
+    res.json({ context: result.rows[0]?.context_note || null });
+  } catch (error) {
+    logError(error, req, { operation: 'get_subtitle_translation_last_context' });
     res.status(500).json({ error: error.message });
   }
 });
@@ -194,6 +228,10 @@ router.post('/:id/retry', async (req, res) => {
       return res.status(409).json({ error: 'Only terminal jobs can be retried' });
     }
 
+    // An optional context string in the body replaces the old job's note.
+    const contextNote = parseContextNote(req.body?.context);
+    if (contextNote.error) return res.status(400).json({ error: contextNote.error });
+
     // A retry re-runs an explicitly requested translation, so an existing
     // target (possibly the failed run's partial predecessor) may be replaced.
     await createJob(req, res, {
@@ -201,6 +239,7 @@ router.post('/:id/retry', async (req, res) => {
       direction: old.direction,
       overwrite: true,
       operation: 'retry',
+      contextNote: req.body?.context !== undefined ? contextNote.value : old.context_note,
     });
   } catch (error) {
     if (error.code === '23505') {
