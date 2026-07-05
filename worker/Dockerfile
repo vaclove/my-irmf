@@ -3,9 +3,20 @@
 #   docker build -f worker/Dockerfile -t irmf-transcode-worker .
 FROM node:20-slim
 
-# ffmpeg + ffprobe for transcoding and audio extraction.
+# ffmpeg + ffprobe for transcoding and audio extraction; pg_dump for DB
+# backups. Debian bookworm's stock postgresql-client is 15, which cannot dump
+# a newer Azure server, so install a pinned major from apt.postgresql.org
+# (pg_dump 17 handles servers up to 17).
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ffmpeg ca-certificates \
+  && apt-get install -y --no-install-recommends ffmpeg ca-certificates curl gnupg \
+  && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+       | gpg --dearmor -o /usr/share/keyrings/pgdg.gpg \
+  && echo "deb [signed-by=/usr/share/keyrings/pgdg.gpg] http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
+       > /etc/apt/sources.list.d/pgdg.list \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends postgresql-client-17 \
+  && apt-get purge -y curl gnupg \
+  && apt-get autoremove -y \
   && rm -rf /var/lib/apt/lists/*
 
 # alass for subtitle timing alignment (static linux binary, pinned release).

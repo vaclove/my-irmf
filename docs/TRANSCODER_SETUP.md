@@ -30,6 +30,17 @@ worker knobs: `ALASS_NO_SPLIT=true` disables alass's cut detection,
 `ALASS_SPLIT_PENALTY` tunes it, and `SUBTITLE_SYNC_ENABLED=false` disables
 enqueueing app-side.
 
+The queue's third message type is **database backups** (message
+`{type: 'db_backup', retain}`): the app's nightly scheduler (production only,
+`DB_BACKUP_CRON`, default 3 AM Europe/Prague) enqueues it, and the worker runs
+`pg_dump --format=custom` against `DATABASE_URL`, uploads the dump to the
+shared drive's top-level `Backups` folder, and permanently deletes all but the
+newest `retain` (default 7) `festival_db_*.dump` files. The image bundles
+`postgresql-client-17` from the PGDG apt repo (pg_dump must be ≥ the server
+major — bump the pin in `worker/Dockerfile` if the Azure server is upgraded
+past 17). A backup can be triggered manually with `POST /api/db-backup`;
+`DB_BACKUP_ENABLED=false` disables the feature app-side.
+
 ## Prerequisites
 
 - Google Drive service account already set up (see `GOOGLE_DRIVE_SETUP.md`).
