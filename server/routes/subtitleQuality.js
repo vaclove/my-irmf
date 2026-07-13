@@ -214,7 +214,7 @@ router.post('/flags/resolve', async (req, res) => {
     }
     const result = await pool.query(
       `UPDATE subtitle_quality_flags
-       SET status = $2, resolved_at = CURRENT_TIMESTAMP, resolved_by = $3
+       SET status = $2, resolved_at = CURRENT_TIMESTAMP, resolved_by = $3, updated_at = CURRENT_TIMESTAMP
        WHERE id = ANY($1) AND status = 'open' RETURNING id`,
       [ids, status, req.user?.email || null]
     );
