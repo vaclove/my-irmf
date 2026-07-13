@@ -31,6 +31,13 @@ const AZURE_DEFAULTS = {
 
 const AZURE_MAX_ATTEMPTS = 5;
 const AZURE_BACKOFF_CAP_MS = 20000;
+// Node's global fetch has no default timeout; without one a stalled Azure
+// response would hang a translation batch forever. Reasoning calls routinely
+// take tens of seconds, so the ceiling is generous.
+const AZURE_TIMEOUT_MS = Math.max(
+  10000,
+  parseInt(process.env.AZURE_OPENAI_TIMEOUT_MS || '300000', 10) || 300000
+);
 
 class LlmError extends Error {
   constructor(message, { kind = 'api', status = null, provider = null } = {}) {
@@ -128,8 +135,10 @@ async function azureComplete({ systemBlocks, messages, maxTokens, jsonSchema, sc
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(body),
+        signal: AbortSignal.timeout(AZURE_TIMEOUT_MS),
       });
     } catch (networkError) {
+      // Includes TimeoutError from the abort signal — both are retryable.
       lastError = new LlmError(`network error: ${networkError.message}`, {
         kind: 'network',
         provider: 'azure',
@@ -140,6 +149,8 @@ async function azureComplete({ systemBlocks, messages, maxTokens, jsonSchema, sc
 
     if (res.status === 429 || res.status >= 500) {
       const retryAfter = parseInt(res.headers.get('retry-after') || '0', 10);
+      // Release the connection before retrying — the body is never read here.
+      if (res.body) await res.body.cancel().catch(() => {});
       lastError = new LlmError(`Azure OpenAI HTTP ${res.status}`, {
         kind: res.status === 429 ? 'rate_limit' : 'api',
         status: res.status,

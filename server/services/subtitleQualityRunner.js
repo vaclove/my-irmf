@@ -177,9 +177,13 @@ class SubtitleQualityRunner {
       [movieId, lang]
     );
     for (const row of active.rows) this.cancel(row.id);
-    // Wait is not needed: the unique index only blocks while the old run is
-    // still pending/running; retry the insert briefly if it races.
-    for (let attempt = 0; attempt < 5; attempt++) {
+    // The partial unique index blocks the insert only while the old run is
+    // still pending/running. The old run may be mid-suggestion-batch when the
+    // cancel lands, so honor it can take a while — wait for the terminal
+    // state (up to ~2 min) rather than dropping this translation's gate run.
+    const RETRY_DELAY_MS = 2000;
+    const MAX_ATTEMPTS = 60;
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
       try {
         const insert = await pool.query(
           `INSERT INTO subtitle_quality_runs (movie_id, lang, file_drive_id, translation_job_id, created_by)
@@ -189,8 +193,8 @@ class SubtitleQualityRunner {
         this.enqueue(insert.rows[0].id);
         return insert.rows[0];
       } catch (error) {
-        if (error.code !== '23505' || attempt === 4) throw error;
-        await new Promise((r) => setTimeout(r, 1000));
+        if (error.code !== '23505' || attempt === MAX_ATTEMPTS - 1) throw error;
+        await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
       }
     }
     return null;
