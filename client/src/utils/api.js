@@ -192,6 +192,18 @@ export const subtitleSyncApi = {
   dismiss: (id) => api.post(`/subtitle-syncs/${id}/dismiss`),
 }
 
+// Subtitle quality gate API (lint runs + per-cue flags with LLM suggestions)
+export const subtitleQualityApi = {
+  createRun: (data) => api.post('/subtitle-quality/runs', data),
+  getRunsForMovie: (movieId) => api.get(`/subtitle-quality/runs/movie/${movieId}`),
+  getRun: (id) => api.get(`/subtitle-quality/runs/${id}`),
+  cancelRun: (id) => api.post(`/subtitle-quality/runs/${id}/cancel`),
+  dismissRun: (id) => api.post(`/subtitle-quality/runs/${id}/dismiss`),
+  getFlags: (movieId, lang) => api.get(`/subtitle-quality/flags/movie/${movieId}`, { params: { lang } }),
+  getFlagSummary: (movieId) => api.get(`/subtitle-quality/flags/movie/${movieId}/summary`),
+  resolveFlags: (ids, status) => api.post('/subtitle-quality/flags/resolve', { ids, status }),
+}
+
 // Sections API
 const sectionApi = {
   getByEdition: (editionId) => api.get(`/sections/edition/${editionId}`),

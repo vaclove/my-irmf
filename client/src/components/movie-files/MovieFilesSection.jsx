@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Link } from 'react-router-dom'
-import { movieFileApi, movieDownloadApi, subtitleTranslationApi, subtitleSyncApi } from '../../utils/api'
+import { movieFileApi, movieDownloadApi, subtitleTranslationApi, subtitleSyncApi, subtitleQualityApi } from '../../utils/api'
 import { useToast } from '../../contexts/ToastContext'
 import { formatBytes } from '../../utils/fileSize'
 import { notifyMovieFilesChanged } from '../../utils/movieFilesBus'
@@ -31,6 +31,12 @@ const SYNC_PHASE_LABELS = {
   aligning: 'Aligning…',
   uploading: 'Uploading',
 }
+
+const QUALITY_LANG_LABELS = { cs: 'CS', en: 'EN', cs_synced: 'CS✓', en_synced: 'EN✓' }
+const QUALITY_PHASE_LABELS = { linting: 'Checking…', suggesting: 'Generating suggestions…' }
+
+// subtitles_cs -> cs, subtitles_en_synced -> en_synced (the quality-gate lang key)
+const qualityLangForKind = (kind) => kind.replace('subtitles_', '')
 
 const ASSET_KINDS = [
   { key: 'movie', label: 'Movie file', badge: '🎬' },
@@ -80,23 +86,30 @@ function MovieFilesSection({ movieId }) {
   const [jobs, setJobs] = useState([])
   const [translationJobs, setTranslationJobs] = useState([])
   const [syncJobs, setSyncJobs] = useState([])
+  const [qualityRuns, setQualityRuns] = useState([])
+  const [qualitySummary, setQualitySummary] = useState({ counts: {} })
   const subtitleInputs = useRef({})
   const wasPolling = useRef(false)
   const wasPollingTranslations = useRef(false)
   const wasPollingSyncs = useRef(false)
+  const wasPollingQuality = useRef(false)
 
   const load = useCallback(async () => {
     try {
-      const [filesRes, jobsRes, translationRes, syncRes] = await Promise.all([
+      const [filesRes, jobsRes, translationRes, syncRes, qualityRes, summaryRes] = await Promise.all([
         movieFileApi.getFiles(movieId),
         movieDownloadApi.getForMovie(movieId).catch(() => ({ data: { jobs: [] } })),
         subtitleTranslationApi.getForMovie(movieId).catch(() => ({ data: { jobs: [] } })),
         subtitleSyncApi.getForMovie(movieId).catch(() => ({ data: { jobs: [] } })),
+        subtitleQualityApi.getRunsForMovie(movieId).catch(() => ({ data: { runs: [] } })),
+        subtitleQualityApi.getFlagSummary(movieId).catch(() => ({ data: { counts: {} } })),
       ])
       setData(filesRes.data)
       setJobs(jobsRes.data.jobs || [])
       setTranslationJobs(translationRes.data.jobs || [])
       setSyncJobs(syncRes.data.jobs || [])
+      setQualityRuns(qualityRes.data.runs || [])
+      setQualitySummary(summaryRes.data || { counts: {} })
     } catch (error) {
       console.error('Error loading movie files:', error)
       showError('Failed to load files: ' + (error.response?.data?.error || error.message))
@@ -189,8 +202,43 @@ function MovieFilesSection({ movieId }) {
     return () => clearInterval(timer)
   }, [syncJobs, movieId, load, success, showError])
 
+  // Poll quality runs while any is active; toast + refresh on completion.
+  useEffect(() => {
+    const hasActive = qualityRuns.some((j) => ACTIVE_STATUSES.includes(j.status))
+    if (!hasActive) {
+      if (wasPollingQuality.current) {
+        wasPollingQuality.current = false
+        const last = qualityRuns[0]
+        if (last?.status === 'completed') {
+          const issues = (last.error_count || 0) + (last.warn_count || 0)
+          success(
+            issues > 0
+              ? `Quality check finished — ${issues} issue${issues === 1 ? '' : 's'} found`
+              : 'Quality check finished — no issues'
+          )
+        } else if (last?.status === 'failed') {
+          showError('Quality check failed: ' + (last.error_message || 'unknown error'))
+        }
+        load()
+      }
+      return undefined
+    }
+    wasPollingQuality.current = true
+    const timer = setInterval(async () => {
+      try {
+        const res = await subtitleQualityApi.getRunsForMovie(movieId)
+        setQualityRuns(res.data.runs || [])
+      } catch {
+        // transient; keep polling
+      }
+    }, 4000)
+    return () => clearInterval(timer)
+  }, [qualityRuns, movieId, load, success, showError])
+
   const fileForKind = (kind) => (data?.files || []).find((f) => f.file_kind === kind)
   const hasActiveTranslation = translationJobs.some((j) => ACTIVE_STATUSES.includes(j.status))
+  const hasActiveQualityFor = (lang) =>
+    qualityRuns.some((j) => j.lang === lang && ACTIVE_STATUSES.includes(j.status))
   const hasActiveSyncFor = (kind) =>
     syncJobs.some((j) => j.subtitle_kind === kind && ACTIVE_STATUSES.includes(j.status))
   const hasVideoFile = !!fileForKind('movie_proxy') || !!fileForKind('movie')
@@ -363,6 +411,40 @@ function MovieFilesSection({ movieId }) {
       await subtitleSyncApi.dismiss(jobId)
       const res = await subtitleSyncApi.getForMovie(movieId)
       setSyncJobs(res.data.jobs || [])
+    } catch (error) {
+      showError('Hide failed: ' + (error.response?.data?.error || error.message))
+    }
+  }
+
+  const startQualityCheck = async (lang) => {
+    setBusy(true)
+    try {
+      await subtitleQualityApi.createRun({ movie_id: movieId, lang })
+      info('Quality check started')
+      const res = await subtitleQualityApi.getRunsForMovie(movieId)
+      setQualityRuns(res.data.runs || [])
+    } catch (error) {
+      showError('Quality check failed to start: ' + (error.response?.data?.error || error.message))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const cancelQualityRun = async (runId) => {
+    try {
+      await subtitleQualityApi.cancelRun(runId)
+      const res = await subtitleQualityApi.getRunsForMovie(movieId)
+      setQualityRuns(res.data.runs || [])
+    } catch (error) {
+      showError('Cancel failed: ' + (error.response?.data?.error || error.message))
+    }
+  }
+
+  const dismissQualityRun = async (runId) => {
+    try {
+      await subtitleQualityApi.dismissRun(runId)
+      const res = await subtitleQualityApi.getRunsForMovie(movieId)
+      setQualityRuns(res.data.runs || [])
     } catch (error) {
       showError('Hide failed: ' + (error.response?.data?.error || error.message))
     }
@@ -643,6 +725,77 @@ function MovieFilesSection({ movieId }) {
         </div>
       )}
 
+      {/* Quality runs */}
+      {qualityRuns.filter((j) => j.status !== 'completed').length > 0 && (
+        <div className="space-y-2">
+          <h4 className="text-sm font-medium text-gray-900">Quality checks</h4>
+          {qualityRuns
+            .filter((j) => j.status !== 'completed')
+            .map((run) => {
+              const active = ACTIVE_STATUSES.includes(run.status)
+              const pct =
+                run.suggest_total > 0
+                  ? Math.min(100, Math.round((Number(run.suggest_done || 0) / Number(run.suggest_total)) * 100))
+                  : null
+              const timestamp = run.finished_at || run.created_at
+              return (
+                <div key={run.id} className="border border-gray-200 rounded-md p-3">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="truncate">
+                      Quality check {QUALITY_LANG_LABELS[run.lang] || run.lang} ·{' '}
+                      <span className="font-medium">{run.status}</span>
+                      {active && run.phase && (
+                        <span className="text-gray-500"> · {QUALITY_PHASE_LABELS[run.phase] || run.phase}</span>
+                      )}
+                      {timestamp && (
+                        <span className="text-gray-500">
+                          {' · '}
+                          {new Date(timestamp).toLocaleString()}
+                        </span>
+                      )}
+                    </span>
+                    <div className="space-x-3 shrink-0">
+                      {active && (
+                        <button
+                          onClick={() => cancelQualityRun(run.id)}
+                          className="text-red-600 hover:text-red-800"
+                        >
+                          Cancel
+                        </button>
+                      )}
+                      {!active && (
+                        <button
+                          onClick={() => dismissQualityRun(run.id)}
+                          className="text-gray-500 hover:text-gray-700"
+                          title="Hide this run"
+                        >
+                          Hide
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {active && run.phase === 'suggesting' && pct != null && (
+                    <div className="mt-2">
+                      <div className="w-full bg-gray-200 rounded-full h-2">
+                        <div
+                          className="bg-blue-600 h-2 rounded-full transition-all"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                      <div className="text-xs text-gray-500 mt-1">
+                        {run.suggest_done || 0}/{run.suggest_total} suggestions ({pct}%)
+                      </div>
+                    </div>
+                  )}
+                  {run.error_message && (
+                    <div className="text-xs text-red-600 mt-1">{run.error_message}</div>
+                  )}
+                </div>
+              )
+            })}
+        </div>
+      )}
+
       {/* Asset rows */}
       <div className="divide-y divide-gray-200 border border-gray-200 rounded-md">
         {ASSET_KINDS.map((asset) => {
@@ -727,6 +880,31 @@ function MovieFilesSection({ movieId }) {
                       >
                         Sync timing
                       </button>
+                    )}
+                    {row && (
+                      <button
+                        onClick={() => startQualityCheck(qualityLangForKind(asset.key))}
+                        disabled={busy || hasActiveQualityFor(qualityLangForKind(asset.key))}
+                        title="Lint these subtitles and generate LLM fix suggestions"
+                        className="text-sm text-blue-600 hover:text-blue-800 disabled:opacity-50"
+                      >
+                        Check quality
+                      </button>
+                    )}
+                    {row && (qualitySummary.counts?.[qualityLangForKind(asset.key)]?.open || 0) > 0 && (
+                      <Link
+                        to={`/movies/${movieId}/subtitles`}
+                        state={{ from: 'files', reviewLang: qualityLangForKind(asset.key) }}
+                        title="Review flagged cues in the subtitle editor"
+                        className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${
+                          (qualitySummary.counts[qualityLangForKind(asset.key)].error || 0) > 0
+                            ? 'bg-red-100 text-red-800 hover:bg-red-200'
+                            : 'bg-amber-100 text-amber-800 hover:bg-amber-200'
+                        }`}
+                      >
+                        ⚑ {qualitySummary.counts[qualityLangForKind(asset.key)].open} issue
+                        {qualitySummary.counts[qualityLangForKind(asset.key)].open === 1 ? '' : 's'}
+                      </Link>
                     )}
                     {row && (
                       <Link
