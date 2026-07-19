@@ -2,7 +2,8 @@
  * Subtitle translation jobs: /api/subtitle-translations
  *
  * A job machine-translates a movie's subtitles between Czech and English
- * (movie_files kinds subtitles_cs <-> subtitles_en) with the Anthropic API.
+ * (movie_files kinds subtitles_cs <-> subtitles_en) with an LLM (see
+ * services/llmClient for the provider switch).
  * Jobs run in-process (subtitleTranslator service); the app inserts the row,
  * enqueues in memory, and the client polls progress here.
  */
@@ -38,7 +39,7 @@ function notConfigured(res) {
   if (!subtitleTranslator.isConfigured()) {
     return res
       .status(503)
-      .json({ error: 'Subtitle translation is not configured (ANTHROPIC_API_KEY missing)' });
+      .json({ error: 'Subtitle translation is not configured (no LLM provider key set)' });
   }
   return res.status(503).json({ error: 'Google Drive is not configured' });
 }

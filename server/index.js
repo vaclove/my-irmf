@@ -27,6 +27,7 @@ const movieDownloadRoutes = require('./routes/movieDownloads');
 const movieTranscodeRoutes = require('./routes/movieTranscodes');
 const subtitleTranslationRoutes = require('./routes/subtitleTranslations');
 const subtitleSyncRoutes = require('./routes/subtitleSyncJobs');
+const subtitleQualityRoutes = require('./routes/subtitleQuality');
 const venueRoutes = require('./routes/venues');
 const blockRoutes = require('./routes/blocks');
 const programmingRoutes = require('./routes/programming');
@@ -41,6 +42,7 @@ const movieFileScanScheduler = require('./services/movie-file-scan-scheduler');
 const dbBackupScheduler = require('./services/db-backup-scheduler');
 const movieDownloader = require('./services/movieDownloader');
 const subtitleTranslator = require('./services/subtitleTranslator');
+const subtitleQualityRunner = require('./services/subtitleQualityRunner');
 const mailgunService = require('./utils/mailgun');
 
 const app = express();
@@ -160,6 +162,7 @@ app.use('/api/movie-downloads', requireIrmfDomain, movieDownloadRoutes);
 app.use('/api/movie-transcodes', requireIrmfDomain, movieTranscodeRoutes);
 app.use('/api/subtitle-translations', requireIrmfDomain, subtitleTranslationRoutes);
 app.use('/api/subtitle-syncs', requireIrmfDomain, subtitleSyncRoutes);
+app.use('/api/subtitle-quality', requireIrmfDomain, subtitleQualityRoutes);
 app.use('/api/movies', requireIrmfDomain, movieRoutes);
 app.use('/api/venues', requireIrmfDomain, venueRoutes);
 app.use('/api/blocks', requireIrmfDomain, blockRoutes);
@@ -243,6 +246,7 @@ const startServer = async () => {
     // Movie files: recover interrupted download/translation jobs and start the Drive scanner
     await movieDownloader.markInterruptedJobs();
     await subtitleTranslator.markInterruptedJobs();
+    await subtitleQualityRunner.markInterruptedJobs();
     movieFileScanScheduler.start();
 
     // Nightly DB backup (production only): enqueues a db_backup worker message

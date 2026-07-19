@@ -510,6 +510,47 @@ router.put('/subtitles/:lang/cues', async (req, res) => {
     });
     await upsertFileRow(movieId, row.file_kind, updated);
     const fresh = await loadSubtitleRow(movieId, lang);
+
+    // Reconcile open quality flags against the saved text (non-fatal):
+    // suggestion applied -> accepted; text changed some other way (or the
+    // file shape changed) -> stale; untouched -> stays open, re-pinned to
+    // the new checksum so later saves don't orphan it.
+    try {
+      const openFlags = await pool.query(
+        `SELECT id, cue_index, target_text, suggestion FROM subtitle_quality_flags
+         WHERE movie_id = $1 AND lang = $2 AND status = 'open'`,
+        [movieId, lang]
+      );
+      const resolvedBy = req.user?.email || null;
+      for (const flag of openFlags.rows) {
+        const saved = clean[flag.cue_index];
+        if (!saved) {
+          await pool.query(
+            `UPDATE subtitle_quality_flags SET status = 'stale' WHERE id = $1`,
+            [flag.id]
+          );
+        } else if (saved.text === flag.target_text) {
+          await pool.query(`UPDATE subtitle_quality_flags SET file_md5 = $2 WHERE id = $1`, [
+            flag.id,
+            fresh?.md5_checksum || null,
+          ]);
+        } else if (flag.suggestion && saved.text === flag.suggestion) {
+          await pool.query(
+            `UPDATE subtitle_quality_flags SET status = 'accepted',
+               resolved_at = CURRENT_TIMESTAMP, resolved_by = $2 WHERE id = $1`,
+            [flag.id, resolvedBy]
+          );
+        } else {
+          await pool.query(
+            `UPDATE subtitle_quality_flags SET status = 'stale' WHERE id = $1`,
+            [flag.id]
+          );
+        }
+      }
+    } catch (flagError) {
+      logError(flagError, req, { operation: 'reconcile_subtitle_quality_flags', movieId });
+    }
+
     res.json({ file: fresh });
   } catch (error) {
     logError(error, req, { operation: 'save_subtitle_cues', movieId });

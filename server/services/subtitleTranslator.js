@@ -1,8 +1,9 @@
 /**
  * In-process subtitle translation job runner: downloads a movie's subtitle
  * file (.srt or .vtt) from Drive, machine-translates it between Czech and
- * English with the Anthropic API, and uploads the result back to the movie's
- * Drive folder as a convention-named .srt.
+ * English with an LLM (GPT-5.6 Sol on Azure by default, Claude Opus as the
+ * fallback provider — see services/llmClient), and uploads the result back
+ * to the movie's Drive folder as a convention-named .srt.
  *
  * Timings are never touched: cue timing lines are copied from the source
  * verbatim, only the text is translated. Cues are sent in batches split at
@@ -10,14 +11,16 @@
  * batch passed along as context for continuity.
  *
  * Every model call carries the complete source subtitle text as a cached
- * system block (prompt caching: written once by the brief pre-pass, read by
- * every batch), plus the movie synopsis from the DB where available. A
- * one-shot pre-pass produces a translation brief (names, register,
- * tykání/vykání, terminology) injected into each batch's prompt; if it
- * fails, the job continues without it. An optional user-provided context
- * note (job.context_note — e.g. who addresses whom formally, character
- * genders, terminology) is treated as authoritative and fed to both the
- * pre-pass and every batch prompt.
+ * system block (prompt caching: explicit cache_control on Anthropic, Azure
+ * prefix-caches automatically), plus the movie synopsis from the DB where
+ * available. A one-shot pre-pass produces a translation brief (names,
+ * register, tykání/vykání, terminology) injected into each batch's prompt,
+ * followed by a small extraction call that distills the brief into
+ * machine-readable JSON (characters, register pairs, glossary) for the
+ * quality gate; if either fails, the job continues without it. An optional
+ * user-provided context note (job.context_note — e.g. who addresses whom
+ * formally, character genders, terminology) is treated as authoritative and
+ * fed to both the pre-pass and every batch prompt.
  *
  * Replies are constrained by structured outputs to a JSON object
  * {"cues": [{"n", "text"}, ...]} and validated against the expected cue
@@ -29,7 +32,7 @@
  * left over from a crash are marked 'interrupted' (retryable).
  */
 
-const Anthropic = require('@anthropic-ai/sdk');
+const llmClient = require('./llmClient');
 const { pool } = require('../models/database');
 const { logger } = require('../utils/logger');
 const googleDrive = require('./googleDrive');
@@ -188,22 +191,15 @@ function buildBatchUserMessage(batch, previousContext) {
 }
 
 // ---------------------------------------------------------------------------
-// Anthropic call + response parsing
+// Model calls + response parsing
 // ---------------------------------------------------------------------------
 
-let cachedClient = null;
-
 function isConfigured() {
-  return !!process.env.ANTHROPIC_API_KEY;
-}
-
-function getClient() {
-  if (!cachedClient) cachedClient = new Anthropic({ maxRetries: 4 });
-  return cachedClient;
+  return llmClient.isConfigured();
 }
 
 function getModel() {
-  return process.env.ANTHROPIC_MODEL || 'claude-opus-4-8';
+  return llmClient.getModel();
 }
 
 // Structured-outputs schema for batch replies: {"cues": [{"n", "text"}, ...]}.
@@ -230,18 +226,54 @@ const TRANSLATION_OUTPUT_FORMAT = {
   },
 };
 
-function logModelUsage(stage, response, extra = {}) {
-  const usage = response.usage || {};
-  logger.debug('[SubtitleTranslator] model call', {
-    stage,
-    stopReason: response.stop_reason,
-    inputTokens: usage.input_tokens,
-    outputTokens: usage.output_tokens,
-    cacheReadTokens: usage.cache_read_input_tokens,
-    cacheWriteTokens: usage.cache_creation_input_tokens,
-    ...extra,
-  });
-}
+// Structured-outputs schema for the brief-to-JSON extraction pass: the
+// machine-checkable facts the quality gate consumes.
+const BRIEF_JSON_SCHEMA = {
+  type: 'object',
+  properties: {
+    characters: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          render_as: { type: 'string' },
+        },
+        required: ['name', 'render_as'],
+        additionalProperties: false,
+      },
+    },
+    register_pairs: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          a: { type: 'string' },
+          b: { type: 'string' },
+          form: { type: 'string', enum: ['t', 'v'] },
+          note: { type: 'string' },
+        },
+        required: ['a', 'b', 'form', 'note'],
+        additionalProperties: false,
+      },
+    },
+    glossary: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          en: { type: 'string' },
+          cs: { type: 'string' },
+          note: { type: 'string' },
+        },
+        required: ['en', 'cs', 'note'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['characters', 'register_pairs', 'glossary'],
+  additionalProperties: false,
+};
 
 /**
  * Parse a structured-outputs JSON reply and validate against the expected
@@ -303,11 +335,10 @@ async function buildTranslationBrief({ direction, movie, sourceText, contextNote
 ${movieHeading(movie)}`,
     },
   ];
-  const response = await getClient().messages.create({
-    model: getModel(),
-    max_tokens: BRIEF_MAX_TOKENS,
-    thinking: { type: 'adaptive' },
-    system,
+  const response = await llmClient.complete({
+    systemBlocks: system,
+    maxTokens: BRIEF_MAX_TOKENS,
+    stage: 'brief',
     messages: [
       {
         role: 'user',
@@ -322,13 +353,47 @@ Plain text, at most 40 lines, no preamble.`,
       },
     ],
   });
-  logModelUsage('brief', response);
-  const text = response.content
-    .filter((b) => b.type === 'text')
-    .map((b) => b.text)
-    .join('')
-    .trim();
+  const text = (response.text || '').trim();
   return text ? text.slice(0, BRIEF_MAX_CHARS) : null;
+}
+
+/**
+ * Distill a text brief into machine-readable JSON for the quality gate
+ * (characters, register pairs, glossary). Deliberately a separate small call
+ * without the source-reference block: cheap, and its failure never degrades
+ * the translation itself.
+ * @returns {Promise<object|null>}
+ */
+async function extractBriefJson({ direction, brief }) {
+  const { sourceLang, targetLang } = DIRECTIONS[direction];
+  const response = await llmClient.complete({
+    systemBlocks: [
+      {
+        type: 'text',
+        text: `You extract machine-checkable facts from a subtitle translation brief (${sourceLang} to ${targetLang}).`,
+      },
+    ],
+    maxTokens: 4000,
+    jsonSchema: BRIEF_JSON_SCHEMA,
+    schemaName: 'brief_facts',
+    stage: 'brief_json',
+    messages: [
+      {
+        role: 'user',
+        content: `Extract from the translation brief below:
+- characters: each character name and how it is rendered in ${targetLang} (typically unchanged).
+- register_pairs: who addresses whom with which form — 't' (tykání/informal) or 'v' (vykání/formal); one entry per direction when asymmetric. Put any caveat in "note" (empty string if none).
+- glossary: recurring terms with the exact ${targetLang} translation to use consistently. Plain phrases only, no regex or quotes. Put any caveat in "note" (empty string if none).
+
+Only include facts stated in the brief. Brief:
+
+${brief}`,
+      },
+    ],
+  });
+  const parsed = JSON.parse(response.text);
+  if (!parsed || !Array.isArray(parsed.glossary)) return null;
+  return parsed;
 }
 
 /**
@@ -343,25 +408,23 @@ async function translateBatch({ batch, direction, movie, sourceText, brief, cont
   const expectedNs = batch.map((c) => c.n);
 
   for (let attempt = 1; ; attempt++) {
-    const response = await getClient().messages.create({
-      model: getModel(),
-      max_tokens: MAX_OUTPUT_TOKENS,
-      thinking: { type: 'adaptive' },
-      output_config: { format: TRANSLATION_OUTPUT_FORMAT },
-      system,
+    const response = await llmClient.complete({
+      systemBlocks: system,
       messages,
-      // No temperature/top_p/top_k: rejected with 400 on current Opus models.
+      maxTokens: MAX_OUTPUT_TOKENS,
+      jsonSchema: TRANSLATION_OUTPUT_FORMAT.schema,
+      schemaName: 'translated_cues',
+      stage: 'batch',
     });
-    logModelUsage('batch', response, { cues: batch.length, attempt });
-    if (response.stop_reason === 'max_tokens') {
+    if (response.refusal) {
+      throw new TranslationFormatError(`model refused: ${response.refusal}`);
+    }
+    if (response.truncated) {
       throw new TranslationTruncatedError(
         `output truncated at max_tokens for cues #${expectedNs[0]}–#${expectedNs[expectedNs.length - 1]}`
       );
     }
-    const text = response.content
-      .filter((b) => b.type === 'text')
-      .map((b) => b.text)
-      .join('');
+    const text = response.text;
     try {
       return parseTranslatedCues(text, expectedNs);
     } catch (formatError) {
@@ -419,16 +482,7 @@ function describeError(error) {
   if (error instanceof TranslationTruncatedError) {
     return `Model output was truncated: ${error.message}`;
   }
-  if (error instanceof Anthropic.AuthenticationError) {
-    return 'Anthropic API key is invalid';
-  }
-  if (error instanceof Anthropic.RateLimitError) {
-    return 'Anthropic rate limit exceeded — try again later';
-  }
-  if (error instanceof Anthropic.APIError) {
-    return `Anthropic API error (${error.status ?? 'network'}): ${error.message}`;
-  }
-  return error.message || 'Unknown error';
+  return llmClient.describeError(error) || error.message || 'Unknown error';
 }
 
 // ---------------------------------------------------------------------------
@@ -522,7 +576,7 @@ class SubtitleTranslator {
       return;
     }
     if (!isConfigured()) {
-      await this.fail(jobId, 'Subtitle translation is not configured (ANTHROPIC_API_KEY missing)');
+      await this.fail(jobId, 'Subtitle translation is not configured (no LLM provider key set)');
       return;
     }
     if (!googleDrive.isConfigured()) {
@@ -571,7 +625,8 @@ class SubtitleTranslator {
 
       // Pre-pass: translation brief for cross-film consistency. Optional —
       // the job carries on without one. Also warms the prompt cache for the
-      // source reference block the batch calls reuse.
+      // source reference block the batch calls reuse. The brief (text +
+      // extracted JSON facts) is stored on the job for the quality gate.
       let brief = null;
       if (!(await this.checkCancelled(jobId))) {
         try {
@@ -586,6 +641,21 @@ class SubtitleTranslator {
             jobId,
             error: briefError.message,
           });
+        }
+        if (brief) {
+          let briefJson = null;
+          try {
+            briefJson = await extractBriefJson({ direction: job.direction, brief });
+          } catch (extractError) {
+            logger.warn('[SubtitleTranslator] brief JSON extraction failed; gate will run without glossary', {
+              jobId,
+              error: extractError.message,
+            });
+          }
+          await pool.query(
+            'UPDATE subtitle_translation_jobs SET brief = $2, brief_json = $3 WHERE id = $1',
+            [jobId, brief, briefJson ? JSON.stringify(briefJson) : null]
+          );
         }
       }
 
@@ -677,6 +747,26 @@ class SubtitleTranslator {
         cues: cues.length,
         batches: batches.length,
       });
+
+      // Kick off a quality-gate run over the fresh translation. Strictly
+      // best-effort: a gate failure must never affect the finished job.
+      // Lazy require avoids a circular dependency (the runner never imports
+      // this service).
+      try {
+        const subtitleQualityRunner = require('./subtitleQualityRunner');
+        await subtitleQualityRunner.createRunForTranslation({
+          movieId: job.movie_id,
+          lang: dir.targetKind.replace('subtitles_', ''),
+          fileDriveId: created.id,
+          translationJobId: jobId,
+          createdBy: job.created_by,
+        });
+      } catch (gateError) {
+        logger.warn('[SubtitleTranslator] failed to enqueue quality run', {
+          jobId,
+          error: gateError.message,
+        });
+      }
     } catch (error) {
       if (error.cancelled) {
         await pool.query(

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useParams, useNavigate, useLocation, Link } from 'react-router-dom'
-import { movieApi, movieFileApi } from '../utils/api'
+import { movieApi, movieFileApi, subtitleQualityApi } from '../utils/api'
 import { useToast } from '../contexts/ToastContext'
 import { notifyMovieFilesChanged } from '../utils/movieFilesBus'
 import { alignCues } from '../utils/cueAlignment'
@@ -10,7 +10,7 @@ import CueTable from '../components/subtitle-editor/CueTable'
 const LANGS = ['en', 'cs']
 const LANG_LABELS = { en: 'English', cs: 'Czech' }
 
-const emptyTrack = { status: 'loading', file: null, baseMd5: null, origCues: null, cues: null, saving: false, conflict: false, message: null }
+const emptyTrack = { status: 'loading', file: null, baseMd5: null, origCues: null, cues: null, saving: false, conflict: false, message: null, flags: [] }
 
 /**
  * Visual subtitle editor: the 720p preview on top, both language tracks in an
@@ -30,13 +30,35 @@ function SubtitleEditor() {
   const [hasProxy, setHasProxy] = useState(false)
   const [loading, setLoading] = useState(true)
   const [tracks, setTracks] = useState({ en: emptyTrack, cs: emptyTrack })
+  // "Review issues" entry point: which lang's flags to jump to after load.
+  const reviewLang = location.state?.reviewLang || null
   // Per-language subtitle variant: the original upload or the alass-synced copy.
-  const [variants, setVariants] = useState({ en: 'original', cs: 'original' })
+  // A reviewLang like 'cs_synced' opens that variant directly.
+  const [variants, setVariants] = useState({
+    en: reviewLang === 'en_synced' ? 'synced' : 'original',
+    cs: reviewLang === 'cs_synced' ? 'synced' : 'original',
+  })
   const [syncedAvailable, setSyncedAvailable] = useState({ en: false, cs: false })
   const [currentTimeMs, setCurrentTimeMs] = useState(0)
+  const [flagBusy, setFlagBusy] = useState(false)
   const videoRef = useRef(null)
   const variantsRef = useRef(variants)
   variantsRef.current = variants
+  const reviewScrolled = useRef(false)
+
+  // Open quality flags for a track, reconciled against the loaded cues: a
+  // flag whose snapshot no longer matches the current text is hidden (the
+  // file drifted; the save handler will mark it stale server-side).
+  const loadFlags = useCallback(async (langKey, cues) => {
+    try {
+      const res = await subtitleQualityApi.getFlags(id, langKey)
+      return (res.data.flags || []).filter(
+        (f) => cues[f.cue_index] && cues[f.cue_index].text === f.target_text
+      )
+    } catch {
+      return [] // quality data is optional; never block the editor
+    }
+  }, [id])
 
   const loadTrack = useCallback(async (lang, variantArg) => {
     const variant = variantArg || variantsRef.current[lang]
@@ -45,9 +67,10 @@ function SubtitleEditor() {
     try {
       const res = await movieFileApi.getSubtitleCues(id, langKey)
       const { file, cues } = res.data
+      const flags = await loadFlags(langKey, cues)
       setTracks((t) => ({
         ...t,
-        [lang]: { ...emptyTrack, status: 'ready', file, baseMd5: file.md5_checksum, origCues: cues, cues },
+        [lang]: { ...emptyTrack, status: 'ready', file, baseMd5: file.md5_checksum, origCues: cues, cues, flags },
       }))
     } catch (error) {
       const status = error.response?.status
@@ -60,7 +83,7 @@ function SubtitleEditor() {
         },
       }))
     }
-  }, [id])
+  }, [id, loadFlags])
 
   useEffect(() => {
     const loadAll = async () => {
@@ -95,6 +118,52 @@ function SubtitleEditor() {
       return { ...t, [lang]: { ...tr, cues } }
     })
   }, [])
+
+  // Per-track flag lookup: cue index -> flags[]. Stable references so the
+  // memoized cue rows only re-render when their own flags change.
+  const flagsByIndex = useMemo(() => {
+    const build = (tr) => {
+      const map = new Map()
+      for (const f of tr.flags || []) {
+        if (!map.has(f.cue_index)) map.set(f.cue_index, [])
+        map.get(f.cue_index).push(f)
+      }
+      return map
+    }
+    return { en: build(tracks.en), cs: build(tracks.cs) }
+  }, [tracks.en.flags, tracks.cs.flags]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Accept = fill the cell with the suggestion (a normal dirty edit). The
+  // flag flips to 'accepted' in the DB when the file is saved.
+  const acceptSuggestion = useCallback(
+    (lang, index) => {
+      const flags = flagsByIndex[lang].get(index) || []
+      const suggestion = flags.find((f) => f.suggestion)?.suggestion
+      if (suggestion) updateCue(lang, index, suggestion)
+    },
+    [flagsByIndex, updateCue]
+  )
+
+  // Dismiss is an immediate human judgement, independent of file content.
+  const dismissFlags = useCallback(
+    async (lang, index) => {
+      const flags = flagsByIndex[lang].get(index) || []
+      if (flags.length === 0) return
+      setFlagBusy(true)
+      try {
+        await subtitleQualityApi.resolveFlags(flags.map((f) => f.id), 'dismissed')
+        setTracks((t) => ({
+          ...t,
+          [lang]: { ...t[lang], flags: (t[lang].flags || []).filter((f) => f.cue_index !== index) },
+        }))
+      } catch (error) {
+        showError('Dismiss failed: ' + (error.response?.data?.error || error.message))
+      } finally {
+        setFlagBusy(false)
+      }
+    },
+    [flagsByIndex, showError]
+  )
 
   const isDirty = (tr) =>
     tr.status === 'ready' &&
@@ -139,6 +208,8 @@ function SubtitleEditor() {
         base_md5: tr.baseMd5,
       })
       const savedCues = tr.cues.map((c) => ({ ...c, text: c.text.trim() }))
+      // The save endpoint reconciled flag statuses (accepted/stale) — refetch.
+      const freshFlags = await loadFlags(langKey, savedCues)
       setTracks((t) => ({
         ...t,
         [lang]: {
@@ -149,6 +220,7 @@ function SubtitleEditor() {
           file: res.data.file,
           saving: false,
           conflict: false,
+          flags: freshFlags,
         },
       }))
       success(`${LANG_LABELS[lang]} subtitles saved`)
@@ -215,6 +287,24 @@ function SubtitleEditor() {
     return count
   }, [rows, activeRowIndex, currentTimeMs])
 
+  // Arriving via "Review issues": scroll to the first flagged row once the
+  // track is ready.
+  useEffect(() => {
+    if (!reviewLang || reviewScrolled.current) return
+    const lang = reviewLang.startsWith('cs') ? 'cs' : 'en'
+    const tr = tracks[lang]
+    if (tr.status !== 'ready' || rows.length === 0) return
+    reviewScrolled.current = true
+    const flagged = new Set((tr.flags || []).map((f) => f.cue_index))
+    if (flagged.size === 0) return
+    const rowIndex = rows.findIndex((r) => flagged.has(lang === 'cs' ? r.cs : r.en))
+    if (rowIndex < 0) return
+    // The rows render right after this effect; defer one frame.
+    requestAnimationFrame(() => {
+      document.querySelector(`[data-row-index="${rowIndex}"]`)?.scrollIntoView({ block: 'center' })
+    })
+  }, [reviewLang, tracks, rows])
+
   if (loading) {
     return <div className="text-sm text-gray-500">Loading subtitle editor…</div>
   }
@@ -252,8 +342,21 @@ function SubtitleEditor() {
           const tr = tracks[lang]
           const dirty = lang === 'en' ? dirtyEn : dirtyCs
           if (tr.status !== 'ready' && !syncedAvailable[lang]) return null
+          const openFlags = (tr.flags || []).length
           return (
             <div key={lang} className="flex items-center gap-1.5">
+              {openFlags > 0 && (
+                <span
+                  className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${
+                    (tr.flags || []).some((f) => f.severity === 'error')
+                      ? 'bg-red-100 text-red-800'
+                      : 'bg-amber-100 text-amber-800'
+                  }`}
+                  title="Open quality findings in this track — click the ⚑ badges in the list"
+                >
+                  ⚑ {openFlags}
+                </span>
+              )}
               {syncedAvailable[lang] && (
                 <div className="flex rounded-md border border-gray-300 overflow-hidden text-xs">
                   {['original', 'synced'].map((variant) => (
@@ -341,11 +444,16 @@ function SubtitleEditor() {
                 rows={rows}
                 en={en}
                 cs={cs}
+                enFlagsByIndex={flagsByIndex.en}
+                csFlagsByIndex={flagsByIndex.cs}
                 activeRowIndex={activeRowIndex}
                 gapIndex={gapIndex}
                 canSeek={hasProxy}
+                flagBusy={flagBusy}
                 onSeek={seekTo}
                 onEdit={updateCue}
+                onAcceptSuggestion={acceptSuggestion}
+                onDismissFlags={dismissFlags}
               />
             </div>
           ) : (
