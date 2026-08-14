@@ -504,6 +504,18 @@ function MovieFilesSection({ movieId }) {
             Download from link
           </button>
         )}
+        {folder && (
+          <a
+            href={`https://drive.google.com/drive/folders/${folder.id}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Open this movie's folder in Google Drive"
+            className="inline-flex items-center gap-1 border border-gray-300 text-gray-700 px-3 py-1.5 rounded-md hover:bg-gray-50 text-sm"
+          >
+            Open in Drive
+            <span aria-hidden="true">↗</span>
+          </a>
+        )}
         <label className="flex items-center space-x-2 text-sm text-gray-600">
           <input
             type="checkbox"
