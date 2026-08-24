@@ -4,7 +4,57 @@ const { logError } = require('../utils/logger');
 const { auditMiddleware, captureOriginalData } = require('../utils/auditLogger');
 const imageStorage = require('../services/imageStorage');
 const googleDrive = require('../services/googleDrive');
+const synopsisTranslator = require('../services/synopsisTranslator');
 const router = express.Router();
+
+// Translate a synopsis between Czech and English with an LLM.
+// Deliberately id-less: it translates whatever the user currently has in the
+// form (including unsaved edits) and works in the "Add Movie" modal, where the
+// movie has no id yet. Nothing is persisted — the client fills the opposite
+// textarea and the usual save flow stores it.
+//
+// Registered above the audit middleware on purpose: it mutates nothing, and
+// auditMiddleware maps any POST to a CREATE, which would litter the movie
+// audit trail with phantom creations.
+router.post('/translate-synopsis', async (req, res) => {
+  const { direction, text, movie } = req.body || {};
+  try {
+    if (!synopsisTranslator.isConfigured()) {
+      return res
+        .status(503)
+        .json({ error: 'Synopsis translation is not configured (no LLM provider key set)' });
+    }
+    if (!synopsisTranslator.DIRECTIONS[direction]) {
+      return res.status(400).json({
+        error: `direction must be one of: ${Object.keys(synopsisTranslator.DIRECTIONS).join(', ')}`,
+      });
+    }
+    if (typeof text !== 'string') {
+      return res.status(400).json({ error: 'text must be a string' });
+    }
+    const source = text.trim();
+    if (!source) {
+      return res.status(400).json({ error: 'text must not be empty' });
+    }
+    if (source.length > synopsisTranslator.MAX_SOURCE_CHARS) {
+      return res.status(400).json({
+        error: `text must be at most ${synopsisTranslator.MAX_SOURCE_CHARS} characters`,
+      });
+    }
+
+    const translated = await synopsisTranslator.translateSynopsis({
+      direction,
+      text: source,
+      movie: movie && typeof movie === 'object' ? movie : null,
+    });
+    res.json({ text: translated });
+  } catch (error) {
+    logError(error, req, { operation: 'translate_synopsis', direction });
+    res
+      .status(502)
+      .json({ error: synopsisTranslator.describeError(error) || error.message });
+  }
+});
 
 // Apply audit middleware to all routes
 router.use(captureOriginalData('movies'));
