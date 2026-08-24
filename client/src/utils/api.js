@@ -133,6 +133,7 @@ export const movieApi = {
   update: (id, movie) => api.put(`/movies/${id}`, movie),
   delete: (id) => api.delete(`/movies/${id}`),
   getBySection: (section, editionId) => api.get(`/movies/section/${section}`, { params: editionId ? { edition_id: editionId } : {} }),
+  translateSynopsis: (data) => api.post('/movies/translate-synopsis', data),
 }
 
 // Movie files API (Google Shared Drive assets per movie)

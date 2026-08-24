@@ -12,6 +12,13 @@ const premiereTypes = [
   { value: 'world', label: 'World Premiere' }
 ]
 
+// Synopsis translation directions, keyed as POST /api/movies/translate-synopsis
+// expects them.
+const synopsisDirections = {
+  cs_to_en: { source: 'synopsis_cs', target: 'synopsis_en', sourceLabel: 'Czech', targetLabel: 'English' },
+  en_to_cs: { source: 'synopsis_en', target: 'synopsis_cs', sourceLabel: 'English', targetLabel: 'Czech' }
+}
+
 const emptyForm = (editionId) => ({
   edition_id: editionId || '',
   catalogue_year: '',
@@ -88,6 +95,8 @@ function MovieForm({
   )
   // Snapshot of the last-seeded/saved state, used to detect unsaved changes.
   const seededRef = useRef(formData)
+  // Direction of the synopsis translation in flight, or null when idle.
+  const [translating, setTranslating] = useState(null)
 
   // Reseed when the target movie changes (e.g. detail page refetches after save).
   useEffect(() => {
@@ -128,6 +137,67 @@ function MovieForm({
       reader.readAsDataURL(file)
     }
   }
+
+  // Machine-translate one synopsis into the other language. The result only
+  // fills the opposite textarea — saving stays with the form's submit button.
+  const handleTranslateSynopsis = async (direction) => {
+    const { source, target, sourceLabel, targetLabel } = synopsisDirections[direction]
+    const sourceText = (formData[source] || '').trim()
+    if (!sourceText) {
+      showError(`The ${sourceLabel} synopsis is empty — nothing to translate`)
+      return
+    }
+    if (
+      (formData[target] || '').trim() &&
+      !window.confirm(`This will overwrite the ${targetLabel} synopsis. Continue?`)
+    ) {
+      return
+    }
+
+    setTranslating(direction)
+    try {
+      const res = await movieApi.translateSynopsis({
+        direction,
+        text: sourceText,
+        movie: {
+          name_cs: formData.name_cs,
+          name_en: formData.name_en,
+          year: formData.year,
+          director: formData.director,
+          country: formData.country
+        }
+      })
+      setFormData(prev => ({ ...prev, [target]: res.data.text }))
+      success(`${targetLabel} synopsis translated — review it before saving`)
+    } catch (error) {
+      console.error('Error translating synopsis:', error)
+      showError('Failed to translate synopsis: ' + (error.response?.data?.error || error.message))
+    } finally {
+      setTranslating(null)
+    }
+  }
+
+  const translateButton = (direction, label, arrowPath) => (
+    <button
+      type="button"
+      onClick={() => handleTranslateSynopsis(direction)}
+      disabled={translating !== null}
+      title={label}
+      aria-label={label}
+      className="p-2 rounded-md border border-gray-300 text-gray-600 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+    >
+      {translating === direction ? (
+        <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth={4} />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+        </svg>
+      ) : (
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={arrowPath} />
+        </svg>
+      )}
+    </button>
+  )
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -359,7 +429,7 @@ function MovieForm({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-[1fr_auto_1fr] gap-4">
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Czech Synopsis</label>
           <textarea
@@ -369,6 +439,10 @@ function MovieForm({
             className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
             placeholder="Czech synopsis..."
           />
+        </div>
+        <div className="flex flex-col justify-center gap-2 pt-6">
+          {translateButton('cs_to_en', 'Translate Czech → English', 'M14 5l7 7m0 0l-7 7m7-7H3')}
+          {translateButton('en_to_cs', 'Translate English → Czech', 'M10 19l-7-7m0 0l7-7m-7 7h18')}
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">English Synopsis</label>
