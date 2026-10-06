@@ -609,6 +609,7 @@ router.get('/public/movies/:id', async (req, res) => {
         ps.scheduled_date::text as scheduled_date,
         ps.scheduled_time,
         ps.ticket_link,
+        ps.free_entry,
         v.name_cs as venue_name_cs,
         v.name_en as venue_name_en,
         null as block_name_cs,
@@ -629,6 +630,7 @@ router.get('/public/movies/:id', async (req, res) => {
         ps.scheduled_date::text as scheduled_date,
         ps.scheduled_time,
         ps.ticket_link,
+        ps.free_entry,
         v.name_cs as venue_name_cs,
         v.name_en as venue_name_en,
         mb.name_cs as block_name_cs,
@@ -653,6 +655,7 @@ router.get('/public/movies/:id', async (req, res) => {
         venue_cs: screening.venue_name_cs,
         venue_en: screening.venue_name_en,
         ticket_link: screening.ticket_link,
+        free_entry: screening.free_entry,
         block_name_cs: screening.block_name_cs,
         block_name_en: screening.block_name_en,
         is_block: !!screening.block_name_cs
