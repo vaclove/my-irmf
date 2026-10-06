@@ -32,6 +32,7 @@ export const LANGUAGES = {
   'ar': 'Arabic',
   'he': 'Hebrew',
   'fa': 'Persian',
+  'ku': 'Kurdish',
   'hi': 'Hindi',
   'ur': 'Urdu',
   'zh': 'Chinese',
