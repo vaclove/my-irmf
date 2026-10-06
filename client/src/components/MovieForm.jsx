@@ -38,7 +38,11 @@ const emptyForm = (editionId) => ({
   subtitles: '',
   is_35mm: false,
   has_delegation: false,
-  is_public: true
+  is_public: true,
+  trailer_url: '',
+  website_url: '',
+  facebook_url: '',
+  instagram_url: ''
 })
 
 const seedFromMovie = (movie) => ({
@@ -60,8 +64,21 @@ const seedFromMovie = (movie) => ({
   subtitles: movie.subtitles || '',
   is_35mm: movie.is_35mm || false,
   has_delegation: movie.has_delegation || false,
-  is_public: movie.is_public !== undefined ? movie.is_public : true
+  is_public: movie.is_public !== undefined ? movie.is_public : true,
+  trailer_url: movie.trailer_url || '',
+  website_url: movie.website_url || '',
+  facebook_url: movie.facebook_url || '',
+  instagram_url: movie.instagram_url || ''
 })
+
+// Shown on the public film detail: YouTube/Vimeo trailers are embedded there,
+// other trailer URLs become a plain link
+const linkFields = [
+  { key: 'trailer_url', label: 'Trailer', placeholder: 'https://www.youtube.com/watch?v=… or https://vimeo.com/…' },
+  { key: 'website_url', label: 'Website', placeholder: 'https://…' },
+  { key: 'facebook_url', label: 'Facebook', placeholder: 'https://www.facebook.com/…' },
+  { key: 'instagram_url', label: 'Instagram', placeholder: 'https://www.instagram.com/…' }
+]
 
 /**
  * Create/edit movie form. Owns its own form state so it can be reused from the
@@ -453,6 +470,42 @@ function MovieForm({
             className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
             placeholder="English synopsis..."
           />
+        </div>
+      </div>
+
+      <div>
+        <h3 className="text-sm font-medium text-gray-700 mb-2">Trailer &amp; Links</h3>
+        <div className="grid grid-cols-2 gap-4">
+          {linkFields.map(({ key, label, placeholder }) => (
+            <div key={key}>
+              <label htmlFor={`movie-${key}`} className="block text-sm text-gray-600 mb-1">{label}</label>
+              <div className="flex items-center gap-2">
+                <input
+                  id={`movie-${key}`}
+                  type="text"
+                  inputMode="url"
+                  value={formData[key]}
+                  onChange={(e) => setFormData({ ...formData, [key]: e.target.value })}
+                  className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                  placeholder={placeholder}
+                />
+                {/^https?:\/\//i.test(formData[key].trim()) && (
+                  <a
+                    href={formData[key].trim()}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={`Open ${label}`}
+                    aria-label={`Open ${label}`}
+                    className="p-2 rounded-md border border-gray-300 text-gray-600 hover:bg-gray-100"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                    </svg>
+                  </a>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 
