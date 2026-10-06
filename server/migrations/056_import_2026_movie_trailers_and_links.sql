@@ -4,8 +4,9 @@
 -- the admin is never overwritten, and re-running is harmless.
 --
 -- Not imported:
---   * three trailers exist only as MP4 files (Vedistan, Get Lost Luca, The Big Ride);
+--   * two trailers exist only as MP4 files (Get Lost Luca, The Big Ride);
 --     add the URL in the admin once they are uploaded to YouTube/Vimeo;
+--   * Socotra and Vedistan from the export are not in the 2026 selection;
 --   * Untamed lists a second YouTube video as its "Website"; left out as it is not a website;
 --   * The Quest for Emerald Mountain, Pierced Souls, The Kingdom of the Innocents had no links.
 
@@ -39,19 +40,3 @@ UPDATE movies m SET
   instagram_url = COALESCE(NULLIF(m.instagram_url, ''), l.instagram_url)
 FROM links l
 WHERE m.id = l.movie_id;
-
--- Two films are not in the public 2026 catalogue (missing or not public), so their
--- ids are unknown here: match them by title within the 2026 edition. No-op if absent.
-UPDATE movies m SET
-  website_url   = COALESCE(NULLIF(m.website_url, ''), 'https://austintrapnell.wixsite.com/portfolio/single-project-1'),
-  instagram_url = COALESCE(NULLIF(m.instagram_url, ''), 'https://www.instagram.com/austin_trapnell/')
-FROM editions e
-WHERE m.edition_id = e.id AND e.year = 2026
-  AND (m.name_en ILIKE 'Socotra%' OR m.name_cs ILIKE 'Socotra%');
-
-UPDATE movies m SET
-  facebook_url  = COALESCE(NULLIF(m.facebook_url, ''), 'https://facebook.com/vedmalmo'),
-  instagram_url = COALESCE(NULLIF(m.instagram_url, ''), 'https://instagram.com/ved.sound')
-FROM editions e
-WHERE m.edition_id = e.id AND e.year = 2026
-  AND (m.name_en ILIKE 'Vedistan%' OR m.name_cs ILIKE 'Vedistan%');
