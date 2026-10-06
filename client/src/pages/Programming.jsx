@@ -1146,7 +1146,7 @@ const Programming = () => {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm text-gray-900">
-                        {entry.total_runtime} min
+                        {entry.base_runtime ?? (entry.total_runtime - (entry.discussion_time || 0))} min
                       </div>
                       {entry.discussion_time > 0 && (
                         <div className="text-xs text-gray-500">
