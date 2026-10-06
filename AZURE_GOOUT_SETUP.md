@@ -87,6 +87,39 @@ Timeline:
 └─ 60d: Refresh token expires → Manual token renewal required
 ```
 
+GoOut issues a new refresh token on every refresh, so the 60-day window rolls forward
+with each scheduled refresh. Manual renewal is only needed if the app stops refreshing
+(e.g. it is down) for 60 days.
+
+## Linking an Edition's Screenings
+
+The ticket counts in Programming (and the check-in IDs for the scanner) need each
+programming entry to carry `goout_schedule_id` and `goout_checkin_id`. Once the screenings
+are on sale in GoOut, sync them with:
+
+```bash
+# Dry run: shows what would be linked or created, writes nothing
+node server/scripts/goout-sync-edition.js --year 2026
+
+# Write the changes (one transaction)
+node server/scripts/goout-sync-edition.js --year 2026 --apply
+```
+
+The script:
+- reads all IRMF sales (organizer 8736) and keeps schedules starting in that year;
+- links the festival pass (a schedule without a start time) to a hidden
+  "Akreditace festivalu" entry, creating it in the Malý sál at 12:00 on the pass's first day if missing;
+- matches every other schedule to a programming entry by date + start time (Europe/Prague),
+  preferring an entry that is already linked and, if two entries share a time, the visible one;
+- takes the check-in ID from the GoOut sale;
+- never changes existing IDs unless run with `--overwrite`;
+- lists GoOut schedules it could not match (`?`) and programme entries not on GoOut (`-`).
+  The Programming UI has no fields for the GoOut IDs, so link those by hand
+  (`PUT /api/programming/:id` with `goout_schedule_id` + `goout_checkin_id`, or SQL).
+
+To run it in production, use Kudu: unpack `node_modules.tar.gz` and run the script
+from `/home/site/wwwroot` with `NODE_ENV=production`. `DATABASE_URL` comes from the app settings.
+
 ## Monitoring
 
 ### Check Token Status
