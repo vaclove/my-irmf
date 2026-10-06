@@ -485,11 +485,13 @@ Accounts are CageFS-isolated — no direct file access between CZ and EN. Transf
 
 ### EN-specific facts and traps
 
-- **The catalogue templates are frozen** (user decision): `MoviesList.php`, `MoviesPage.php`,
-  `MoviesSchedule.php`, `MoviesPreview.php`, `_db.php` (`$lang='en'`), `_lang.php` in the EN child
-  theme keep their older look. They read `https://my.irmf.cz/api/public/*` + shared DB
-  `8108-roadmovie` and are fully bilingual. The lone `#df342c` on `/schedule/` comes from this
-  frozen template — it is expected.
+- **The catalogue templates are no longer frozen.** `MoviesSchedule.php` and `MoviesPage.php` now
+  track the CZ copies (§13): `MoviesSchedule.php` is byte-identical to CZ, `MoviesPage.php` differs
+  only in three CSS values (`.movie-header` padding-top 40px, mobile container padding 15px, no
+  mobile `.button-section` override). Both read `https://my.irmf.cz/api/public/*` and pick the
+  language from the WP locale, so a CZ change can be ported by copying the file and re-applying
+  those three differences. `MoviesList.php`, `MoviesPreview.php`, `_db.php`, `_lang.php` are
+  untouched.
 - The header nav widget selects the menu **by slug** (`"nav_menu":"main-menu-2026"` in
   #3367 `_elementor_data`). Rebuilding the menu under a new name means repointing this setting.
 - `wp_update_nav_menu_item()` **dies under WP-CLI** on this install ("The link you followed has
@@ -849,3 +851,73 @@ That heading (`b7200b1`) is wrapped in `<span style="font-weight: normal;">` whi
 cards are plain text. The wrapper looks vestigial — all three render at the same weight — but it
 is preserved on edit rather than stripped, so nothing shifts unexpectedly. Swap the words inside
 it, do not replace the whole `title`.
+
+---
+
+## 13. Programme + film detail aligned with the site design (2026-10-06)
+
+Both sites, same day. The EN child theme has its own copies, ported as described in §11.
+Backups: CZ `~/backups/child-theme-cz-pre-ux-20261006-2312.tar.gz` +
+`irmf-db-pre-ux-20261006-2312.sql.gz`; EN `~/backups/child-theme-en-pre-ux-20261006-2318.tar.gz` +
+`irmf-net-db-pre-ux-20261006-2318.sql.gz`. EN has no page cache, so a new head shows immediately
+(the 15-min transient still applies).
+
+**Film pages now have their own head (`MoviesPage.php`).** The body is rendered in JS from
+`my.irmf.cz/api/public/movies/<id>`, so the server used to send the head of page 2551 for every
+film: `<title>Filmy`, `og:title="movie"`, canonical and `og:url` = `/movie/`, the homepage hero
+as `og:image`. Shared links showed "movie", and every film was a canonical duplicate of
+`/movie/`. The template now fetches the film server-side (`wp_remote_get`, 3 s timeout, cached in
+a transient for 15 min, failures for 1 min) and rewrites The SEO Framework's tags through
+`the_seo_framework_meta_render_data`: title, canonical, `og:url`, `og:title`/`description`/
+`image` (`image_urls.large`) and the twitter equivalents. The hero's `og:image:width/height` are
+dropped for films with a still. If the API is down the page keeps the generic head — nothing
+breaks. A synopsis edit can take up to 15 min (plus WP Fastest Cache) to reach the share card.
+
+**Ticket area on the detail follows the programme's rule:** button only if a screening has a
+`ticket_link`; otherwise „Vstup zdarma" if every screening is free, otherwise „Vstupenky brzy v
+prodeji", nothing once all screenings are past. Before, it fell back to a „Kup si vstupenku"
+button pointing at `/vstupenky/` while the programme said tickets were not on sale yet. When
+single tickets go on sale, fill `ticket_link` on the screenings in my.irmf.cz — both pages switch
+by themselves.
+
+**Visual alignment**, i.e. the homepage card language:
+- **IRMFont has one weight (400).** Anything at 500/600/700/bold was synthetic faux-bold.
+  All `font-weight` in both templates are now 400; hierarchy is size + colour (`#332E2E` vs
+  `#555`/`#666`). Do not reintroduce bold.
+- Programme cards: no shadow or lift, 1px `#e5e5e5` border, radius 10px, border turns `#332E2E`
+  on hover (only cards that are clickable, i.e. single films). Stills radius 8px.
+- Highlighted entries (`highlighted` flag) are **lime `#BFDE54`** instead of the cream `#FFF9E6`
+  left over from the 2025 yellow. Everything on lime is `#332E2E`; link hover on lime is an
+  underline, because purple is only ~2.8:1 on lime.
+- Film links: `.schedule-movie-link` (replaces inline `onmouseover` styles), purple `#7A64D8` on
+  hover, also while hovering the whole card.
+- Detail: image shadow removed, synopsis left-aligned (was justified), „← Program" link to the
+  film's edition (`history.back()` when the visitor came from the programme, keeping the day and
+  scroll position), language codes the map lacks are named via `Intl.DisplayNames`
+  („fa" → „perština"), multiple languages comma-separated.
+
+**EN dates** use `en-GB` without the year: day headings and selector „Thursday 22 October“, screenings on the detail „Thu 22 Oct“ (were US „Thursday, 10/22/2026“ / „Thu, 10/22“). CZ is unchanged. Dates are parsed as local midnight (`YYYY-MM-DD` + `T00:00:00`); a bare `new Date('2026-10-22')` is UTC and showed the previous day to visitors west of Greenwich.
+
+The section badge on the detail stays removed (it was removed deliberately before this round).
+Not done yet — proposed, waiting: genre badge colours (§5, owned separately), grey `#888` text
+contrast, day selector on mobile (wraps to 3 rows), `Celá synopse` tap target.
+
+## 14. Trailer + website/Facebook/Instagram on the film detail (2026-10-07)
+
+Data lives in my.irmf.cz: `movies.trailer_url`, `website_url`, `facebook_url`, `instagram_url`
+(migration 055), editable in the admin film form under "Trailer & Links". The API accepts only
+http(s) URLs and adds `https://` to a pasted `instagram.com/…`. The public detail endpoint returns
+`m.*`, so the fields reach the sites without further API work. The 2026 selection was seeded from
+the FilmFreeway export by migration 056 (fills empty fields only).
+
+`MoviesPage.php` (both sites, identical patch) renders them in the right column under the still:
+- **YouTube / Vimeo trailer → embedded player**, 16:9, radius 10px, via `youtube-nocookie.com` and
+  Vimeo `?dnt=1` (no tracking cookies until play). Accepts `watch?v=`, `youtu.be/`, `shorts/`,
+  `embed/`, `vimeo.com/<id>`, unlisted `vimeo.com/<id>/<hash>` and `player.vimeo.com/video/<id>`.
+- Any other trailer URL becomes a ▶ link icon instead.
+- Website / Facebook / Instagram: 40px black round icons (Font Awesome, already loaded by the
+  theme) — the same look as the footer's "Sledujte nás" row; hover lime. Missing fields render
+  nothing, so films without links look as before.
+
+Backups of the previous template: `~/backups/MoviesPage-pre-trailer-links-20261007-0013.php`
+on both accounts.

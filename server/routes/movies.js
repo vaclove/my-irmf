@@ -7,6 +7,34 @@ const googleDrive = require('../services/googleDrive');
 const synopsisTranslator = require('../services/synopsisTranslator');
 const router = express.Router();
 
+// Trailer, website and social links. These are rendered as links and embeds on
+// the public sites, so only http(s) URLs are accepted. A bare "instagram.com/x"
+// gets https:// so a URL copied without the scheme still works.
+const LINK_FIELDS = ['trailer_url', 'website_url', 'facebook_url', 'instagram_url'];
+
+function normalizeLinkUrl(value, field) {
+  if (value === undefined || value === null) return null;
+  const trimmed = String(value).trim();
+  if (!trimmed) return null;
+  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  let url = null;
+  try {
+    url = new URL(withScheme);
+  } catch (e) {
+    // handled below
+  }
+  if (!url || !['http:', 'https:'].includes(url.protocol) || !url.hostname.includes('.')) {
+    const error = new Error(`${field} must be a valid http(s) URL`);
+    error.status = 400;
+    throw error;
+  }
+  return withScheme;
+}
+
+function parseLinks(body) {
+  return Object.fromEntries(LINK_FIELDS.map(field => [field, normalizeLinkUrl(body[field], field)]));
+}
+
 // Translate a synopsis between Czech and English with an LLM.
 // Deliberately id-less: it translates whatever the user currently has in the
 // form (including unsaved edits) and works in the "Add Movie" modal, where the
@@ -238,25 +266,29 @@ router.post('/', async (req, res) => {
     if (!edition_id || !name_cs || !name_en) {
       return res.status(400).json({ error: 'Edition ID, Czech name, and English name are required' });
     }
-    
+
+    const links = parseLinks(req.body);
+
     // Verify edition exists
     const editionCheck = await pool.query('SELECT id FROM editions WHERE id = $1', [edition_id]);
     if (editionCheck.rows.length === 0) {
       return res.status(400).json({ error: 'Edition not found' });
     }
-    
+
     // First create the movie without image
     const result = await pool.query(`
       INSERT INTO movies (
         edition_id, catalogue_year, name_cs, name_en, synopsis_cs, synopsis_en,
         image, runtime, director, year, country, "cast",
-        premiere, section, language, subtitles, is_35mm, has_delegation, is_public
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+        premiere, section, language, subtitles, is_35mm, has_delegation, is_public,
+        trailer_url, website_url, facebook_url, instagram_url
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
       RETURNING *
     `, [
       edition_id, catalogue_year, name_cs, name_en, synopsis_cs, synopsis_en,
       image, runtime, director, year, country, cast,
-      premiere, section, language, subtitles, is_35mm || false, has_delegation || false, is_public
+      premiere, section, language, subtitles, is_35mm || false, has_delegation || false, is_public,
+      links.trailer_url, links.website_url, links.facebook_url, links.instagram_url
     ]);
     
     const movie = result.rows[0];
@@ -307,6 +339,9 @@ router.post('/', async (req, res) => {
 
     res.status(201).json(movie);
   } catch (error) {
+    if (error.status === 400) {
+      return res.status(400).json({ error: error.message });
+    }
     logError(error, req, { operation: 'create_movie', body: req.body });
     res.status(500).json({ error: error.message });
   }
@@ -342,7 +377,13 @@ router.put('/:id', async (req, res) => {
     if (!name_cs || !name_en) {
       return res.status(400).json({ error: 'Czech name and English name are required' });
     }
-    
+
+    // Links are updated only when sent, so a caller that doesn't know about
+    // them can't wipe them
+    const links = parseLinks(req.body);
+    const linkFields = LINK_FIELDS.filter(field => Object.prototype.hasOwnProperty.call(req.body, field));
+    const linkAssignments = linkFields.map((field, i) => `${field} = $${21 + i},`).join(' ');
+
     // Verify edition exists if provided
     if (edition_id) {
       const editionCheck = await pool.query('SELECT id FROM editions WHERE id = $1', [edition_id]);
@@ -373,13 +414,15 @@ router.put('/:id', async (req, res) => {
         is_35mm = $18,
         has_delegation = $19,
         is_public = $20,
+        ${linkAssignments}
         updated_at = CURRENT_TIMESTAMP
       WHERE id = $1
       RETURNING *
     `, [
       id, edition_id, catalogue_year, name_cs, name_en, synopsis_cs, synopsis_en,
       image, runtime, director, year, country, cast,
-      premiere, section, language, subtitles, is_35mm || false, has_delegation || false, is_public
+      premiere, section, language, subtitles, is_35mm || false, has_delegation || false, is_public,
+      ...linkFields.map(field => links[field])
     ]);
     
     if (result.rows.length === 0) {
@@ -418,6 +461,9 @@ router.put('/:id', async (req, res) => {
     
     res.json(movie);
   } catch (error) {
+    if (error.status === 400) {
+      return res.status(400).json({ error: error.message });
+    }
     logError(error, req, { operation: 'update_movie', movieId: req.params.id, body: req.body });
     res.status(500).json({ error: error.message });
   }
