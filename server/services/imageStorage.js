@@ -32,10 +32,12 @@ class ImageStorageService {
   };
 
   /**
-   * Generate blob path for a movie image
+   * Generate a versioned base path for a movie image upload.
+   * Every upload gets its own folder, so replacing an image changes its URL
+   * and the year-long Cache-Control below never serves a stale image.
    */
-  generateBlobPath(year, movieId, sizeSuffix, extension = 'jpg') {
-    return `${year}/${movieId}/${sizeSuffix}.${extension}`;
+  generateBasePath(year, movieId) {
+    return `${year}/${movieId}/${Date.now()}`;
   }
 
   /**
@@ -44,11 +46,12 @@ class ImageStorageService {
   async uploadMovieImage(imageBuffer, year, movieId) {
     const uploadResults = {};
     const extension = 'jpg'; // We'll convert all images to JPEG for consistency
+    const basePath = this.generateBasePath(year, movieId);
 
     try {
       // Process and upload each size
       for (const [sizeName, config] of Object.entries(ImageStorageService.IMAGE_SIZES)) {
-        const blobPath = this.generateBlobPath(year, movieId, config.suffix, extension);
+        const blobPath = `${basePath}/${config.suffix}.${extension}`;
         
         let processedBuffer;
         if (sizeName === 'original') {
@@ -81,7 +84,7 @@ class ImageStorageService {
 
       // Return the base path (without size suffix and extension)
       return {
-        basePath: `${year}/${movieId}`,
+        basePath,
         urls: uploadResults
       };
     } catch (error) {
@@ -109,37 +112,21 @@ class ImageStorageService {
   }
 
   /**
-   * Delete all image sizes for a movie
+   * Delete a movie's images (all versions, including the legacy unversioned
+   * layout `${year}/${movieId}/<size>.jpg`), optionally keeping one version.
    */
-  async deleteMovieImages(year, movieId) {
+  async deleteMovieImages(year, movieId, { keepBasePath } = {}) {
     const deletionPromises = [];
 
-    for (const config of Object.values(ImageStorageService.IMAGE_SIZES)) {
-      const blobPath = this.generateBlobPath(year, movieId, config.suffix, 'jpg');
-      const blockBlobClient = this.containerClient.getBlockBlobClient(blobPath);
+    for await (const blob of this.containerClient.listBlobsFlat({ prefix: `${year}/${movieId}/` })) {
+      if (keepBasePath && blob.name.startsWith(`${keepBasePath}/`)) continue;
       deletionPromises.push(
-        blockBlobClient.deleteIfExists()
-          .catch(err => console.error(`Failed to delete ${blobPath}:`, err))
+        this.containerClient.getBlockBlobClient(blob.name).deleteIfExists()
+          .catch(err => console.error(`Failed to delete ${blob.name}:`, err))
       );
     }
 
     await Promise.all(deletionPromises);
-  }
-
-  /**
-   * Check if movie images exist
-   */
-  async movieImagesExist(year, movieId) {
-    const blobPath = this.generateBlobPath(year, movieId, 'original', 'jpg');
-    const blockBlobClient = this.containerClient.getBlockBlobClient(blobPath);
-    
-    try {
-      const exists = await blockBlobClient.exists();
-      return exists;
-    } catch (error) {
-      console.error('Error checking blob existence:', error);
-      return false;
-    }
   }
 
   /**

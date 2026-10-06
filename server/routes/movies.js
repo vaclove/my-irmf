@@ -403,8 +403,12 @@ router.put('/:id', async (req, res) => {
           'UPDATE movies SET image_url = $2 WHERE id = $1',
           [id, uploadResult.basePath]
         );
-        
+
         movie.image_url = uploadResult.basePath;
+
+        // Remove the replaced image versions. Best-effort: leftovers only cost storage.
+        imageStorage.deleteMovieImages(editionYear, id, { keepBasePath: uploadResult.basePath })
+          .catch(err => console.error('Old image cleanup failed:', err.message));
       } catch (uploadError) {
         logError(uploadError, req, { operation: 'upload_movie_image' });
         console.error('Image upload failed:', uploadError.message);
