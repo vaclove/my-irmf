@@ -37,7 +37,8 @@ const Programming = () => {
     notes: '',
     ticket_link: '',
     highlighted: false,
-    hidden_from_public: false
+    hidden_from_public: false,
+    free_entry: false
   })
 
   useEffect(() => {
@@ -168,7 +169,8 @@ const Programming = () => {
       notes: '',
       ticket_link: '',
       highlighted: false,
-      hidden_from_public: false
+      hidden_from_public: false,
+      free_entry: false
     })
     setEditingEntry(null)
     setShowForm(false)
@@ -246,7 +248,8 @@ const Programming = () => {
       notes: '',
       ticket_link: '',
       highlighted: false,
-      hidden_from_public: false
+      hidden_from_public: false,
+      free_entry: false
     })
     setShowForm(true)
   }
@@ -264,7 +267,8 @@ const Programming = () => {
       notes: '',
       ticket_link: '',
       highlighted: false,
-      hidden_from_public: false
+      hidden_from_public: false,
+      free_entry: false
     })
     setShowForm(true)
   }
@@ -300,7 +304,8 @@ const Programming = () => {
       notes: entry.notes || '',
       ticket_link: entry.ticket_link || '',
       highlighted: entry.highlighted || false,
-      hidden_from_public: entry.hidden_from_public || false
+      hidden_from_public: entry.hidden_from_public || false,
+      free_entry: entry.free_entry || false
     })
     setContentType(entry.movie_id ? 'movie' : entry.block_id ? 'block' : '')
     setEditingEntry(entry)
@@ -979,6 +984,19 @@ const Programming = () => {
                   </label>
                   <span className="ml-2 text-xs text-gray-500">(Visible only in admin)</span>
                 </div>
+
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
+                    id="free_entry"
+                    checked={formData.free_entry}
+                    onChange={(e) => setFormData({...formData, free_entry: e.target.checked})}
+                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                  />
+                  <label htmlFor="free_entry" className="ml-2 block text-sm font-medium text-gray-700">
+                    Free entry
+                  </label>
+                </div>
               </div>
 
               <div className="flex justify-end space-x-3 pt-4 border-t">
@@ -1106,6 +1124,11 @@ const Programming = () => {
                           </svg>
                         )}
                         {entry.title_override_cs || entry.movie_name_cs || entry.block_name_cs}
+                        {entry.free_entry && (
+                          <span className="ml-2 px-1.5 py-0.5 text-xs font-medium rounded bg-green-100 text-green-800 flex-shrink-0">
+                            Free entry
+                          </span>
+                        )}
                       </div>
                       <div className="text-sm text-gray-500">
                         {entry.title_override_en || entry.movie_name_en || entry.block_name_en}
