@@ -366,7 +366,13 @@ Run this on **both sites** — every content item below exists twice (CZ id / EN
     `awards-<year>` (+ menu entries on both, EN menu term 54). Copy the page metas
     `page_header_type=Image`, `page_show_title=1` or the grey caption band appears (§11).
 11. Team/contact list (Kontakty CZ #2555 / Contact EN #2555) and the PR contact on Média (#3517).
-12. Flush caches, then verify in a **real browser**, not just curl (§4).
+12. Default programme year: `$edition_year = <year>; // Default fallback` at the top of
+    `MoviesSchedule.php` in **both** child themes — it decides what bare `/program/` (CZ) and
+    `/schedule/` (EN) show. Year archives `/program/<year>/` and `/schedule/<year>/` work via the
+    `edition_year` rewrite tag in each child `functions.php` (fixed 2026-10-06; before that every
+    archive URL silently showed the default year). The EN `MoviesSchedule.php` was root-owned
+    and read-only until 2026-10-06 — replace it (write a new file, rename over) rather than edit.
+13. Flush caches, then verify in a **real browser**, not just curl (§4).
 
 ### Season timeline 2026 (canonical wording, agreed 2026-08-21)
 
