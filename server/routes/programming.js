@@ -162,6 +162,7 @@ router.get('/edition/:editionId', async (req, res) => {
         ps.ticket_link,
         ps.highlighted,
         ps.hidden_from_public,
+        ps.free_entry,
         ps.goout_schedule_id,
         ps.goout_checkin_id,
         ps.created_at,
@@ -235,6 +236,7 @@ router.get('/:id', async (req, res) => {
         ps.ticket_link,
         ps.highlighted,
         ps.hidden_from_public,
+        ps.free_entry,
         ps.goout_schedule_id,
         ps.goout_checkin_id,
         ps.created_at,
@@ -307,6 +309,7 @@ router.post('/', async (req, res) => {
       ticket_link,
       highlighted,
       hidden_from_public,
+      free_entry,
       goout_schedule_id,
       goout_checkin_id
     } = req.body;
@@ -348,9 +351,9 @@ router.post('/', async (req, res) => {
       INSERT INTO programming_schedule (
         edition_id, venue_id, movie_id, block_id, scheduled_date, scheduled_time,
         discussion_time, title_override_cs, title_override_en, notes, ticket_link, highlighted,
-        hidden_from_public, goout_schedule_id, goout_checkin_id
+        hidden_from_public, goout_schedule_id, goout_checkin_id, free_entry
       )
-      VALUES ($1, $2, $3, $4, $5::date, $6::time, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+      VALUES ($1, $2, $3, $4, $5::date, $6::time, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
       RETURNING *
     `, [
       edition_id, venue_id, movie_id || null, block_id || null,
@@ -358,7 +361,8 @@ router.post('/', async (req, res) => {
       title_override_cs || null, title_override_en || null, notes || null, ticket_link || null,
       highlighted || false,
       hidden_from_public || false,
-      goout_schedule_id || null, goout_checkin_id || null
+      goout_schedule_id || null, goout_checkin_id || null,
+      free_entry || false
     ]);
     
     res.status(201).json(result.rows[0]);
@@ -385,6 +389,7 @@ router.put('/:id', async (req, res) => {
       ticket_link,
       highlighted,
       hidden_from_public,
+      free_entry,
       goout_schedule_id,
       goout_checkin_id
     } = req.body;
@@ -450,14 +455,15 @@ router.put('/:id', async (req, res) => {
         highlighted = COALESCE($11, highlighted),
         hidden_from_public = COALESCE($12, hidden_from_public),
         goout_schedule_id = COALESCE($13, goout_schedule_id),
-        goout_checkin_id = COALESCE($14, goout_checkin_id)
-      WHERE id = $15
+        goout_checkin_id = COALESCE($14, goout_checkin_id),
+        free_entry = COALESCE($15, free_entry)
+      WHERE id = $16
       RETURNING *
     `, [
       venue_id, movie_id || null, block_id || null, cleanDate, scheduled_time, discussion_time,
       title_override_cs, title_override_en, notes, ticket_link, highlighted,
       hidden_from_public,
-      goout_schedule_id, goout_checkin_id, id
+      goout_schedule_id, goout_checkin_id, free_entry, id
     ]);
     
     if (result.rows.length === 0) {
