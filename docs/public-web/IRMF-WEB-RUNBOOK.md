@@ -921,3 +921,22 @@ the FilmFreeway export by migration 056 (fills empty fields only).
 
 Backups of the previous template: `~/backups/MoviesPage-pre-trailer-links-20261007-0013.php`
 on both accounts.
+
+### Design feedback round (2026-10-07, Tereza)
+
+Supersedes parts of §13, both sites, `MoviesSchedule.php` + `MoviesPage.php`:
+- **Highlighted entries are a black card** (`#000`, white text — like the footer's newsletter
+  box), not lime. The concept (highlighting the special screenings, as in previous years and the
+  printed programme) stays; the lime card read as odd next to plain ones.
+- **No purple hover.** Film titles, block film links and the detail's „← Program" underline on
+  hover instead; purple is not used anywhere else on the site.
+- **Ticket buttons** (`.schedule-ticket-button a`, `.buy-ticket-btn`): black with a 1px black
+  border, hover = transparent fill (outline). On a black highlighted card they invert (white,
+  outline on hover).
+- **Delegation badge** is `.schedule-delegation-badge`: the section badge's shape and type, but
+  outlined (`currentColor` border) so it doesn't read as another section colour. Blocks show it
+  per film instead of on the block title (the old unreadable white-on-peach inline spans and the
+  single "D" are gone).
+- Still lime: the „Vstup zdarma" pills and the link-icon hover on the film detail.
+
+Backups: `~/backups/Movies{Schedule,Page}-pre-design-feedback-*.php` on both accounts.
