@@ -13,6 +13,7 @@ const { pool } = require('../models/database');
 const { logError } = require('../utils/logger');
 const { logAuditEvent } = require('../utils/auditLogger');
 const googleDrive = require('../services/googleDrive');
+const movieStorage = require('../services/movieStorage');
 const subtitleQualityRunner = require('../services/subtitleQualityRunner');
 
 const router = express.Router();
@@ -33,7 +34,7 @@ router.post('/runs', async (req, res) => {
     }
 
     const fileRow = await pool.query(
-      'SELECT drive_file_id FROM movie_files WHERE movie_id = $1 AND file_kind = $2',
+      'SELECT storage, blob_name, drive_file_id FROM movie_files WHERE movie_id = $1 AND file_kind = $2',
       [movie_id, `subtitles_${lang}`]
     );
     if (fileRow.rows.length === 0) {
@@ -43,7 +44,7 @@ router.post('/runs', async (req, res) => {
     const insert = await pool.query(
       `INSERT INTO subtitle_quality_runs (movie_id, lang, file_drive_id, created_by)
        VALUES ($1, $2, $3, $4) RETURNING *`,
-      [movie_id, lang, fileRow.rows[0].drive_file_id, req.user?.email || null]
+      [movie_id, lang, movieStorage.fileRef(fileRow.rows[0]), req.user?.email || null]
     );
     const run = insert.rows[0];
     subtitleQualityRunner.enqueue(run.id);

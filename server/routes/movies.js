@@ -1,4 +1,5 @@
 const express = require('express');
+const movieStorage = require('../services/movieStorage');
 const { pool } = require('../models/database');
 const { logError } = require('../utils/logger');
 const { auditMiddleware, captureOriginalData } = require('../utils/auditLogger');
@@ -473,11 +474,25 @@ router.put('/:id', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    
+
+    // Azure copies of the movie's files (rows go with the movie via CASCADE;
+    // the Drive folder stays as the human backup).
+    const blobs = await pool.query(
+      "SELECT blob_name FROM movie_files WHERE movie_id = $1 AND storage = 'azure'",
+      [id]
+    );
+
     const result = await pool.query('DELETE FROM movies WHERE id = $1 RETURNING *', [id]);
     
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Movie not found' });
+    }
+
+    // Best-effort; blob soft delete keeps them recoverable for 14 days.
+    for (const { blob_name } of blobs.rows) {
+      await movieStorage.deleteBlob(blob_name).catch((blobError) =>
+        logError(blobError, req, { operation: 'delete_movie_blob', movieId: id })
+      );
     }
     
     res.json({ message: 'Movie deleted successfully', movie: result.rows[0] });

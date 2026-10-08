@@ -36,9 +36,8 @@ const llmClient = require('./llmClient');
 const { pool } = require('../models/database');
 const { logger } = require('../utils/logger');
 const googleDrive = require('./googleDrive');
-const { readSubtitleText, cacheSubtitleTextSafe } = require('./subtitleCache');
+const movieStorage = require('./movieStorage');
 const { conventionFileName, extensionOf } = require('../utils/movieFileNaming');
-const { upsertFileRow } = require('./movieFileScanner');
 const {
   msFromTimestamp,
   parseSrt,
@@ -600,15 +599,13 @@ class SubtitleTranslator {
       if (movieRes.rows.length === 0) throw new Error('Movie not found');
       const movie = movieRes.rows[0];
 
-      // Source file name (for extension detection); the row may have been
-      // replaced since job creation, so fall back to Drive metadata.
-      const sourceRow = await pool.query(
-        'SELECT file_name FROM movie_files WHERE movie_id = $1 AND file_kind = $2',
-        [job.movie_id, dir.sourceKind]
-      );
+      // Source format, from the file the job was created for (a file ref:
+      // the row may have been replaced since job creation).
+      const sourceRef = movieStorage.parseRef(job.source_drive_file_id);
       const sourceName =
-        sourceRow.rows[0]?.file_name ||
-        (await googleDrive.getFileMetadata(job.source_drive_file_id)).name;
+        sourceRef.type === 'blob'
+          ? sourceRef.name
+          : (await googleDrive.getFileMetadata(sourceRef.id)).name;
       const ext = extensionOf(sourceName) || 'srt';
 
       const sourceText = await this.downloadText(job.source_drive_file_id);
@@ -705,54 +702,31 @@ class SubtitleTranslator {
       const srtText = serializeSrt(outputCues);
 
       const targetName = conventionFileName(movie, dir.targetKind, 'srt');
-      const folderId = await googleDrive.ensureMovieFolder(movie);
-
-      // Remember any pre-existing target file so we can trash it after the
-      // replacement upload succeeds (Drive allows duplicate names).
-      const oldTarget = await pool.query(
-        'SELECT drive_file_id FROM movie_files WHERE movie_id = $1 AND file_kind = $2',
-        [job.movie_id, dir.targetKind]
-      );
-      const oldDriveFileId = oldTarget.rows[0]?.drive_file_id || null;
-
-      const created = await googleDrive.uploadSmallFile({
-        folderId,
-        name: targetName,
-        mimeType: 'application/x-subrip',
-        body: Buffer.from(srtText, 'utf8'),
-      });
-
-      if (oldDriveFileId && oldDriveFileId !== created.id) {
-        try {
-          await googleDrive.trashFile(oldDriveFileId);
-        } catch (trashError) {
-          logger.warn('[SubtitleTranslator] failed to trash replaced subtitle file', {
-            jobId,
-            oldDriveFileId,
-            error: trashError.message,
-          });
+      // Replaces any existing target (Azure + Drive mirror, or legacy Drive).
+      const written = await movieStorage.writeSubtitleFile(
+        movie,
+        dir.targetKind,
+        Buffer.from(srtText, 'utf8'),
+        {
+          ext: 'srt',
+          onMirrorError: (mirrorError) =>
+            logger.warn('[SubtitleTranslator] failed to mirror translation to Drive', {
+              jobId,
+              error: mirrorError.message,
+            }),
         }
-      }
-      await upsertFileRow(job.movie_id, dir.targetKind, created);
-      await cacheSubtitleTextSafe(
-        created.id,
-        { text: srtText, md5: created.md5Checksum || null },
-        (cacheError) =>
-          logger.warn('[SubtitleTranslator] failed to cache translated subtitles', {
-            jobId,
-            error: cacheError.message,
-          })
       );
+      const targetRef = movieStorage.fileRef(written);
 
       await pool.query(
         `UPDATE subtitle_translation_jobs SET status = 'completed', drive_file_id = $2,
            target_file_name = $3, translated_cues = $4, progress_percent = 100,
            finished_at = CURRENT_TIMESTAMP WHERE id = $1`,
-        [jobId, created.id, targetName, cues.length]
+        [jobId, targetRef, targetName, cues.length]
       );
       logger.info('[SubtitleTranslator] job completed', {
         jobId,
-        driveFileId: created.id,
+        target: targetRef,
         cues: cues.length,
         batches: batches.length,
       });
@@ -766,7 +740,7 @@ class SubtitleTranslator {
         await subtitleQualityRunner.createRunForTranslation({
           movieId: job.movie_id,
           lang: dir.targetKind.replace('subtitles_', ''),
-          fileDriveId: created.id,
+          fileDriveId: targetRef,
           translationJobId: jobId,
           createdBy: job.created_by,
         });
@@ -795,9 +769,9 @@ class SubtitleTranslator {
    * A subtitle file's decoded text, served from the subtitle cache when its
    * md5 still matches (Drive download only on a miss).
    */
-  async downloadText(driveFileId) {
+  async downloadText(fileRef) {
     try {
-      return (await readSubtitleText(driveFileId)).text;
+      return (await movieStorage.readSubtitleRef(fileRef)).text;
     } catch (error) {
       if (error.statusCode === 413) {
         throw new Error('Subtitle file is too large to translate (over 2 MiB)');

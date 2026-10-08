@@ -161,16 +161,16 @@ function MoviePlayerSection({ movieId }) {
   const activeJob = jobs.find((j) => ACTIVE_STATUSES.includes(j.status))
   const latest = jobs[0]
 
+  // The proxy as a file ref (what transcode jobs record as their result).
+  const proxyRef = proxy ? (proxy.storage === 'azure' ? `blob:${proxy.blob_name}` : proxy.drive_file_id) : null
   // Source duration from the job that produced this proxy (null for proxies
   // imported by hand — nothing to compare against).
   const sourceSeconds = proxy
     ? Number(
-        jobs.find((j) => j.status === 'completed' && j.drive_file_id === proxy.drive_file_id)
-          ?.duration_seconds
+        jobs.find((j) => j.status === 'completed' && j.drive_file_id === proxyRef)?.duration_seconds
       ) || null
     : null
-  const actualSeconds =
-    proxy && proxyDuration?.id === proxy.drive_file_id ? proxyDuration.seconds : null
+  const actualSeconds = proxy && proxyDuration?.id === proxyRef ? proxyDuration.seconds : null
   // Without a source duration (older jobs, hand-imported proxies) only an
   // absurdly short preview is flagged.
   const truncated =
@@ -184,18 +184,19 @@ function MoviePlayerSection({ movieId }) {
     <div className="space-y-4">
       {proxy ? (
         <>
-          {/* Cache-bust the <video> when the proxy id changes (regenerate). */}
+          {/* Cache-bust the <video> when the proxy changes (regenerate). The
+              stream URL redirects to Azure, so no crossOrigin: subtitle
+              tracks are same-origin and need no CORS. */}
           <video
-            key={proxy.drive_file_id}
+            key={proxyRef}
             controls
             preload="metadata"
-            crossOrigin="use-credentials"
             className="w-full max-h-[70vh] bg-black rounded-md"
             src={movieFileApi.streamUrl(movieId, 'movie_proxy')}
             onLoadedMetadata={(e) => {
               const seconds = e.currentTarget.duration
               if (Number.isFinite(seconds)) {
-                setProxyDuration({ id: proxy.drive_file_id, seconds })
+                setProxyDuration({ id: proxyRef, seconds })
               }
             }}
           >

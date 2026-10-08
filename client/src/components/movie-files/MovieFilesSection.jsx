@@ -33,6 +33,75 @@ const SYNC_PHASE_LABELS = {
 }
 
 const QUALITY_LANG_LABELS = { cs: 'CS', en: 'EN', cs_synced: 'CS✓', en_synced: 'EN✓' }
+
+const TRANSFER_LABELS = {
+  drive_to_azure: 'Copy to Azure',
+  azure_to_drive: 'Back up to Drive',
+}
+const KIND_SHORT = {
+  movie: 'movie',
+  movie_proxy: 'preview',
+  subtitles_cs: 'CS subtitles',
+  subtitles_en: 'EN subtitles',
+  subtitles_cs_synced: 'CS synced',
+  subtitles_en_synced: 'EN synced',
+}
+
+// Where a row's primary copy lives and how its Drive copy stands.
+function StorageInfo({ row, onAdoptDrive, onBackup, busy }) {
+  if (row.storage !== 'azure') {
+    return <span className="text-gray-400">Drive</span>
+  }
+  const tier = row.file_kind === 'movie' ? 'Cold' : 'Hot'
+  const isSubtitle = row.file_kind.startsWith('subtitles_')
+  return (
+    <>
+      <span title={`Stored in Azure Blob Storage (${tier} tier)`}>Azure · {tier}</span>
+      {row.drive_state === 'in_sync' && <span className="text-green-700"> · Drive copy ✓</span>}
+      {row.drive_state === 'outdated' && (
+        <span className="text-amber-700" title="The latest version hasn't reached the Drive copy yet">
+          {' '}· Drive copy outdated
+          {row.file_kind === 'movie' && (
+            <button
+              onClick={onBackup}
+              disabled={busy}
+              className="ml-1 underline hover:text-amber-900 disabled:opacity-50"
+            >
+              back up
+            </button>
+          )}
+        </span>
+      )}
+      {row.drive_state === 'changed' && (
+        <span className="text-red-700">
+          {' '}· Drive copy edited outside the app
+          {isSubtitle && (
+            <button
+              onClick={onAdoptDrive}
+              disabled={busy}
+              className="ml-1 underline hover:text-red-900 disabled:opacity-50"
+              title="Replace the app's version with the edited Drive copy"
+            >
+              use Drive version
+            </button>
+          )}
+        </span>
+      )}
+      {row.drive_state === 'none' && row.file_kind === 'movie' && (
+        <span className="text-amber-700">
+          {' '}· no Drive backup
+          <button
+            onClick={onBackup}
+            disabled={busy}
+            className="ml-1 underline hover:text-amber-900 disabled:opacity-50"
+          >
+            back up
+          </button>
+        </span>
+      )}
+    </>
+  )
+}
 const QUALITY_PHASE_LABELS = { linting: 'Checking…', suggesting: 'Generating suggestions…' }
 
 // subtitles_cs -> cs, subtitles_en_synced -> en_synced (the quality-gate lang key)
@@ -88,21 +157,24 @@ function MovieFilesSection({ movieId }) {
   const [syncJobs, setSyncJobs] = useState([])
   const [qualityRuns, setQualityRuns] = useState([])
   const [qualitySummary, setQualitySummary] = useState({ counts: {} })
+  const [transfers, setTransfers] = useState([])
   const subtitleInputs = useRef({})
   const wasPolling = useRef(false)
   const wasPollingTranslations = useRef(false)
   const wasPollingSyncs = useRef(false)
   const wasPollingQuality = useRef(false)
+  const wasPollingTransfers = useRef(false)
 
   const load = useCallback(async () => {
     try {
-      const [filesRes, jobsRes, translationRes, syncRes, qualityRes, summaryRes] = await Promise.all([
+      const [filesRes, jobsRes, translationRes, syncRes, qualityRes, summaryRes, transfersRes] = await Promise.all([
         movieFileApi.getFiles(movieId),
         movieDownloadApi.getForMovie(movieId).catch(() => ({ data: { jobs: [] } })),
         subtitleTranslationApi.getForMovie(movieId).catch(() => ({ data: { jobs: [] } })),
         subtitleSyncApi.getForMovie(movieId).catch(() => ({ data: { jobs: [] } })),
         subtitleQualityApi.getRunsForMovie(movieId).catch(() => ({ data: { runs: [] } })),
         subtitleQualityApi.getFlagSummary(movieId).catch(() => ({ data: { counts: {} } })),
+        movieFileApi.getTransfers(movieId).catch(() => ({ data: { jobs: [] } })),
       ])
       setData(filesRes.data)
       setJobs(jobsRes.data.jobs || [])
@@ -110,6 +182,7 @@ function MovieFilesSection({ movieId }) {
       setSyncJobs(syncRes.data.jobs || [])
       setQualityRuns(qualityRes.data.runs || [])
       setQualitySummary(summaryRes.data || { counts: {} })
+      setTransfers(transfersRes.data.jobs || [])
     } catch (error) {
       console.error('Error loading movie files:', error)
       showError('Failed to load files: ' + (error.response?.data?.error || error.message))
@@ -235,6 +308,28 @@ function MovieFilesSection({ movieId }) {
     return () => clearInterval(timer)
   }, [qualityRuns, movieId, load, success, showError])
 
+  // Poll Drive <-> Azure transfers while any is active; refresh files after.
+  useEffect(() => {
+    const hasActive = transfers.some((j) => ACTIVE_STATUSES.includes(j.status))
+    if (!hasActive) {
+      if (wasPollingTransfers.current) {
+        wasPollingTransfers.current = false
+        load().then(() => notifyMovieFilesChanged(movieId))
+      }
+      return undefined
+    }
+    wasPollingTransfers.current = true
+    const timer = setInterval(async () => {
+      try {
+        const res = await movieFileApi.getTransfers(movieId)
+        setTransfers(res.data.jobs || [])
+      } catch {
+        // transient; keep polling
+      }
+    }, 4000)
+    return () => clearInterval(timer)
+  }, [transfers, movieId, load])
+
   const fileForKind = (kind) => (data?.files || []).find((f) => f.file_kind === kind)
   const hasActiveTranslation = translationJobs.some((j) => ACTIVE_STATUSES.includes(j.status))
   const hasActiveQualityFor = (lang) =>
@@ -295,10 +390,17 @@ function MovieFilesSection({ movieId }) {
   }
 
   const removeAsset = async (kind) => {
-    const note = trashOnRemove
-      ? 'The file will be moved to Drive trash.'
-      : 'The file stays in Drive, renamed to *.removed.*, so it is not picked up again.'
-    if (!window.confirm(`Remove this asset from the app?\n\n${note}`)) return
+    const row = fileForKind(kind)
+    const notes = []
+    if (row?.storage === 'azure') notes.push('The Azure copy is deleted (recoverable for 14 days).')
+    if (row?.drive_file_id) {
+      notes.push(
+        trashOnRemove
+          ? 'The Drive copy will be moved to Drive trash.'
+          : 'The Drive copy stays, renamed to *.removed.*, so it is not picked up again.'
+      )
+    }
+    if (!window.confirm(`Remove this asset from the app?\n\n${notes.join('\n')}`)) return
     setBusy(true)
     try {
       await movieFileApi.deleteFile(movieId, kind, trashOnRemove)
@@ -328,7 +430,19 @@ function MovieFilesSection({ movieId }) {
     }
     setBusy(true)
     try {
-      await movieFileApi.promoteSyncedSubtitles(movieId, lang)
+      try {
+        await movieFileApi.promoteSyncedSubtitles(movieId, lang)
+      } catch (error) {
+        if (error.response?.data?.code !== 'drive_changed') throw error
+        if (
+          !window.confirm(
+            `${error.response.data.error}\n\nOverwrite the edited Drive copy with the synced version?`
+          )
+        ) {
+          return
+        }
+        await movieFileApi.promoteSyncedSubtitles(movieId, lang, { overwrite_drive: true })
+      }
       success(`${label} subtitles replaced with the synced version`)
       await load()
       notifyMovieFilesChanged(movieId)
@@ -336,6 +450,61 @@ function MovieFilesSection({ movieId }) {
       showError('Replace failed: ' + (error.response?.data?.error || error.message))
     } finally {
       setBusy(false)
+    }
+  }
+
+  const adoptDrive = async (kind) => {
+    const lang = kind.replace('subtitles_', '')
+    if (
+      !window.confirm(
+        "Replace the app's version of these subtitles with the copy edited on Drive?"
+      )
+    ) {
+      return
+    }
+    setBusy(true)
+    try {
+      await movieFileApi.adoptDriveSubtitles(movieId, lang)
+      success('Drive version is now the app version')
+      await load()
+      notifyMovieFilesChanged(movieId)
+    } catch (error) {
+      showError('Failed: ' + (error.response?.data?.error || error.message))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const backupToDrive = async () => {
+    setBusy(true)
+    try {
+      await movieFileApi.backupToDrive(movieId)
+      info('Backup to Drive started')
+      const res = await movieFileApi.getTransfers(movieId)
+      setTransfers(res.data.jobs || [])
+    } catch (error) {
+      showError('Backup failed to start: ' + (error.response?.data?.error || error.message))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const retryTransfer = async (jobId) => {
+    try {
+      await movieFileApi.retryTransfer(movieId, jobId)
+      const res = await movieFileApi.getTransfers(movieId)
+      setTransfers(res.data.jobs || [])
+    } catch (error) {
+      showError('Retry failed: ' + (error.response?.data?.error || error.message))
+    }
+  }
+
+  const dismissTransfer = async (jobId) => {
+    try {
+      await movieFileApi.dismissTransfer(movieId, jobId)
+      setTransfers((list) => list.filter((j) => j.id !== jobId))
+    } catch (error) {
+      showError('Hide failed: ' + (error.response?.data?.error || error.message))
     }
   }
 
@@ -652,6 +821,68 @@ function MovieFilesSection({ movieId }) {
         </div>
       )}
 
+      {/* Drive <-> Azure transfers */}
+      {transfers.filter((j) => j.status !== 'completed').length > 0 && (
+        <div className="space-y-2">
+          <h4 className="text-sm font-medium text-gray-900">File transfers</h4>
+          {transfers
+            .filter((j) => j.status !== 'completed')
+            .map((job) => {
+              const total = job.bytes_total != null ? Number(job.bytes_total) : null
+              const transferred = Number(job.bytes_transferred || 0)
+              const pct = total ? Math.min(100, Math.round((transferred / total) * 100)) : null
+              const active = ACTIVE_STATUSES.includes(job.status)
+              return (
+                <div key={job.id} className="border border-gray-200 rounded-md p-3">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="truncate">
+                      {TRANSFER_LABELS[job.direction] || job.direction} · {KIND_SHORT[job.file_kind] || job.file_kind} ·{' '}
+                      <span className="font-medium">{job.status}</span>
+                    </span>
+                    <div className="space-x-3 shrink-0">
+                      {job.status === 'failed' && (
+                        <button onClick={() => retryTransfer(job.id)} className="text-blue-600 hover:text-blue-800">
+                          Retry
+                        </button>
+                      )}
+                      {!active && (
+                        <button
+                          onClick={() => dismissTransfer(job.id)}
+                          className="text-gray-500 hover:text-gray-700"
+                          title="Hide this transfer"
+                        >
+                          Hide
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {job.status === 'running' && (
+                    <div className="mt-2">
+                      <div className="w-full bg-gray-200 rounded-full h-2">
+                        <div
+                          className="bg-blue-600 h-2 rounded-full transition-all"
+                          style={{ width: `${pct != null ? pct : 0}%` }}
+                        />
+                      </div>
+                      <div className="text-xs text-gray-500 mt-1">
+                        {formatBytes(transferred)}
+                        {total != null && ` / ${formatBytes(total)}`}
+                        {pct != null && ` (${pct}%)`}
+                      </div>
+                    </div>
+                  )}
+                  {job.status === 'pending' && (
+                    <div className="text-xs text-gray-500 mt-1">Queued — the worker picks it up shortly</div>
+                  )}
+                  {job.error_message && (
+                    <div className="text-xs text-red-600 mt-1">{job.error_message}</div>
+                  )}
+                </div>
+              )
+            })}
+        </div>
+      )}
+
       {/* Translation jobs */}
       {translationJobs.filter((j) => j.status !== 'completed').length > 0 && (
         <div className="space-y-2">
@@ -901,7 +1132,13 @@ function MovieFilesSection({ movieId }) {
                     <div className="text-xs text-gray-500 truncate">
                       {row.file_name}
                       {row.file_size != null && ` · ${formatBytes(Number(row.file_size))}`}
-                      {row.last_synced_at && ` · synced ${new Date(row.last_synced_at).toLocaleString()}`}
+                      {' · '}
+                      <StorageInfo
+                        row={row}
+                        busy={busy}
+                        onAdoptDrive={() => adoptDrive(asset.key)}
+                        onBackup={backupToDrive}
+                      />
                     </div>
                   )}
                 </div>
@@ -1012,6 +1249,17 @@ function MovieFilesSection({ movieId }) {
                   </>
                 )}
                 {row && (
+                  <a
+                    href={movieFileApi.downloadUrl(movieId, asset.key)}
+                    title={row.storage === 'azure' ? 'Download the file' : 'Open the file in Google Drive'}
+                    className="text-sm text-blue-600 hover:text-blue-800"
+                    target={row.storage === 'azure' ? undefined : '_blank'}
+                    rel="noopener noreferrer"
+                  >
+                    {row.storage === 'azure' ? 'Download' : 'Open'}
+                  </a>
+                )}
+                {row && (
                   <button
                     onClick={() => removeAsset(asset.key)}
                     disabled={busy}
@@ -1041,13 +1289,17 @@ function MovieFilesSection({ movieId }) {
                 onImport={async (fileKind, rename, replace) => {
                   setBusy(true)
                   try {
-                    await movieFileApi.importFile(movieId, {
+                    const res = await movieFileApi.importFile(movieId, {
                       drive_file_id: f.id,
                       file_kind: fileKind,
                       rename,
                       replace,
                     })
-                    success('File imported')
+                    if (res.status === 202) {
+                      info('Copying the file into Azure — it appears here when done')
+                    } else {
+                      success('File imported')
+                    }
                     await load()
                     notifyMovieFilesChanged(movieId)
                   } catch (error) {

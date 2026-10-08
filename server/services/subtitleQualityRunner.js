@@ -19,7 +19,7 @@
 const { pool } = require('../models/database');
 const { logger } = require('../utils/logger');
 const googleDrive = require('./googleDrive');
-const { readSubtitleText } = require('./subtitleCache');
+const movieStorage = require('./movieStorage');
 const llmClient = require('./llmClient');
 const gate = require('./subtitleQualityGate');
 const { parseSubtitles } = require('../utils/subtitles');
@@ -261,13 +261,14 @@ class SubtitleQualityRunner {
       // Target file: current movie_files row (the file may have been
       // replaced since the run was created — same fallback as the translator).
       const fileRow = await pool.query(
-        'SELECT drive_file_id, file_name, md5_checksum FROM movie_files WHERE movie_id = $1 AND file_kind = $2',
+        'SELECT storage, blob_name, drive_file_id, file_name, md5_checksum FROM movie_files WHERE movie_id = $1 AND file_kind = $2',
         [run.movie_id, `subtitles_${run.lang}`]
       );
       if (fileRow.rows.length === 0) throw new Error('Subtitle file not found');
       const file = fileRow.rows[0];
-      const ext = extensionOf(file.file_name) || 'srt';
-      const text = await this.downloadText(file.drive_file_id);
+      const fileRef = movieStorage.fileRef(file);
+      const ext = extensionOf(file.storage === 'azure' ? file.blob_name : file.file_name) || 'srt';
+      const text = await this.downloadText(fileRef);
       const cues = parseSubtitles(text, ext);
 
       // Reference: counterpart-language ORIGINAL file, used only when the
@@ -276,13 +277,13 @@ class SubtitleQualityRunner {
       let refAvailable = false;
       let refCountMatch = false;
       const refRow = await pool.query(
-        'SELECT drive_file_id, file_name FROM movie_files WHERE movie_id = $1 AND file_kind = $2',
+        'SELECT storage, blob_name, drive_file_id, file_name FROM movie_files WHERE movie_id = $1 AND file_kind = $2',
         [run.movie_id, `subtitles_${REF_LANG[run.lang]}`]
       );
       if (refRow.rows.length > 0) {
         refAvailable = true;
         try {
-          const refText = await this.downloadText(refRow.rows[0].drive_file_id);
+          const refText = await this.downloadText(movieStorage.fileRef(refRow.rows[0]));
           const parsed = parseSubtitles(refText, extensionOf(refRow.rows[0].file_name) || 'srt');
           if (parsed.length === cues.length) {
             refCountMatch = true;
@@ -353,7 +354,7 @@ class SubtitleQualityRunner {
               runId,
               run.movie_id,
               run.lang,
-              file.drive_file_id,
+              fileRef,
               file.md5_checksum || null,
               f.cueIndex,
               f.cueN,
@@ -375,7 +376,7 @@ class SubtitleQualityRunner {
            WHERE id = $1`,
           [
             runId,
-            file.drive_file_id,
+            fileRef,
             file.md5_checksum || null,
             cues.length,
             flags.length,
@@ -539,9 +540,9 @@ class SubtitleQualityRunner {
    * A subtitle file's decoded text, served from the subtitle cache when its
    * md5 still matches (Drive download only on a miss).
    */
-  async downloadText(driveFileId) {
+  async downloadText(fileRef) {
     try {
-      return (await readSubtitleText(driveFileId)).text;
+      return (await movieStorage.readSubtitleRef(fileRef)).text;
     } catch (error) {
       if (error.statusCode === 413) {
         throw new Error('Subtitle file is too large to check (over 2 MiB)');

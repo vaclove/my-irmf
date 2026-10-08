@@ -150,11 +150,19 @@ export const movieFileApi = {
   deleteFile: (movieId, fileKind, removeFromDrive = false) =>
     api.delete(`/movies/${movieId}/files/${fileKind}`, { params: { remove_from_drive: removeFromDrive } }),
   // Overwrite the original subtitles with the alass-synced copy (lang: cs | en).
-  promoteSyncedSubtitles: (movieId, lang) => api.post(`/movies/${movieId}/files/subtitles/${lang}/use-synced`),
+  promoteSyncedSubtitles: (movieId, lang, data = {}) =>
+    api.post(`/movies/${movieId}/files/subtitles/${lang}/use-synced`, data),
+  // Make the (outside-edited) Drive copy of Azure subtitles the app's version.
+  adoptDriveSubtitles: (movieId, lang) => api.post(`/movies/${movieId}/files/subtitles/${lang}/adopt-drive`),
+  getTransfers: (movieId) => api.get(`/movies/${movieId}/files/transfers`),
+  retryTransfer: (movieId, jobId) => api.post(`/movies/${movieId}/files/transfers/${jobId}/retry`),
+  dismissTransfer: (movieId, jobId) => api.post(`/movies/${movieId}/files/transfers/${jobId}/dismiss`),
+  backupToDrive: (movieId) => api.post(`/movies/${movieId}/files/backup`),
   setReady: (movieId, ready) => api.put(`/movies/${movieId}/files/ready`, { ready }),
   // Raw URLs for <video>/<track> elements (not axios). withCredentials via cookies.
   streamUrl: (movieId, fileKind) => `${API_BASE_URL}/movies/${movieId}/files/stream/${fileKind}`,
   subtitleUrl: (movieId, lang) => `${API_BASE_URL}/movies/${movieId}/files/subtitles/${lang}.vtt`,
+  downloadUrl: (movieId, fileKind) => `${API_BASE_URL}/movies/${movieId}/files/download/${fileKind}`,
 }
 
 // Movie download jobs API (server-side downloader: public Drive link / FTP)

@@ -10,7 +10,7 @@ import CueTable from '../components/subtitle-editor/CueTable'
 const LANGS = ['en', 'cs']
 const LANG_LABELS = { en: 'English', cs: 'Czech' }
 
-const emptyTrack = { status: 'loading', file: null, baseMd5: null, origCues: null, cues: null, saving: false, conflict: false, message: null, flags: [], staleCache: null }
+const emptyTrack = { status: 'loading', file: null, baseMd5: null, origCues: null, cues: null, saving: false, conflict: false, driveConflict: null, message: null, flags: [], staleCache: null }
 
 /**
  * Visual subtitle editor: the 720p preview on top, both language tracks in an
@@ -199,7 +199,7 @@ function SubtitleEditor() {
     loadTrack(lang, variant)
   }
 
-  const save = async (lang) => {
+  const save = async (lang, { overwriteDrive = false } = {}) => {
     const tr = tracks[lang]
     if (tr.status !== 'ready' || tr.saving) return
     const langKey = variants[lang] === 'synced' ? `${lang}_synced` : lang
@@ -208,6 +208,7 @@ function SubtitleEditor() {
       const res = await movieFileApi.saveSubtitleCues(id, langKey, {
         cues: tr.cues.map(({ timing, text }) => ({ timing, text: text.trim() })),
         base_md5: tr.baseMd5,
+        overwrite_drive: overwriteDrive,
       })
       const savedCues = tr.cues.map((c) => ({ ...c, text: c.text.trim() }))
       // The save endpoint reconciled flag statuses (accepted/stale) — refetch.
@@ -222,6 +223,7 @@ function SubtitleEditor() {
           file: res.data.file,
           saving: false,
           conflict: false,
+          driveConflict: null,
           staleCache: null,
           flags: freshFlags,
         },
@@ -230,11 +232,33 @@ function SubtitleEditor() {
       notifyMovieFilesChanged(id)
     } catch (error) {
       const status = error.response?.status
+      // The Drive copy was edited outside the app: let the user pick a side
+      // instead of failing outright.
+      if (status === 409 && error.response?.data?.code === 'drive_changed') {
+        setTracks((t) => ({
+          ...t,
+          [lang]: { ...t[lang], saving: false, driveConflict: error.response.data.error },
+        }))
+        return
+      }
       setTracks((t) => ({ ...t, [lang]: { ...t[lang], saving: false, conflict: status === 409 } }))
       showError(
         `Saving ${LANG_LABELS[lang]} subtitles failed: ` +
           (error.response?.data?.error || error.message)
       )
+    }
+  }
+
+  // Take the version edited on Drive (discards unsaved edits in this track).
+  const takeDriveVersion = async (lang) => {
+    const langKey = variants[lang] === 'synced' ? `${lang}_synced` : lang
+    try {
+      await movieFileApi.adoptDriveSubtitles(id, langKey)
+      success(`${LANG_LABELS[lang]}: loaded the version edited on Drive`)
+      notifyMovieFilesChanged(id)
+      loadTrack(lang)
+    } catch (error) {
+      showError('Loading the Drive version failed: ' + (error.response?.data?.error || error.message))
     }
   }
 
@@ -397,6 +421,34 @@ function SubtitleEditor() {
       <div className="shrink-0 space-y-2 empty:hidden pt-3">
         {LANGS.map((lang) => {
           const tr = tracks[lang]
+          if (tr.status === 'ready' && tr.driveConflict) {
+            return (
+              <div
+                key={lang}
+                className="rounded-md bg-red-50 border border-red-200 p-3 text-sm text-red-800 flex flex-wrap items-center gap-3"
+              >
+                <span className="flex-1">
+                  {LANG_LABELS[lang]}: {tr.driveConflict}
+                </span>
+                <button
+                  onClick={() => {
+                    if (window.confirm('Discard your unsaved edits in this track and load the Drive version?')) {
+                      takeDriveVersion(lang)
+                    }
+                  }}
+                  className="text-blue-700 hover:text-blue-900 font-medium"
+                >
+                  Use Drive version
+                </button>
+                <button
+                  onClick={() => save(lang, { overwriteDrive: true })}
+                  className="text-red-700 hover:text-red-900 font-medium"
+                >
+                  Save mine, overwrite Drive
+                </button>
+              </div>
+            )
+          }
           if (tr.status === 'ready' && tr.staleCache && !tr.conflict) {
             return (
               <div

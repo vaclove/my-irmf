@@ -17,6 +17,7 @@ on:
       - 'server/services/driveMediaProxy.js'
       - 'server/services/driveChunkedUpload.js'
       - 'server/services/subtitleCache.js'
+      - 'server/services/movieStorage.js'
       - 'server/utils/movieFileNaming.js'
       - 'server/utils/subtitles.js'
       - 'server/models/database.js'

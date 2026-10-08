@@ -13,6 +13,7 @@ const { pool } = require('../models/database');
 const { logError } = require('../utils/logger');
 const { logAuditEvent } = require('../utils/auditLogger');
 const subtitleSyncQueue = require('../services/subtitleSyncQueue');
+const movieStorage = require('../services/movieStorage');
 
 const router = express.Router();
 
@@ -32,7 +33,7 @@ function notConfigured(res) {
  */
 async function resolveFiles(movieId, subtitleKind) {
   const res = await pool.query(
-    'SELECT file_kind, drive_file_id FROM movie_files WHERE movie_id = $1 AND file_kind = ANY($2)',
+    'SELECT file_kind, storage, blob_name, drive_file_id FROM movie_files WHERE movie_id = $1 AND file_kind = ANY($2)',
     [movieId, [subtitleKind, 'movie_proxy', 'movie']]
   );
   const byKind = new Map(res.rows.map((r) => [r.file_kind, r]));
@@ -76,8 +77,8 @@ async function createJob(req, res, { movieId, subtitleKind, operation }) {
     [
       movieId,
       subtitleKind,
-      source.drive_file_id,
-      reference.drive_file_id,
+      movieStorage.fileRef(source),
+      movieStorage.fileRef(reference),
       referenceKind,
       req.user?.email || null,
     ]

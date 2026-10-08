@@ -8,14 +8,15 @@
  *   TRANSCODE_QUEUE_NAME             queue name (default 'movie-transcodes')
  *   MOVIE_TRANSCODE_ENABLED          'false' disables enqueueing entirely
  *
- * Transcoding also requires Google Drive to be configured (the worker reads the
- * master and writes the proxy there).
+ * Transcoding also requires Google Drive to be configured (legacy masters are
+ * read from there). source_drive_file_id holds a file ref (see movieStorage).
  */
 
 const { QueueServiceClient } = require('@azure/storage-queue');
 const { pool } = require('../models/database');
 const { logger } = require('../utils/logger');
 const googleDrive = require('./googleDrive');
+const movieStorage = require('./movieStorage');
 
 const QUEUE_NAME = process.env.TRANSCODE_QUEUE_NAME || 'movie-transcodes';
 
@@ -65,10 +66,11 @@ async function enqueueForMovie(movieId, createdBy) {
     if (!isConfigured()) return null;
 
     const master = await pool.query(
-      "SELECT drive_file_id FROM movie_files WHERE movie_id = $1 AND file_kind = 'movie'",
+      "SELECT storage, blob_name, drive_file_id FROM movie_files WHERE movie_id = $1 AND file_kind = 'movie'",
       [movieId]
     );
     if (master.rows.length === 0) return null;
+    const sourceRef = movieStorage.fileRef(master.rows[0]);
 
     const active = await pool.query(
       "SELECT id FROM movie_transcode_jobs WHERE movie_id = $1 AND status IN ('pending', 'running')",
@@ -79,7 +81,7 @@ async function enqueueForMovie(movieId, createdBy) {
     const insert = await pool.query(
       `INSERT INTO movie_transcode_jobs (movie_id, source_drive_file_id, status, created_by)
        VALUES ($1, $2, 'pending', $3) RETURNING *`,
-      [movieId, master.rows[0].drive_file_id, createdBy || null]
+      [movieId, sourceRef, createdBy || null]
     );
     const job = insert.rows[0];
     try {

@@ -11,6 +11,7 @@ const { pool } = require('../models/database');
 const { logError } = require('../utils/logger');
 const googleDrive = require('../services/googleDrive');
 const transcodeQueue = require('../services/transcodeQueue');
+const movieStorage = require('../services/movieStorage');
 
 const router = express.Router();
 
@@ -22,13 +23,13 @@ function notConfigured(res) {
     .json({ error: 'Transcoding is not configured (needs Drive + storage queue)' });
 }
 
-/** Load a movie's master (movie kind) drive_file_id, or null. */
+/** File ref (see movieStorage) of a movie's master, or null. */
 async function getMasterFileId(movieId) {
   const res = await pool.query(
-    "SELECT drive_file_id FROM movie_files WHERE movie_id = $1 AND file_kind = 'movie'",
+    "SELECT storage, blob_name, drive_file_id FROM movie_files WHERE movie_id = $1 AND file_kind = 'movie'",
     [movieId]
   );
-  return res.rows[0]?.drive_file_id || null;
+  return res.rows[0] ? movieStorage.fileRef(res.rows[0]) : null;
 }
 
 // POST / — create + enqueue a transcode job for a movie's master.

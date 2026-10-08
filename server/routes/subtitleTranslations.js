@@ -13,6 +13,7 @@ const { pool } = require('../models/database');
 const { logError } = require('../utils/logger');
 const { logAuditEvent } = require('../utils/auditLogger');
 const googleDrive = require('../services/googleDrive');
+const movieStorage = require('../services/movieStorage');
 const subtitleTranslator = require('../services/subtitleTranslator');
 const { DIRECTIONS } = require('../services/subtitleTranslator');
 
@@ -52,7 +53,7 @@ function isReady() {
 async function getSubtitleRows(movieId, direction) {
   const dir = DIRECTIONS[direction];
   const res = await pool.query(
-    'SELECT file_kind, drive_file_id FROM movie_files WHERE movie_id = $1 AND file_kind = ANY($2)',
+    'SELECT file_kind, storage, blob_name, drive_file_id FROM movie_files WHERE movie_id = $1 AND file_kind = ANY($2)',
     [movieId, [dir.sourceKind, dir.targetKind]]
   );
   const byKind = new Map(res.rows.map((r) => [r.file_kind, r]));
@@ -95,7 +96,7 @@ async function createJob(req, res, { movieId, direction, overwrite, operation, c
   const insert = await pool.query(
     `INSERT INTO subtitle_translation_jobs (movie_id, direction, source_drive_file_id, model, status, created_by, context_note)
      VALUES ($1, $2, $3, $4, 'pending', $5, $6) RETURNING *`,
-    [movieId, direction, source.drive_file_id, subtitleTranslator.getModel(), req.user?.email || null, contextNote || null]
+    [movieId, direction, movieStorage.fileRef(source), subtitleTranslator.getModel(), req.user?.email || null, contextNote || null]
   );
   const job = insert.rows[0];
   subtitleTranslator.enqueue(job.id);
