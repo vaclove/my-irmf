@@ -16,6 +16,7 @@ on:
       - 'server/services/googleDrive.js'
       - 'server/services/driveMediaProxy.js'
       - 'server/services/driveChunkedUpload.js'
+      - 'server/services/subtitleCache.js'
       - 'server/utils/movieFileNaming.js'
       - 'server/utils/subtitles.js'
       - 'server/models/database.js'

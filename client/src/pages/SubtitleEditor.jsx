@@ -10,7 +10,7 @@ import CueTable from '../components/subtitle-editor/CueTable'
 const LANGS = ['en', 'cs']
 const LANG_LABELS = { en: 'English', cs: 'Czech' }
 
-const emptyTrack = { status: 'loading', file: null, baseMd5: null, origCues: null, cues: null, saving: false, conflict: false, message: null, flags: [] }
+const emptyTrack = { status: 'loading', file: null, baseMd5: null, origCues: null, cues: null, saving: false, conflict: false, message: null, flags: [], staleCache: null }
 
 /**
  * Visual subtitle editor: the 720p preview on top, both language tracks in an
@@ -66,11 +66,13 @@ function SubtitleEditor() {
     setTracks((t) => ({ ...t, [lang]: { ...emptyTrack } }))
     try {
       const res = await movieFileApi.getSubtitleCues(id, langKey)
-      const { file, cues } = res.data
+      const { file, cues, cache } = res.data
       const flags = await loadFlags(langKey, cues)
+      // Drive refused the download; this is the last cached copy.
+      const staleCache = cache?.source === 'stale-cache' ? cache.drive_error || 'Drive unavailable' : null
       setTracks((t) => ({
         ...t,
-        [lang]: { ...emptyTrack, status: 'ready', file, baseMd5: file.md5_checksum, origCues: cues, cues, flags },
+        [lang]: { ...emptyTrack, status: 'ready', file, baseMd5: file.md5_checksum, origCues: cues, cues, flags, staleCache },
       }))
     } catch (error) {
       const status = error.response?.status
@@ -220,6 +222,7 @@ function SubtitleEditor() {
           file: res.data.file,
           saving: false,
           conflict: false,
+          staleCache: null,
           flags: freshFlags,
         },
       }))
@@ -394,6 +397,26 @@ function SubtitleEditor() {
       <div className="shrink-0 space-y-2 empty:hidden pt-3">
         {LANGS.map((lang) => {
           const tr = tracks[lang]
+          if (tr.status === 'ready' && tr.staleCache && !tr.conflict) {
+            return (
+              <div
+                key={lang}
+                className="rounded-md bg-yellow-50 border border-yellow-200 p-3 text-sm text-yellow-800 flex items-center gap-3"
+              >
+                <span className="flex-1">
+                  {LANG_LABELS[lang]}: Drive is not serving this file right now ({tr.staleCache}), so
+                  this is the last cached copy. Saving still checks Drive and refuses if the file
+                  was changed there in the meantime.
+                </span>
+                <button
+                  onClick={() => loadTrack(lang)}
+                  className="text-blue-700 hover:text-blue-900 font-medium"
+                >
+                  Retry
+                </button>
+              </div>
+            )
+          }
           if (tr.status === 'error' || tr.conflict) {
             return (
               <div
@@ -402,7 +425,7 @@ function SubtitleEditor() {
               >
                 <span className="flex-1">
                   {LANG_LABELS[lang]}: {tr.conflict
-                    ? 'the file changed on Drive since you loaded it — reload to continue (your unsaved edits will be lost).'
+                    ? 'the file was changed on Drive outside the app since you loaded it — reload to get the current version (your unsaved edits will be lost).'
                     : tr.message}
                 </span>
                 <button
