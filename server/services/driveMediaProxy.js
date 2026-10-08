@@ -21,6 +21,52 @@ const DRIVE_MEDIA_BASE = 'https://www.googleapis.com/drive/v3/files';
 // deadline that covers the whole request.
 const UPSTREAM_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 
+// Transient Drive failures (rate limits, 5xx, dropped connections) are retried
+// with exponential backoff before giving up: 1 s, 2 s, 4 s.
+const MAX_ATTEMPTS = 4;
+const RETRY_BASE_MS = 1000;
+const RETRYABLE_403_REASONS = [
+  'rateLimitExceeded',
+  'userRateLimitExceeded',
+  'backendError',
+  'internalError',
+];
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Pull status + Drive's reason/message out of a failed request. With
+ * responseType 'stream' the error body is a stream, so read a bounded prefix.
+ */
+async function describeUpstreamError(error) {
+  const status = error.response?.status || null;
+  let reason = null;
+  let message = error.message;
+  const body = error.response?.data;
+  if (body && typeof body.on === 'function') {
+    try {
+      let raw = '';
+      for await (const chunk of body) {
+        raw += chunk.toString();
+        if (raw.length > 8192) break;
+      }
+      const parsed = JSON.parse(raw);
+      reason = parsed?.error?.errors?.[0]?.reason || null;
+      message = parsed?.error?.message || message;
+    } catch {
+      // not JSON / unreadable — keep axios' message
+    }
+  }
+  return { status, reason, message };
+}
+
+function isRetryable(error, { status, reason }) {
+  if (error.code === 'ERR_CANCELED') return false; // our own deadline
+  if (!status) return true; // network error or token fetch failure
+  if (status === 429 || status >= 500) return true;
+  return status === 403 && RETRYABLE_403_REASONS.includes(reason);
+}
+
 // Copy through only the headers that describe the byte stream.
 const PASS_THROUGH_HEADERS = ['content-length', 'content-range', 'content-type'];
 
@@ -31,30 +77,44 @@ const PASS_THROUGH_HEADERS = ['content-length', 'content-range', 'content-type']
  * @param {string} [fallbackMime] content-type if Drive doesn't send one
  * @param {object} [opts]
  * @param {number} [opts.timeoutMs] upstream deadline (default 30 minutes)
+ * @param {(detail: string) => void} [opts.onError] called with Drive's reason
+ *   when the request finally fails (callers that only see the 502, like
+ *   ffmpeg, can't report it themselves)
  */
 async function proxyDriveMedia(req, res, fileId, fallbackMime, opts = {}) {
-  const token = await googleDrive.getAccessToken();
-  const headers = { Authorization: `Bearer ${token}` };
-  if (req.headers.range) headers.Range = req.headers.range;
-
   let upstream;
-  try {
-    upstream = await axios.get(
-      `${DRIVE_MEDIA_BASE}/${encodeURIComponent(fileId)}`,
-      {
-        params: { alt: 'media', supportsAllDrives: true },
-        headers,
-        responseType: 'stream',
-        signal: AbortSignal.timeout(opts.timeoutMs || UPSTREAM_TIMEOUT_MS),
-        // 416 (range not satisfiable) is a legitimate response to mirror.
-        validateStatus: (s) => s === 200 || s === 206 || s === 416,
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const token = await googleDrive.getAccessToken();
+      const headers = { Authorization: `Bearer ${token}` };
+      if (req.headers.range) headers.Range = req.headers.range;
+      upstream = await axios.get(
+        `${DRIVE_MEDIA_BASE}/${encodeURIComponent(fileId)}`,
+        {
+          params: { alt: 'media', supportsAllDrives: true },
+          headers,
+          responseType: 'stream',
+          signal: AbortSignal.timeout(opts.timeoutMs || UPSTREAM_TIMEOUT_MS),
+          // 416 (range not satisfiable) is a legitimate response to mirror.
+          validateStatus: (s) => s === 200 || s === 206 || s === 416,
+        }
+      );
+      break;
+    } catch (error) {
+      const info = await describeUpstreamError(error);
+      const clientGone = res.destroyed || req.socket?.destroyed;
+      if (attempt < MAX_ATTEMPTS && isRetryable(error, info) && !clientGone) {
+        await sleep(RETRY_BASE_MS * 2 ** (attempt - 1));
+        continue;
       }
-    );
-  } catch (error) {
-    if (!res.headersSent) {
-      res.status(502).json({ error: 'Failed to reach Drive: ' + error.message });
+      const detail =
+        `Drive ${info.status || 'request'} failed` +
+        `${info.reason ? ` (${info.reason})` : ''}: ${info.message}` +
+        ` [after ${attempt} attempt${attempt === 1 ? '' : 's'}]`;
+      if (opts.onError) opts.onError(detail);
+      if (!res.headersSent) res.status(502).json({ error: detail });
+      return;
     }
-    return;
   }
 
   res.status(upstream.status);

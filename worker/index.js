@@ -91,8 +91,12 @@ async function upsertFileKindRow(movieId, fileKind, meta, defaultMime) {
   );
 }
 
-/** Start a loopback HTTP proxy that ffmpeg reads the master through. */
-function startInputProxy() {
+/**
+ * Start a loopback HTTP proxy that ffmpeg reads the master through. ffmpeg
+ * only sees "5XX" when Drive refuses a request, so Drive's actual reason is
+ * handed to onUpstreamError for the job's error message.
+ */
+function startInputProxy(onUpstreamError) {
   return new Promise((resolve) => {
     const app = express();
     // ffmpeg reads the whole master in one long request; the app's 30-minute
@@ -100,6 +104,10 @@ function startInputProxy() {
     app.get('/:fileId', (req, res) =>
       proxyDriveMedia(req, res, req.params.fileId, 'application/octet-stream', {
         timeoutMs: VISIBILITY_TIMEOUT_S * 1000,
+        onError: (detail) => {
+          log('drive upstream error', { fileId: req.params.fileId, detail });
+          if (onUpstreamError) onUpstreamError(detail);
+        },
       })
     );
     const server = app.listen(0, '127.0.0.1', () => {
@@ -212,7 +220,7 @@ function runFfmpeg({ inputUrl, tempPath, durationSeconds, onProgress, onSpawn })
   const args = [
     '-hide_banner', '-nostdin', '-y', '-loglevel', 'error',
     '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_on_network_error', '1',
-    '-reconnect_delay_max', '30',
+    '-reconnect_on_http_error', '5xx', '-reconnect_delay_max', '30',
     '-i', inputUrl,
     '-map', '0:v:0', '-map', '0:a:0?',
     '-vf', `scale=-2:'min(${HEIGHT},ih)'`,
@@ -230,7 +238,7 @@ function extractAudio({ inputUrl, tempPath, durationSeconds, onProgress, onSpawn
   const args = [
     '-hide_banner', '-nostdin', '-y', '-loglevel', 'error',
     '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_on_network_error', '1',
-    '-reconnect_delay_max', '30',
+    '-reconnect_on_http_error', '5xx', '-reconnect_delay_max', '30',
     '-i', inputUrl,
     '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le',
     '-progress', 'pipe:1', tempPath,
@@ -480,6 +488,7 @@ async function processJob(jobId, dequeueCount) {
   let proxyServer = null;
   let ffmpegChild = null;
   let cancelled = false;
+  let upstreamError = null;
 
   const cancelTimer = setInterval(async () => {
     try {
@@ -506,7 +515,7 @@ async function processJob(jobId, dequeueCount) {
     if (movieRes.rows.length === 0) throw new Error('Movie not found');
     const movie = movieRes.rows[0];
 
-    const { server, port } = await startInputProxy();
+    const { server, port } = await startInputProxy((d) => (upstreamError = d));
     proxyServer = server;
     const inputUrl = `http://127.0.0.1:${port}/${encodeURIComponent(job.source_drive_file_id)}`;
 
@@ -600,12 +609,14 @@ async function processJob(jobId, dequeueCount) {
       );
       log('job cancelled', { jobId });
     } else {
+      const message =
+        (error.message || 'Unknown error') + (upstreamError ? ` — ${upstreamError}` : '');
       await pool.query(
         `UPDATE movie_transcode_jobs SET status = 'failed', phase = NULL,
            error_message = $2, finished_at = CURRENT_TIMESTAMP WHERE id = $1`,
-        [jobId, (error.message || 'Unknown error').slice(0, 1000)]
+        [jobId, message.slice(0, 1000)]
       );
-      log('job failed', { jobId, error: error.message });
+      log('job failed', { jobId, error: message });
     }
     return true; // terminal — drop the message (retry is user-driven)
   } finally {
@@ -669,6 +680,7 @@ async function processSubtitleSyncJob(jobId, dequeueCount) {
   let proxyServer = null;
   let activeChild = null;
   let cancelled = false;
+  let upstreamError = null;
 
   const cancelTimer = setInterval(async () => {
     try {
@@ -694,7 +706,7 @@ async function processSubtitleSyncJob(jobId, dequeueCount) {
     if (movieRes.rows.length === 0) throw new Error('Movie not found');
     const movie = movieRes.rows[0];
 
-    const { server, port } = await startInputProxy();
+    const { server, port } = await startInputProxy((d) => (upstreamError = d));
     proxyServer = server;
     const inputUrl = `http://127.0.0.1:${port}/${encodeURIComponent(job.reference_drive_file_id)}`;
 
@@ -812,12 +824,14 @@ async function processSubtitleSyncJob(jobId, dequeueCount) {
       );
       log('sync job cancelled', { jobId });
     } else {
+      const message =
+        (error.message || 'Unknown error') + (upstreamError ? ` — ${upstreamError}` : '');
       await pool.query(
         `UPDATE subtitle_sync_jobs SET status = 'failed', phase = NULL,
            error_message = $2, finished_at = CURRENT_TIMESTAMP WHERE id = $1`,
-        [jobId, (error.message || 'Unknown error').slice(0, 1000)]
+        [jobId, message.slice(0, 1000)]
       );
-      log('sync job failed', { jobId, error: error.message });
+      log('sync job failed', { jobId, error: message });
     }
     return true; // terminal — drop the message (retry is user-driven)
   } finally {
