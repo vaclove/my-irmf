@@ -12,9 +12,10 @@ const KIND_LABELS = {
 }
 
 /**
- * Chunked, resumable upload of a large file straight from the browser to
- * Google Drive. The backend only mints a resumable session; the bytes never
- * pass through our server.
+ * Chunked upload of a large file straight from the browser to Azure Blob
+ * Storage (a short-lived SAS URL scoped to one blob) or, for editions that
+ * stay on Drive, to a Google Drive resumable session. The backend only mints
+ * the target; the bytes never pass through our server.
  */
 function FileUploadModal({ isOpen, onClose, movieId, fileKind = 'movie', onUploaded }) {
   const { success, error: showError } = useToast()
@@ -22,6 +23,7 @@ function FileUploadModal({ isOpen, onClose, movieId, fileKind = 'movie', onUploa
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState(0)
   const cancelRef = useRef(false)
+  const abortRef = useRef(null)
 
   // Warn before leaving the tab while an upload is in flight.
   useEffect(() => {
@@ -44,6 +46,7 @@ function FileUploadModal({ isOpen, onClose, movieId, fileKind = 'movie', onUploa
   const close = () => {
     if (uploading) {
       cancelRef.current = true
+      abortRef.current?.abort()
     }
     reset()
     onClose()
@@ -61,19 +64,41 @@ function FileUploadModal({ isOpen, onClose, movieId, fileKind = 'movie', onUploa
         file_size: file.size,
         mime_type: file.type || 'application/octet-stream',
       })
-      const { upload_url } = sessionRes.data
+      const session = sessionRes.data
 
-      const driveFileId = await uploadToDriveSession(file, upload_url, {
-        onProgress: ({ loaded, total }) => setProgress(Math.round((loaded / total) * 100)),
-        shouldCancel: () => cancelRef.current,
-      })
-
-      if (!driveFileId) throw new Error('Upload did not complete')
-
-      await movieFileApi.completeUpload(movieId, {
-        file_kind: fileKind,
-        drive_file_id: driveFileId,
-      })
+      if (session.target === 'azure') {
+        const abort = new AbortController()
+        abortRef.current = abort
+        try {
+          // Loaded on demand: the SDK is only needed while uploading.
+          const { BlockBlobClient } = await import('@azure/storage-blob')
+          await new BlockBlobClient(session.upload_url).uploadData(file, {
+            blockSize: 8 * 1024 * 1024,
+            concurrency: 4,
+            tier: session.tier,
+            blobHTTPHeaders: { blobContentType: session.content_type },
+            abortSignal: abort.signal,
+            onProgress: ({ loadedBytes }) => setProgress(Math.round((loadedBytes / file.size) * 100)),
+          })
+        } catch (uploadError) {
+          if (abort.signal.aborted) throw Object.assign(new Error('cancelled'), { cancelled: true })
+          throw uploadError
+        }
+        await movieFileApi.completeUpload(movieId, {
+          file_kind: fileKind,
+          blob_name: session.blob_name,
+        })
+      } else {
+        const driveFileId = await uploadToDriveSession(file, session.upload_url, {
+          onProgress: ({ loaded, total }) => setProgress(Math.round((loaded / total) * 100)),
+          shouldCancel: () => cancelRef.current,
+        })
+        if (!driveFileId) throw new Error('Upload did not complete')
+        await movieFileApi.completeUpload(movieId, {
+          file_kind: fileKind,
+          drive_file_id: driveFileId,
+        })
+      }
 
       success('Upload complete')
       if (onUploaded) await onUploaded()

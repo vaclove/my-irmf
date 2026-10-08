@@ -1,14 +1,17 @@
 /**
  * Movie worker — runs as an Azure Container Apps Job triggered by a
  * storage-queue message. One execution drains the queue, then exits so the
- * platform scales to zero. Three job types share the queue, discriminated by
+ * platform scales to zero. Four job types share the queue, discriminated by
  * the message's `type` field (absent = transcode, for back-compat):
  *
- *   transcode      streams the master from Drive, transcodes a 720p H.264/AAC
- *                  proxy with ffmpeg, uploads it back to the movie's folder
+ *   transcode      reads the master (Azure Blob via a read URL, or Drive for
+ *                  legacy rows), transcodes a 720p H.264/AAC proxy with
+ *                  ffmpeg, uploads it to Azure (Hot)
  *   subtitle_sync  extracts mono audio from the proxy/master, re-times a
- *                  subtitle track to it with alass, uploads the synced SRT as
- *                  a new file next to the untouched original
+ *                  subtitle track to it with alass, saves the synced SRT as a
+ *                  separate file (Azure + Drive mirror) next to the original
+ *   file_transfer  copies a file Drive -> Azure (import) or an Azure master
+ *                  -> Drive (backup); see movie_file_transfer_jobs
  *   db_backup      runs pg_dump against DATABASE_URL, uploads the dump to the
  *                  shared drive's Backups folder, prunes to the newest N
  *
@@ -17,12 +20,15 @@
  *
  * Env: DATABASE_URL, GOOGLE_SERVICE_ACCOUNT_KEY (or _PATH), GOOGLE_SHARED_DRIVE_ID,
  *      AZURE_STORAGE_CONNECTION_STRING, TRANSCODE_QUEUE_NAME,
+ *      MOVIE_STORAGE_CONNECTION_STRING, MOVIE_STORAGE_CONTAINER,
  *      MOVIE_TRANSCODE_HEIGHT/CRF/PRESET, FFMPEG_PATH/FFPROBE_PATH (optional),
  *      ALASS_PATH, ALASS_NO_SPLIT, ALASS_SPLIT_PENALTY (optional),
  *      PG_DUMP_PATH, DB_BACKUP_FOLDER_NAME (optional).
  */
 
 const os = require('os');
+const crypto = require('crypto');
+const { Transform, pipeline } = require('stream');
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
@@ -33,9 +39,9 @@ const { pool } = require('../server/models/database');
 const googleDrive = require('../server/services/googleDrive');
 const { proxyDriveMedia } = require('../server/services/driveMediaProxy');
 const { uploadStreamToDrive } = require('../server/services/driveChunkedUpload');
-const { conventionFileName } = require('../server/utils/movieFileNaming');
+const { conventionFileName, extensionOf } = require('../server/utils/movieFileNaming');
 const { parseSubtitles, serializeSrt } = require('../server/utils/subtitles');
-const { readSubtitleText, cacheSubtitleTextSafe } = require('../server/services/subtitleCache');
+const movieStorage = require('../server/services/movieStorage');
 
 const QUEUE_NAME = process.env.TRANSCODE_QUEUE_NAME || 'movie-transcodes';
 const VISIBILITY_TIMEOUT_S = 8 * 60 * 60; // 8h — matches the job replica timeout
@@ -62,33 +68,9 @@ function log(msg, extra) {
   console.log(`[transcode-worker] ${msg}`, extra ? JSON.stringify(extra) : '');
 }
 
-/** Refresh/insert a movie_files pointer row from Drive metadata. */
-async function upsertFileKindRow(movieId, fileKind, meta, defaultMime) {
-  const size = meta.size != null ? parseInt(meta.size, 10) : null;
-  await pool.query(
-    `INSERT INTO movie_files
-       (movie_id, file_kind, drive_file_id, file_name, file_size, mime_type,
-        md5_checksum, drive_modified_at, last_synced_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)
-     ON CONFLICT (movie_id, file_kind) DO UPDATE SET
-       drive_file_id = EXCLUDED.drive_file_id,
-       file_name = EXCLUDED.file_name,
-       file_size = EXCLUDED.file_size,
-       mime_type = EXCLUDED.mime_type,
-       md5_checksum = EXCLUDED.md5_checksum,
-       drive_modified_at = EXCLUDED.drive_modified_at,
-       last_synced_at = CURRENT_TIMESTAMP`,
-    [
-      movieId,
-      fileKind,
-      meta.id,
-      meta.name,
-      size,
-      meta.mimeType || defaultMime,
-      meta.md5Checksum || null,
-      meta.modifiedTime || null,
-    ]
-  );
+/** Hide SAS signatures (ffmpeg echoes its input URL in errors). */
+function redact(message) {
+  return String(message || '').replace(/([?&]sig=)[^&\s]+/g, '$1REDACTED');
 }
 
 /**
@@ -114,6 +96,21 @@ function startInputProxy(onUpstreamError) {
       resolve({ server, port: server.address().port });
     });
   });
+}
+
+/**
+ * Turn a file ref into a URL ffmpeg can read: a read SAS URL for blobs (Blob
+ * Storage serves Range requests itself), the loopback Drive proxy otherwise.
+ * Returns {inputUrl, server} — close `server` when done.
+ */
+async function resolveInput(ref, onUpstreamError) {
+  const parsed = movieStorage.parseRef(ref);
+  if (parsed.type === 'blob') {
+    const inputUrl = await movieStorage.readUrl(parsed.name, { expiresInSec: VISIBILITY_TIMEOUT_S });
+    return { inputUrl, server: null };
+  }
+  const { server, port } = await startInputProxy(onUpstreamError);
+  return { inputUrl: `http://127.0.0.1:${port}/${encodeURIComponent(parsed.id)}`, server };
 }
 
 /** ffprobe the input URL and return its duration in seconds (or null). */
@@ -472,6 +469,7 @@ async function processJob(jobId, dequeueCount) {
   let ffmpegChild = null;
   let cancelled = false;
   let upstreamError = null;
+  const uploadAbort = new AbortController();
 
   const cancelTimer = setInterval(async () => {
     try {
@@ -482,6 +480,7 @@ async function processJob(jobId, dequeueCount) {
       if (r.rows[0]?.cancel_requested) {
         cancelled = true;
         if (ffmpegChild) ffmpegChild.kill('SIGKILL');
+        uploadAbort.abort();
       }
     } catch {
       // transient; try again next tick
@@ -498,9 +497,9 @@ async function processJob(jobId, dequeueCount) {
     if (movieRes.rows.length === 0) throw new Error('Movie not found');
     const movie = movieRes.rows[0];
 
-    const { server, port } = await startInputProxy((d) => (upstreamError = d));
-    proxyServer = server;
-    const inputUrl = `http://127.0.0.1:${port}/${encodeURIComponent(job.source_drive_file_id)}`;
+    const input = await resolveInput(job.source_drive_file_id, (d) => (upstreamError = d));
+    proxyServer = input.server;
+    const { inputUrl } = input;
 
     // Probe.
     const durationSeconds = await probeDuration(inputUrl);
@@ -543,39 +542,80 @@ async function processJob(jobId, dequeueCount) {
     await pool.query("UPDATE movie_transcode_jobs SET phase = 'uploading', progress_percent = 99 WHERE id = $1", [jobId]);
     const stat = fs.statSync(tempPath);
     const targetName = conventionFileName(movie, 'movie_proxy', 'mp4');
-    const folderId = await googleDrive.ensureMovieFolder(movie);
-    const sessionUrl = await googleDrive.createResumableSession({
-      folderId,
-      name: targetName,
-      mimeType: 'video/mp4',
-      size: stat.size,
-    });
     await pool.query('UPDATE movie_transcode_jobs SET bytes_total = $2, target_file_name = $3 WHERE id = $1', [
       jobId,
       stat.size,
       targetName,
     ]);
+    const prior = await movieStorage.loadRow(job.movie_id, 'movie_proxy');
+    let driveFileId; // the job's result as a file ref
 
-    const driveFileId = await uploadStreamToDrive({
-      readable: fs.createReadStream(tempPath),
-      sessionUrl,
-      total: stat.size,
-      onProgress: (n) =>
-        pool.query('UPDATE movie_transcode_jobs SET bytes_transferred = $2 WHERE id = $1', [jobId, n]),
-      shouldCancel: () => cancelled,
-    });
-
-    // Dedup: trash any prior proxy pointing at a different Drive file.
-    const prior = await pool.query(
-      "SELECT drive_file_id FROM movie_files WHERE movie_id = $1 AND file_kind = 'movie_proxy'",
-      [job.movie_id]
-    );
-    if (prior.rows[0] && prior.rows[0].drive_file_id !== driveFileId) {
-      await googleDrive.trashFile(prior.rows[0].drive_file_id).catch(() => {});
+    if (movieStorage.isConfigured()) {
+      const blobName = movieStorage.blobNameFor(movie, 'movie_proxy', 'mp4');
+      let lastWrite = 0;
+      let written;
+      try {
+        written = await movieStorage.uploadStream(blobName, fs.createReadStream(tempPath), {
+          fileKind: 'movie_proxy',
+          contentType: 'video/mp4',
+          abortSignal: uploadAbort.signal,
+          onProgress: (n) => {
+            const now = Date.now();
+            if (now - lastWrite < 2000) return;
+            lastWrite = now;
+            pool
+              .query('UPDATE movie_transcode_jobs SET bytes_transferred = $2 WHERE id = $1', [jobId, n])
+              .catch(() => {});
+          },
+        });
+      } catch (uploadError) {
+        await movieStorage.deleteBlob(blobName).catch(() => {});
+        if (cancelled) throw Object.assign(new Error('cancelled'), { cancelled: true });
+        throw uploadError;
+      }
+      // Previews live only in Azure: no Drive copy.
+      try {
+        await movieStorage.upsertAzureRow(job.movie_id, 'movie_proxy', {
+          blobName,
+          fileName: targetName,
+          size: written.size,
+          mimeType: 'video/mp4',
+          md5: written.md5,
+          etag: written.etag,
+          drive: null,
+        });
+      } catch (rowError) {
+        await movieStorage.deleteBlob(blobName).catch(() => {});
+        throw rowError;
+      }
+      if (prior?.storage === 'azure' && prior.blob_name !== blobName) {
+        await movieStorage.deleteBlob(prior.blob_name).catch(() => {});
+      }
+      if (prior?.drive_file_id) await googleDrive.trashFile(prior.drive_file_id).catch(() => {});
+      driveFileId = movieStorage.fileRef({ storage: 'azure', blob_name: blobName });
+    } else {
+      const folderId = await googleDrive.ensureMovieFolder(movie);
+      const sessionUrl = await googleDrive.createResumableSession({
+        folderId,
+        name: targetName,
+        mimeType: 'video/mp4',
+        size: stat.size,
+      });
+      driveFileId = await uploadStreamToDrive({
+        readable: fs.createReadStream(tempPath),
+        sessionUrl,
+        total: stat.size,
+        onProgress: (n) =>
+          pool.query('UPDATE movie_transcode_jobs SET bytes_transferred = $2 WHERE id = $1', [jobId, n]),
+        shouldCancel: () => cancelled,
+      });
+      // Dedup: trash any prior proxy pointing at a different Drive file.
+      if (prior?.drive_file_id && prior.drive_file_id !== driveFileId) {
+        await googleDrive.trashFile(prior.drive_file_id).catch(() => {});
+      }
+      const meta = await googleDrive.getFileMetadata(driveFileId);
+      await movieStorage.upsertDriveRow(job.movie_id, 'movie_proxy', { ...meta, mimeType: meta.mimeType || 'video/mp4' });
     }
-
-    const meta = await googleDrive.getFileMetadata(driveFileId);
-    await upsertFileKindRow(job.movie_id, 'movie_proxy', meta, 'video/mp4');
 
     await pool.query(
       `UPDATE movie_transcode_jobs SET status = 'completed', phase = NULL,
@@ -594,8 +634,9 @@ async function processJob(jobId, dequeueCount) {
       );
       log('job cancelled', { jobId });
     } else {
-      const message =
-        (error.message || 'Unknown error') + (upstreamError ? ` — ${upstreamError}` : '');
+      const message = redact(
+        (error.message || 'Unknown error') + (upstreamError ? ` — ${upstreamError}` : '')
+      );
       await pool.query(
         `UPDATE movie_transcode_jobs SET status = 'failed', phase = NULL,
            error_message = $2, finished_at = CURRENT_TIMESTAMP WHERE id = $1`,
@@ -691,9 +732,9 @@ async function processSubtitleSyncJob(jobId, dequeueCount) {
     if (movieRes.rows.length === 0) throw new Error('Movie not found');
     const movie = movieRes.rows[0];
 
-    const { server, port } = await startInputProxy((d) => (upstreamError = d));
-    proxyServer = server;
-    const inputUrl = `http://127.0.0.1:${port}/${encodeURIComponent(job.reference_drive_file_id)}`;
+    const input = await resolveInput(job.reference_drive_file_id, (d) => (upstreamError = d));
+    proxyServer = input.server;
+    const { inputUrl } = input;
 
     // Probe the reference video.
     const durationSeconds = await probeDuration(inputUrl);
@@ -742,7 +783,7 @@ async function processSubtitleSyncJob(jobId, dequeueCount) {
 
     // Fetch + normalize the subtitle to SRT (parseSubtitles converts VTT
     // timings to SRT form; serializeSrt renumbers and enforces LF endings).
-    const { text: sourceText } = await readSubtitleText(job.source_drive_file_id);
+    const { text: sourceText } = await movieStorage.readSubtitleRef(job.source_drive_file_id);
     const sourceCues = parseSubtitles(sourceText);
     fs.writeFileSync(inSrtPath, serializeSrt(sourceCues), 'utf8');
     if (cancelled) throw Object.assign(new Error('cancelled'), { cancelled: true });
@@ -766,7 +807,8 @@ async function processSubtitleSyncJob(jobId, dequeueCount) {
     const syncedCues = parseSubtitles(syncedText, 'srt'); // throws when no cues
     const body = Buffer.from(serializeSrt(syncedCues), 'utf8');
 
-    // Upload the synced SRT as a new file next to the original.
+    // Save the synced SRT as its own file next to the original (Azure + Drive
+    // mirror; replaces a previous synced copy).
     const syncedKind = `${job.subtitle_kind}_synced`;
     const targetName = conventionFileName(movie, syncedKind, 'srt');
     await pool.query(
@@ -774,36 +816,19 @@ async function processSubtitleSyncJob(jobId, dequeueCount) {
          target_file_name = $2 WHERE id = $1`,
       [jobId, targetName]
     );
-    const folderId = await googleDrive.ensureMovieFolder(movie);
-    const created = await googleDrive.uploadSmallFile({
-      folderId,
-      name: targetName,
-      mimeType: 'application/x-subrip',
-      body,
+    const saved = await movieStorage.writeSubtitleFile(movie, syncedKind, body, {
+      ext: 'srt',
+      onMirrorError: (e) => log('failed to mirror synced subtitles to Drive', { jobId, error: e.message }),
     });
-
-    // Dedup: trash any prior synced file pointing at a different Drive file.
-    const prior = await pool.query(
-      'SELECT drive_file_id FROM movie_files WHERE movie_id = $1 AND file_kind = $2',
-      [job.movie_id, syncedKind]
-    );
-    if (prior.rows[0] && prior.rows[0].drive_file_id !== created.id) {
-      await googleDrive.trashFile(prior.rows[0].drive_file_id).catch(() => {});
-    }
-
-    // uploadSmallFile already returns full metadata (id, name, size, md5, mtime).
-    await upsertFileKindRow(job.movie_id, syncedKind, created, 'application/x-subrip');
-    await cacheSubtitleTextSafe(created.id, { bytes: body, md5: created.md5Checksum || null }, (e) =>
-      log('failed to cache synced subtitles', { jobId, error: e.message })
-    );
+    const resultRef = movieStorage.fileRef(saved);
 
     await pool.query(
       `UPDATE subtitle_sync_jobs SET status = 'completed', phase = NULL,
          progress_percent = 100, drive_file_id = $2, finished_at = CURRENT_TIMESTAMP
        WHERE id = $1`,
-      [jobId, created.id]
+      [jobId, resultRef]
     );
-    log('sync job completed', { jobId, driveFileId: created.id });
+    log('sync job completed', { jobId, file: resultRef });
     return true;
   } catch (error) {
     if (cancelled || error.cancelled) {
@@ -814,8 +839,9 @@ async function processSubtitleSyncJob(jobId, dequeueCount) {
       );
       log('sync job cancelled', { jobId });
     } else {
-      const message =
-        (error.message || 'Unknown error') + (upstreamError ? ` — ${upstreamError}` : '');
+      const message = redact(
+        (error.message || 'Unknown error') + (upstreamError ? ` — ${upstreamError}` : '')
+      );
       await pool.query(
         `UPDATE subtitle_sync_jobs SET status = 'failed', phase = NULL,
            error_message = $2, finished_at = CURRENT_TIMESTAMP WHERE id = $1`,
@@ -830,6 +856,296 @@ async function processSubtitleSyncJob(jobId, dequeueCount) {
     for (const p of [wavPath, inSrtPath, outSrtPath]) {
       fs.promises.unlink(p).catch(() => {});
     }
+  }
+}
+
+/**
+ * Create + enqueue a preview transcode for a movie's current master (after an
+ * import). Mirrors server/services/transcodeQueue.enqueueForMovie.
+ */
+async function enqueueTranscode(queue, movieId, createdBy) {
+  const master = await movieStorage.loadRow(movieId, 'movie');
+  if (!master) return;
+  const active = await pool.query(
+    "SELECT id FROM movie_transcode_jobs WHERE movie_id = $1 AND status IN ('pending', 'running')",
+    [movieId]
+  );
+  if (active.rows.length > 0) return;
+  const insert = await pool.query(
+    `INSERT INTO movie_transcode_jobs (movie_id, source_drive_file_id, status, created_by)
+     VALUES ($1, $2, 'pending', $3) RETURNING id`,
+    [movieId, movieStorage.fileRef(master), createdBy || null]
+  );
+  const body = Buffer.from(JSON.stringify({ job_id: insert.rows[0].id }), 'utf8').toString('base64');
+  await queue.sendMessage(body);
+  log('transcode enqueued after import', { movieId, jobId: insert.rows[0].id });
+}
+
+/** Queue a Drive backup of the row's current Azure blob (unless one is active). */
+async function enqueueBackup(queue, movieId, fileKind, createdBy) {
+  const row = await movieStorage.loadRow(movieId, fileKind);
+  if (!row || row.storage !== 'azure') return;
+  const insert = await pool.query(
+    `INSERT INTO movie_file_transfer_jobs (movie_id, file_kind, direction, source_ref, created_by)
+     SELECT $1, $2, 'azure_to_drive', $3, $4
+     WHERE NOT EXISTS (
+       SELECT 1 FROM movie_file_transfer_jobs WHERE movie_id = $1 AND file_kind = $2
+         AND direction = 'azure_to_drive' AND status IN ('pending', 'running'))
+     RETURNING id`,
+    [movieId, fileKind, movieStorage.fileRef(row), createdBy || null]
+  );
+  if (insert.rows.length === 0) return;
+  const body = Buffer.from(JSON.stringify({ job_id: insert.rows[0].id, type: 'file_transfer' }), 'utf8').toString(
+    'base64'
+  );
+  await queue.sendMessage(body);
+  log('backup re-queued for the current file', { movieId, jobId: insert.rows[0].id });
+}
+
+/** Pass-through that hashes (md5) and counts the bytes flowing through it. */
+function hashingTap(readable) {
+  const hash = crypto.createHash('md5');
+  let size = 0;
+  const tap = new Transform({
+    transform(chunk, _enc, cb) {
+      hash.update(chunk);
+      size += chunk.length;
+      cb(null, chunk);
+    },
+  });
+  pipeline(readable, tap, (err) => {
+    if (err) tap.destroy(err);
+  });
+  return { tap, result: () => ({ md5: hash.digest('hex'), size }) };
+}
+
+/**
+ * drive_to_azure: copy a Drive file into a blob and point the row at it.
+ * Automatic imports apply only while the row still is the legacy Drive row
+ * they were queued for (checked and switched in one UPDATE, so an upload or
+ * save that happened meanwhile wins); explicit imports (replace_existing)
+ * take the slot regardless.
+ */
+async function transferDriveToAzure(job, movie, onProgress) {
+  const driveId = job.source_ref;
+  const meta = await googleDrive.getFileMetadata(driveId);
+  const total = meta.size != null ? Number(meta.size) : null;
+  await pool.query('UPDATE movie_file_transfer_jobs SET bytes_total = $2 WHERE id = $1', [job.id, total]);
+
+  const kind = job.file_kind;
+  const ext = extensionOf(meta.name) || 'bin';
+  const blobName = movieStorage.blobNameFor(movie, kind, ext);
+  let written;
+  try {
+    written = await movieStorage.uploadStream(blobName, await googleDrive.downloadFileStream(driveId), {
+      fileKind: kind,
+      contentType: meta.mimeType,
+      onProgress,
+    });
+    // A Drive stream that dies mid-way (e.g. downloadQuotaExceeded) must not
+    // produce a short copy.
+    if ((total != null && written.size !== total) || (meta.md5Checksum && written.md5 !== meta.md5Checksum)) {
+      throw new Error(
+        `Copy incomplete: got ${written.size} of ${total ?? '?'} bytes (md5 ${written.md5} vs ${meta.md5Checksum || '?'})`
+      );
+    }
+  } catch (error) {
+    await movieStorage.deleteBlob(blobName).catch(() => {});
+    throw error;
+  }
+
+  // Previews live only in Azure; masters and subtitles keep the Drive file as
+  // their backup/mirror.
+  const keepDrive = kind !== 'movie_proxy';
+  const fields = {
+    blobName,
+    fileName: conventionFileName(movie, kind, ext),
+    size: written.size,
+    mimeType: meta.mimeType,
+    md5: written.md5,
+    etag: written.etag,
+    drive: keepDrive ? { id: driveId, md5: meta.md5Checksum || written.md5 } : null,
+  };
+
+  let row;
+  try {
+    row = await movieStorage.loadRow(job.movie_id, kind);
+    if (job.replace_existing || !row) {
+      await movieStorage.upsertAzureRow(job.movie_id, kind, fields);
+    } else {
+      const switched = await pool.query(
+        `UPDATE movie_files SET storage = 'azure', blob_name = $4, blob_etag = $5, file_name = $6,
+           file_size = $7, mime_type = $8, md5_checksum = $9, drive_file_id = $10,
+           drive_md5_checksum = $11, last_synced_at = CURRENT_TIMESTAMP
+         WHERE movie_id = $1 AND file_kind = $2 AND storage = 'drive' AND drive_file_id = $3
+         RETURNING id`,
+        [
+          job.movie_id, kind, driveId, blobName, fields.etag, fields.fileName, fields.size,
+          fields.mimeType || null, fields.md5, fields.drive?.id || null, fields.drive?.md5 || null,
+        ]
+      );
+      if (switched.rows.length === 0) {
+        await movieStorage.deleteBlob(blobName).catch(() => {});
+        return { superseded: true };
+      }
+    }
+  } catch (error) {
+    await movieStorage.deleteBlob(blobName).catch(() => {});
+    throw error;
+  }
+
+  if (row?.storage === 'azure' && row.blob_name !== blobName) {
+    await movieStorage.deleteBlob(row.blob_name).catch(() => {});
+  }
+  if (row?.drive_file_id && row.drive_file_id !== driveId) {
+    await googleDrive.trashFile(row.drive_file_id).catch(() => {});
+  }
+  if (!keepDrive) await googleDrive.trashFile(driveId).catch(() => {});
+  return { targetRef: movieStorage.fileRef({ storage: 'azure', blob_name: blobName }) };
+}
+
+/** azure_to_drive: write the Drive backup of an Azure master. */
+async function transferAzureToDrive(job, movie, onProgress) {
+  const { name: blobName } = movieStorage.parseRef(job.source_ref);
+  const current = await movieStorage.loadRow(job.movie_id, job.file_kind);
+  if (!current || current.blob_name !== blobName) return { superseded: true };
+
+  const props = await movieStorage.getProperties(blobName);
+  const total = props.contentLength;
+  await pool.query('UPDATE movie_file_transfer_jobs SET bytes_total = $2 WHERE id = $1', [job.id, total]);
+
+  const ext = extensionOf(blobName) || 'bin';
+  const folderId = await googleDrive.ensureMovieFolder(movie);
+  const sessionUrl = await googleDrive.createResumableSession({
+    folderId,
+    name: conventionFileName(movie, job.file_kind, ext),
+    mimeType: props.contentType || 'application/octet-stream',
+    size: total,
+  });
+  const { tap, result } = hashingTap(await movieStorage.openBlobStream(blobName));
+  const driveId = await uploadStreamToDrive({ readable: tap, sessionUrl, total, onProgress });
+  const { md5 } = result();
+  const meta = await googleDrive.getFileMetadata(driveId);
+  if (meta.md5Checksum && meta.md5Checksum !== md5) {
+    await googleDrive.trashFile(driveId).catch(() => {});
+    throw new Error('Drive backup does not match the Azure file (md5 mismatch)');
+  }
+
+  // The master may have been replaced while we copied.
+  const updated = await pool.query(
+    `UPDATE movie_files SET drive_file_id = $3, drive_md5_checksum = $4,
+       md5_checksum = COALESCE(md5_checksum, $5)
+     WHERE movie_id = $1 AND file_kind = $2 AND blob_name = $6
+     RETURNING id`,
+    [job.movie_id, job.file_kind, driveId, meta.md5Checksum || md5, md5, blobName]
+  );
+  if (updated.rows.length === 0) {
+    await googleDrive.trashFile(driveId).catch(() => {});
+    return { superseded: true };
+  }
+  if (current.drive_file_id && current.drive_file_id !== driveId) {
+    await googleDrive.trashFile(current.drive_file_id).catch(() => {});
+  }
+  return { targetRef: driveId };
+}
+
+/** Process a file transfer job. Returns true if the message should be deleted. */
+async function processTransferJob(jobId, dequeueCount, queue) {
+  if (dequeueCount > MAX_DEQUEUE) {
+    await pool.query(
+      `UPDATE movie_file_transfer_jobs SET status = 'failed',
+         error_message = 'Transfer crashed repeatedly and was abandoned',
+         finished_at = CURRENT_TIMESTAMP WHERE id = $1 AND status <> 'completed'`,
+      [jobId]
+    );
+    log('poison transfer message abandoned', { jobId, dequeueCount });
+    return true;
+  }
+  const jobRes = await pool.query('SELECT * FROM movie_file_transfer_jobs WHERE id = $1', [jobId]);
+  if (jobRes.rows.length === 0) return true;
+  const job = jobRes.rows[0];
+  if (!['pending', 'running'].includes(job.status)) {
+    log('transfer not runnable, skipping', { jobId, status: job.status });
+    return true;
+  }
+  if (!googleDrive.isConfigured() || !movieStorage.isConfigured()) {
+    log('Drive or movie storage not configured; leaving transfer for redelivery', { jobId });
+    return false;
+  }
+
+  await pool.query(
+    `UPDATE movie_file_transfer_jobs SET status = 'running', attempt_count = attempt_count + 1,
+       started_at = COALESCE(started_at, CURRENT_TIMESTAMP), error_message = NULL,
+       bytes_transferred = 0
+     WHERE id = $1`,
+    [jobId]
+  );
+
+  let lastWrite = 0;
+  const onProgress = (n) => {
+    const now = Date.now();
+    if (now - lastWrite < 2000) return;
+    lastWrite = now;
+    pool
+      .query('UPDATE movie_file_transfer_jobs SET bytes_transferred = $2 WHERE id = $1', [jobId, n])
+      .catch(() => {});
+  };
+
+  try {
+    const movieRes = await pool.query(
+      `SELECT m.id, m.name_cs, m.name_en, m.drive_folder_id, e.year AS edition_year
+       FROM movies m JOIN editions e ON m.edition_id = e.id WHERE m.id = $1`,
+      [job.movie_id]
+    );
+    if (movieRes.rows.length === 0) throw new Error('Movie not found');
+    const movie = movieRes.rows[0];
+
+    const outcome =
+      job.direction === 'drive_to_azure'
+        ? await transferDriveToAzure(job, movie, onProgress)
+        : await transferAzureToDrive(job, movie, onProgress);
+
+    if (outcome.superseded) {
+      await pool.query(
+        `UPDATE movie_file_transfer_jobs SET status = 'cancelled',
+           error_message = 'Superseded: the file was replaced while copying',
+           finished_at = CURRENT_TIMESTAMP WHERE id = $1`,
+        [jobId]
+      );
+      log('transfer superseded', { jobId });
+      // The replacement's own backup couldn't be queued while this one was
+      // active; queue it now.
+      if (job.direction === 'azure_to_drive') {
+        await enqueueBackup(queue, job.movie_id, job.file_kind, job.created_by).catch((e) =>
+          log('failed to re-queue backup', { jobId, error: e.message })
+        );
+      }
+      return true;
+    }
+
+    await pool.query(
+      `UPDATE movie_file_transfer_jobs SET status = 'completed', target_ref = $2,
+         bytes_transferred = COALESCE(bytes_total, bytes_transferred),
+         finished_at = CURRENT_TIMESTAMP WHERE id = $1`,
+      [jobId, outcome.targetRef]
+    );
+    log('transfer completed', { jobId, direction: job.direction, target: outcome.targetRef });
+
+    if (job.transcode_after) {
+      await enqueueTranscode(queue, job.movie_id, job.created_by).catch((e) =>
+        log('failed to enqueue transcode after import', { jobId, error: e.message })
+      );
+    }
+    return true;
+  } catch (error) {
+    const message = redact(error.message || 'Unknown error');
+    await pool.query(
+      `UPDATE movie_file_transfer_jobs SET status = 'failed', error_message = $2,
+         finished_at = CURRENT_TIMESTAMP WHERE id = $1`,
+      [jobId, message.slice(0, 1000)]
+    );
+    log('transfer failed', { jobId, error: message });
+    return true; // terminal — retry is user- or scan-driven
   }
 }
 
@@ -895,7 +1211,9 @@ async function main() {
           ? await processDbBackup(parsed, msg.dequeueCount)
           : jobType === 'subtitle_sync'
             ? await processSubtitleSyncJob(jobId, msg.dequeueCount)
-            : await processJob(jobId, msg.dequeueCount);
+            : jobType === 'file_transfer'
+              ? await processTransferJob(jobId, msg.dequeueCount, queue)
+              : await processJob(jobId, msg.dequeueCount);
     } catch (e) {
       // Unexpected crash: leave the message so it redelivers (dequeueCount rises).
       log('unexpected job error; leaving message', { jobId, error: e.message });

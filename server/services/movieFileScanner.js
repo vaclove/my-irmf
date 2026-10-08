@@ -8,47 +8,25 @@
  * - Anything else is returned as "unclassified" for the manual import UI.
  * - Subtitle files whose cached copy is missing or outdated are downloaded
  *   into the subtitle cache, so reads keep working when Drive refuses them.
+ * - Azure rows (see movieStorage): Drive only holds their backup/mirror, so
+ *   only the drive_file_id pointer is reconciled — the row itself stays.
+ * - Drive rows of editions that live in Azure are queued for import.
  */
 
 const { pool } = require('../models/database');
 const { logger } = require('../utils/logger');
 const googleDrive = require('./googleDrive');
 const { readSubtitleText } = require('./subtitleCache');
+const movieStorage = require('./movieStorage');
+const fileTransferQueue = require('./fileTransferQueue');
 const { classifyByName, isDetachedFile, isVideoFile } = require('../utils/movieFileNaming');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Refresh/insert a movie_files row from Drive file metadata. */
-async function upsertFileRow(movieId, fileKind, file) {
-  const size = file.size != null ? parseInt(file.size, 10) : null;
-  await pool.query(
-    `INSERT INTO movie_files
-       (movie_id, file_kind, drive_file_id, file_name, file_size, mime_type,
-        md5_checksum, drive_modified_at, last_synced_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)
-     ON CONFLICT (movie_id, file_kind) DO UPDATE SET
-       drive_file_id = EXCLUDED.drive_file_id,
-       file_name = EXCLUDED.file_name,
-       file_size = EXCLUDED.file_size,
-       mime_type = EXCLUDED.mime_type,
-       md5_checksum = EXCLUDED.md5_checksum,
-       drive_modified_at = EXCLUDED.drive_modified_at,
-       last_synced_at = CURRENT_TIMESTAMP`,
-    [
-      movieId,
-      fileKind,
-      file.id,
-      file.name,
-      size,
-      file.mimeType || null,
-      file.md5Checksum || null,
-      file.modifiedTime || null,
-    ]
-  );
-}
+const { upsertDriveRow: upsertFileRow } = movieStorage;
 
 /**
- * Download into the cache every subtitle file of a movie whose cached copy is
+ * Download into the cache every Drive-stored subtitle file of a movie whose cached copy is
  * missing or doesn't match the row's md5. Per-file failures are logged only.
  */
 async function warmSubtitleCache(movieId) {
@@ -57,7 +35,7 @@ async function warmSubtitleCache(movieId) {
      FROM movie_files mf
      LEFT JOIN subtitle_file_cache c ON c.drive_file_id = mf.drive_file_id
      WHERE mf.movie_id = $1 AND mf.file_kind LIKE 'subtitles_%'
-       AND mf.md5_checksum IS NOT NULL
+       AND mf.storage = 'drive' AND mf.md5_checksum IS NOT NULL
        AND c.md5_checksum IS DISTINCT FROM mf.md5_checksum`,
     [movieId]
   );
@@ -94,7 +72,11 @@ async function scanMovie(movieId, opts = {}) {
   const movie = movieRes.rows[0];
 
   if (!movie.drive_folder_id) {
-    return { skipped: true, files: [], unclassified: [], folder: null };
+    const rows = await pool.query(
+      'SELECT * FROM movie_files WHERE movie_id = $1 ORDER BY file_kind',
+      [movieId]
+    );
+    return { skipped: true, files: rows.rows, unclassified: [], folder: null };
   }
 
   const children = await googleDrive.listFolderChildren(movie.drive_folder_id);
@@ -107,9 +89,27 @@ async function scanMovie(movieId, opts = {}) {
 
   const occupiedKinds = new Set();
   const classifiedFileIds = new Set();
+  // Drive listing entry of each Azure row's Drive copy, for drive_state.
+  const driveCopyByKind = new Map();
 
   // Reconcile existing rows against current Drive contents.
   for (const row of existingRes.rows) {
+    if (row.storage === 'azure') {
+      occupiedKinds.add(row.file_kind);
+      if (!row.drive_file_id) continue;
+      const copy = childById.get(row.drive_file_id);
+      if (copy) {
+        classifiedFileIds.add(copy.id);
+        driveCopyByKind.set(row.file_kind, copy);
+      } else {
+        // Drive copy deleted by hand — the Azure file is still the asset.
+        await pool.query(
+          'UPDATE movie_files SET drive_file_id = NULL, drive_md5_checksum = NULL WHERE id = $1',
+          [row.id]
+        );
+      }
+      continue;
+    }
     const file = childById.get(row.drive_file_id);
     if (file) {
       await upsertFileRow(movieId, row.file_kind, file);
@@ -147,6 +147,24 @@ async function scanMovie(movieId, opts = {}) {
     'SELECT * FROM movie_files WHERE movie_id = $1 ORDER BY file_kind',
     [movieId]
   );
+
+  // Editions that live in Azure: import every remaining Drive row (migration,
+  // and files dropped into the Drive folder by hand). Failed imports of the
+  // same file are retried a day later at the earliest.
+  if (movieStorage.importsToAzure(movie)) {
+    const hasProxy = filesRes.rows.some((r) => r.file_kind === 'movie_proxy');
+    for (const row of filesRes.rows.filter((r) => r.storage === 'drive')) {
+      await fileTransferQueue.enqueueImport(row, {
+        respectBackoff: true,
+        transcodeAfter: row.file_kind === 'movie' && !hasProxy,
+      });
+    }
+  }
+
+  const files = filesRes.rows.map((row) => ({
+    ...row,
+    drive_state: movieStorage.driveState(row, driveCopyByKind.get(row.file_kind) || null),
+  }));
   const unclassified = children
     .filter((c) => !classifiedFileIds.has(c.id))
     .map((c) => ({
@@ -158,7 +176,7 @@ async function scanMovie(movieId, opts = {}) {
     }));
 
   return {
-    files: filesRes.rows,
+    files,
     unclassified,
     folder: { id: movie.drive_folder_id },
   };

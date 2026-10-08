@@ -1,13 +1,14 @@
 {
   "name": "my-irmf-transcode-worker",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
-  "description": "Out-of-process movie transcode worker (Azure Container Apps Job). Reads a job from a storage queue, transcodes the master to a 720p proxy with ffmpeg, uploads it to Google Drive.",
+  "description": "Out-of-process movie worker (Azure Container Apps Job): preview transcodes, subtitle sync, Drive<->Azure file transfers and DB backups, driven by a storage queue.",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
+    "@azure/storage-blob": "^12.27.0",
     "@azure/storage-queue": "^12.0.0",
     "axios": "^1.10.0",
     "express": "^4.21.2",

@@ -121,6 +121,25 @@ Notes:
 - 480p is faster/smaller: set `MOVIE_TRANSCODE_HEIGHT=480`. Subtitle readability
   is unaffected (rendered by the browser, not burned in).
 
+### Movie storage (Azure Blob)
+
+Since BE v1.22 the worker reads masters from and writes previews/subtitles to
+the `irmfmovies` storage account (container `movies`; masters Cold, previews
+and subtitles Hot, blob soft delete 14 days). It also runs the Drive <-> Azure
+copy jobs (`file_transfer` messages: imports of Drive files, Drive backups of
+masters). Give the job the account's connection string:
+
+```bash
+MOVIES_CONN=$(az storage account show-connection-string -n irmfmovies -g $RG --query connectionString -o tsv)
+az containerapp job secret set -g $RG -n movie-transcoder --secrets "movies-conn=$MOVIES_CONN"
+az containerapp job update -g $RG -n movie-transcoder \
+  --set-env-vars "MOVIE_STORAGE_CONNECTION_STRING=secretref:movies-conn" "MOVIE_STORAGE_CONTAINER=movies"
+```
+
+The app needs the same `MOVIE_STORAGE_CONNECTION_STRING` (App Service setting).
+The account's blob CORS rules must allow `PUT` from the app origins — browsers
+upload masters straight to Blob Storage through short-lived SAS URLs.
+
 ## 4. CI (optional)
 
 `.github/workflows/transcoder.yml` rebuilds and updates the job image on pushes

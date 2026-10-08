@@ -32,7 +32,6 @@ function SubtitleVideoPanel({ movieId, hasProxy, videoRef, currentTimeMs, enCues
         ref={videoRef}
         controls
         preload="metadata"
-        crossOrigin="use-credentials"
         className="w-full max-h-[40vh]"
         src={movieFileApi.streamUrl(movieId, 'movie_proxy')}
         onTimeUpdate={(e) => onTimeUpdate(Math.round(e.target.currentTime * 1000))}
