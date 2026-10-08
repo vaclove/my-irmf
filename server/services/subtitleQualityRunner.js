@@ -19,6 +19,7 @@
 const { pool } = require('../models/database');
 const { logger } = require('../utils/logger');
 const googleDrive = require('./googleDrive');
+const { readSubtitleText } = require('./subtitleCache');
 const llmClient = require('./llmClient');
 const gate = require('./subtitleQualityGate');
 const { parseSubtitles } = require('../utils/subtitles');
@@ -28,7 +29,6 @@ const MAX_CONCURRENT = Math.max(
   1,
   parseInt(process.env.SUBTITLE_QUALITY_MAX_CONCURRENT || '1', 10) || 1
 );
-const MAX_SUBTITLE_BYTES = 2 * 1024 * 1024;
 const SUGGEST_BATCH_SIZE = 20;
 const SUGGEST_MAX_TOKENS = 8000;
 const SUGGEST_CONTEXT_NEIGHBORS = 2;
@@ -535,21 +535,19 @@ class SubtitleQualityRunner {
     }
   }
 
-  /** Download a Drive file into a utf8 string, capped at MAX_SUBTITLE_BYTES. */
+  /**
+   * A subtitle file's decoded text, served from the subtitle cache when its
+   * md5 still matches (Drive download only on a miss).
+   */
   async downloadText(driveFileId) {
-    const stream = await googleDrive.downloadFileStream(driveFileId);
-    const chunks = [];
-    let bytes = 0;
-    for await (const chunk of stream) {
-      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-      bytes += buf.length;
-      if (bytes > MAX_SUBTITLE_BYTES) {
-        if (typeof stream.destroy === 'function') stream.destroy();
+    try {
+      return (await readSubtitleText(driveFileId)).text;
+    } catch (error) {
+      if (error.statusCode === 413) {
         throw new Error('Subtitle file is too large to check (over 2 MiB)');
       }
-      chunks.push(buf);
+      throw error;
     }
-    return Buffer.concat(chunks).toString('utf8');
   }
 
   async fail(runId, message) {

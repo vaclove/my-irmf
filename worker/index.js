@@ -34,7 +34,8 @@ const googleDrive = require('../server/services/googleDrive');
 const { proxyDriveMedia } = require('../server/services/driveMediaProxy');
 const { uploadStreamToDrive } = require('../server/services/driveChunkedUpload');
 const { conventionFileName } = require('../server/utils/movieFileNaming');
-const { decodeSubtitleBuffer, parseSubtitles, serializeSrt } = require('../server/utils/subtitles');
+const { parseSubtitles, serializeSrt } = require('../server/utils/subtitles');
+const { readSubtitleText, cacheSubtitleTextSafe } = require('../server/services/subtitleCache');
 
 const QUEUE_NAME = process.env.TRANSCODE_QUEUE_NAME || 'movie-transcodes';
 const VISIBILITY_TIMEOUT_S = 8 * 60 * 60; // 8h — matches the job replica timeout
@@ -47,7 +48,6 @@ const ALASS = process.env.ALASS_PATH || 'alass';
 const PG_DUMP = process.env.PG_DUMP_PATH || 'pg_dump';
 const BACKUP_FOLDER_NAME = process.env.DB_BACKUP_FOLDER_NAME || 'Backups';
 const BACKUP_NAME_RE = /^festival_db_\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z\.dump$/;
-const MAX_SUBTITLE_BYTES = 2 * 1024 * 1024;
 const HEIGHT = parseInt(process.env.MOVIE_TRANSCODE_HEIGHT || '720', 10);
 const CRF = process.env.MOVIE_TRANSCODE_CRF || '23';
 const PRESET = process.env.MOVIE_TRANSCODE_PRESET || 'veryfast';
@@ -410,23 +410,6 @@ async function processDbBackup(message, dequeueCount) {
   }
 }
 
-/** Download a Drive subtitle file into a bounded buffer and decode it. */
-async function downloadSubtitleText(driveFileId) {
-  const stream = await googleDrive.downloadFileStream(driveFileId);
-  const chunks = [];
-  let bytes = 0;
-  for await (const chunk of stream) {
-    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    bytes += buf.length;
-    if (bytes > MAX_SUBTITLE_BYTES) {
-      if (typeof stream.destroy === 'function') stream.destroy();
-      throw new Error('Subtitles file is too large');
-    }
-    chunks.push(buf);
-  }
-  return decodeSubtitleBuffer(Buffer.concat(chunks));
-}
-
 /** Process a single job. Returns true if the message should be deleted. */
 async function processJob(jobId, dequeueCount) {
   if (dequeueCount > MAX_DEQUEUE) {
@@ -759,7 +742,7 @@ async function processSubtitleSyncJob(jobId, dequeueCount) {
 
     // Fetch + normalize the subtitle to SRT (parseSubtitles converts VTT
     // timings to SRT form; serializeSrt renumbers and enforces LF endings).
-    const sourceText = await downloadSubtitleText(job.source_drive_file_id);
+    const { text: sourceText } = await readSubtitleText(job.source_drive_file_id);
     const sourceCues = parseSubtitles(sourceText);
     fs.writeFileSync(inSrtPath, serializeSrt(sourceCues), 'utf8');
     if (cancelled) throw Object.assign(new Error('cancelled'), { cancelled: true });
@@ -810,6 +793,9 @@ async function processSubtitleSyncJob(jobId, dequeueCount) {
 
     // uploadSmallFile already returns full metadata (id, name, size, md5, mtime).
     await upsertFileKindRow(job.movie_id, syncedKind, created, 'application/x-subrip');
+    await cacheSubtitleTextSafe(created.id, { bytes: body, md5: created.md5Checksum || null }, (e) =>
+      log('failed to cache synced subtitles', { jobId, error: e.message })
+    );
 
     await pool.query(
       `UPDATE subtitle_sync_jobs SET status = 'completed', phase = NULL,

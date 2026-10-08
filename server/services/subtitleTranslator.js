@@ -36,6 +36,7 @@ const llmClient = require('./llmClient');
 const { pool } = require('../models/database');
 const { logger } = require('../utils/logger');
 const googleDrive = require('./googleDrive');
+const { readSubtitleText, cacheSubtitleTextSafe } = require('./subtitleCache');
 const { conventionFileName, extensionOf } = require('../utils/movieFileNaming');
 const { upsertFileRow } = require('./movieFileScanner');
 const {
@@ -52,7 +53,6 @@ const MAX_CONCURRENT = Math.max(
 );
 const MAX_BATCH_SIZE = 80;
 const MIN_BATCH_SIZE = 10;
-const MAX_SUBTITLE_BYTES = 2 * 1024 * 1024; // same cap as the subtitle serving route
 const CONTEXT_CUES = 3; // trailing cues of the previous batch passed as context
 const MAX_OUTPUT_TOKENS = 16000; // headroom for adaptive thinking + translated cues
 const BRIEF_MAX_TOKENS = 8000;
@@ -734,6 +734,15 @@ class SubtitleTranslator {
         }
       }
       await upsertFileRow(job.movie_id, dir.targetKind, created);
+      await cacheSubtitleTextSafe(
+        created.id,
+        { text: srtText, md5: created.md5Checksum || null },
+        (cacheError) =>
+          logger.warn('[SubtitleTranslator] failed to cache translated subtitles', {
+            jobId,
+            error: cacheError.message,
+          })
+      );
 
       await pool.query(
         `UPDATE subtitle_translation_jobs SET status = 'completed', drive_file_id = $2,
@@ -782,21 +791,19 @@ class SubtitleTranslator {
     }
   }
 
-  /** Download a Drive file into a utf8 string, capped at MAX_SUBTITLE_BYTES. */
+  /**
+   * A subtitle file's decoded text, served from the subtitle cache when its
+   * md5 still matches (Drive download only on a miss).
+   */
   async downloadText(driveFileId) {
-    const stream = await googleDrive.downloadFileStream(driveFileId);
-    const chunks = [];
-    let bytes = 0;
-    for await (const chunk of stream) {
-      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-      bytes += buf.length;
-      if (bytes > MAX_SUBTITLE_BYTES) {
-        if (typeof stream.destroy === 'function') stream.destroy();
+    try {
+      return (await readSubtitleText(driveFileId)).text;
+    } catch (error) {
+      if (error.statusCode === 413) {
         throw new Error('Subtitle file is too large to translate (over 2 MiB)');
       }
-      chunks.push(buf);
+      throw error;
     }
-    return Buffer.concat(chunks).toString('utf8');
   }
 
   async fail(jobId, message) {

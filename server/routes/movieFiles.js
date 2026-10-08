@@ -14,12 +14,16 @@ const { proxyDriveMedia } = require('../services/driveMediaProxy');
 const transcodeQueue = require('../services/transcodeQueue');
 const {
   convertSrtToVtt,
-  decodeSubtitleBuffer,
   parseSubtitles,
   serializeSrt,
   serializeVtt,
 } = require('../utils/subtitles');
 const { scanMovie, upsertFileRow } = require('../services/movieFileScanner');
+const {
+  MAX_SUBTITLE_BYTES,
+  readSubtitleText,
+  cacheSubtitleTextSafe,
+} = require('../services/subtitleCache');
 const {
   conventionFileName,
   detachedFileName,
@@ -92,28 +96,33 @@ function subtitleMime(ext) {
   return ext === 'vtt' ? 'text/vtt' : 'application/x-subrip';
 }
 
-const MAX_SUBTITLE_BYTES = 2 * 1024 * 1024;
+/** Read a subtitle row's text through the cache (Drive only on a miss). */
+function readRowText(row) {
+  return readSubtitleText(row.drive_file_id, { expectedMd5: row.md5_checksum || null });
+}
+
+/** Cache freshly written subtitle bytes; failures are only logged. */
+function cacheWritten(req, movieId, meta, body) {
+  return cacheSubtitleTextSafe(
+    meta.id,
+    { bytes: body, md5: meta.md5Checksum || null },
+    (cacheError) => logError(cacheError, req, { operation: 'cache_subtitle_text', movieId })
+  );
+}
 
 /**
- * Download and decode a subtitle file from Drive.
- * Throws an Error with statusCode=413 when the file exceeds the cap.
+ * Guard an in-place overwrite: compare the file's current Drive md5 with the
+ * md5 the app based its change on. On a mismatch the file was edited outside
+ * the app — refresh the pointer row (so the next read re-downloads instead of
+ * serving the cached old text) and return the fresh metadata as `changed`.
  */
-async function downloadSubtitleText(driveFileId) {
-  const stream = await googleDrive.downloadFileStream(driveFileId);
-  const chunks = [];
-  let bytes = 0;
-  for await (const chunk of stream) {
-    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    bytes += buf.length;
-    if (bytes > MAX_SUBTITLE_BYTES) {
-      if (typeof stream.destroy === 'function') stream.destroy();
-      const err = new Error('Subtitles file is too large');
-      err.statusCode = 413;
-      throw err;
-    }
-    chunks.push(buf);
+async function checkDriveUnchanged(movieId, row, baseMd5) {
+  const meta = await googleDrive.getFileMetadata(row.drive_file_id);
+  if (meta.md5Checksum && baseMd5 && meta.md5Checksum !== baseMd5) {
+    await upsertFileRow(movieId, row.file_kind, meta);
+    return { changed: meta };
   }
-  return decodeSubtitleBuffer(Buffer.concat(chunks));
+  return { changed: null };
 }
 
 /**
@@ -325,6 +334,7 @@ router.post('/subtitles', async (req, res) => {
       body,
     });
     await upsertFileRow(movieId, file_kind, created);
+    await cacheWritten(req, movieId, created, body);
     // Replacing: trash the old file, otherwise it lingers under the same
     // convention name and the scanner re-adopts it once this one is removed.
     if (prior && prior.drive_file_id !== created.id) {
@@ -441,7 +451,7 @@ router.get('/subtitles/:lang', async (req, res) => {
     const row = await loadSubtitleRow(movieId, cleanLang);
     if (!row) return res.status(404).json({ error: 'Subtitles not found' });
 
-    const text = await downloadSubtitleText(row.drive_file_id);
+    const { text } = await readRowText(row);
     const vtt = extensionOf(row.file_name) === 'vtt' ? text : convertSrtToVtt(text);
 
     res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
@@ -467,7 +477,7 @@ router.get('/subtitles/:lang/cues', async (req, res) => {
     if (!row) return res.status(404).json({ error: 'Subtitles not found' });
 
     const ext = extensionOf(row.file_name);
-    const text = await downloadSubtitleText(row.drive_file_id);
+    const { text, md5, source, driveError } = await readRowText(row);
     let cues;
     try {
       cues = parseSubtitles(text, ext);
@@ -479,11 +489,14 @@ router.get('/subtitles/:lang/cues', async (req, res) => {
       file: {
         file_name: row.file_name,
         drive_file_id: row.drive_file_id,
-        md5_checksum: row.md5_checksum,
+        // The md5 of the text actually returned — the editor saves against it.
+        md5_checksum: md5,
         drive_modified_at: row.drive_modified_at,
       },
       format: ext === 'vtt' ? 'vtt' : 'srt',
       cues,
+      // 'stale-cache': Drive refused the download, this is the last cached copy.
+      cache: { source, drive_error: driveError || null },
     });
   } catch (error) {
     if (error.statusCode === 413) {
@@ -531,10 +544,14 @@ router.put('/subtitles/:lang/cues', async (req, res) => {
     const row = await loadSubtitleRow(movieId, lang);
     if (!row) return res.status(404).json({ error: 'Subtitles not found' });
 
-    const meta = await googleDrive.getFileMetadata(row.drive_file_id);
-    if (meta.md5Checksum && meta.md5Checksum !== base_md5) {
+    // The file must still be exactly what the editor loaded — otherwise
+    // someone changed it on Drive outside the app and saving would wipe that.
+    const { changed } = await checkDriveUnchanged(movieId, row, base_md5);
+    if (changed) {
       return res.status(409).json({
-        error: 'Subtitles changed on Drive since you loaded them. Reload the editor.',
+        error:
+          'Subtitles were changed on Drive outside the app since you loaded them. ' +
+          'Reload the editor to get the current version (your unsaved edits will be lost).',
       });
     }
 
@@ -552,6 +569,7 @@ router.put('/subtitles/:lang/cues', async (req, res) => {
       body,
     });
     await upsertFileRow(movieId, row.file_kind, updated);
+    await cacheWritten(req, movieId, updated, body);
     const fresh = await loadSubtitleRow(movieId, lang);
 
     // Reconcile open quality flags against the saved text (non-fatal):
@@ -627,7 +645,7 @@ router.post('/subtitles/:lang/use-synced', async (req, res) => {
       return res.status(409).json({ error: 'A sync job is still running for this track' });
     }
 
-    const syncedText = await downloadSubtitleText(synced.drive_file_id);
+    const { text: syncedText } = await readRowText(synced);
     let cues;
     try {
       cues = parseSubtitles(syncedText, 'srt');
@@ -643,6 +661,14 @@ router.post('/subtitles/:lang/use-synced', async (req, res) => {
 
     let meta;
     if (original) {
+      const { changed } = await checkDriveUnchanged(movieId, original, original.md5_checksum);
+      if (changed) {
+        return res.status(409).json({
+          error:
+            'The original subtitles were changed on Drive outside the app. ' +
+            'Check them first; replacing again will overwrite that change.',
+        });
+      }
       meta = await googleDrive.updateFileContent({
         fileId: original.drive_file_id,
         mimeType: subtitleMime(ext),
@@ -658,6 +684,7 @@ router.post('/subtitles/:lang/use-synced', async (req, res) => {
       });
     }
     await upsertFileRow(movieId, kind, meta);
+    await cacheWritten(req, movieId, meta, body);
 
     await googleDrive.trashFile(synced.drive_file_id).catch((trashError) => {
       if (!isDriveNotFound(trashError)) {

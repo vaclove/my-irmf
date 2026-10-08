@@ -40,6 +40,7 @@ COPY server/models/database.js ./server/models/database.js
 COPY server/services/googleDrive.js ./server/services/googleDrive.js
 COPY server/services/driveMediaProxy.js ./server/services/driveMediaProxy.js
 COPY server/services/driveChunkedUpload.js ./server/services/driveChunkedUpload.js
+COPY server/services/subtitleCache.js ./server/services/subtitleCache.js
 COPY server/utils/movieFileNaming.js ./server/utils/movieFileNaming.js
 COPY server/utils/subtitles.js ./server/utils/subtitles.js
 

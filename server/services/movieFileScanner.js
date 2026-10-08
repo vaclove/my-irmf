@@ -6,11 +6,14 @@
  * - Unoccupied kinds are auto-filled from convention-named files (conservative:
  *   a lone video counts as the movie; *.cs / *.en subtitle files count).
  * - Anything else is returned as "unclassified" for the manual import UI.
+ * - Subtitle files whose cached copy is missing or outdated are downloaded
+ *   into the subtitle cache, so reads keep working when Drive refuses them.
  */
 
 const { pool } = require('../models/database');
 const { logger } = require('../utils/logger');
 const googleDrive = require('./googleDrive');
+const { readSubtitleText } = require('./subtitleCache');
 const { classifyByName, isDetachedFile, isVideoFile } = require('../utils/movieFileNaming');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -45,10 +48,38 @@ async function upsertFileRow(movieId, fileKind, file) {
 }
 
 /**
+ * Download into the cache every subtitle file of a movie whose cached copy is
+ * missing or doesn't match the row's md5. Per-file failures are logged only.
+ */
+async function warmSubtitleCache(movieId) {
+  const res = await pool.query(
+    `SELECT mf.drive_file_id, mf.md5_checksum, mf.file_kind
+     FROM movie_files mf
+     LEFT JOIN subtitle_file_cache c ON c.drive_file_id = mf.drive_file_id
+     WHERE mf.movie_id = $1 AND mf.file_kind LIKE 'subtitles_%'
+       AND mf.md5_checksum IS NOT NULL
+       AND c.md5_checksum IS DISTINCT FROM mf.md5_checksum`,
+    [movieId]
+  );
+  for (const row of res.rows) {
+    try {
+      await readSubtitleText(row.drive_file_id, { expectedMd5: row.md5_checksum });
+    } catch (error) {
+      logger.warn('[MovieScan] Failed to cache subtitles', {
+        movieId,
+        fileKind: row.file_kind,
+        error: error.message,
+      });
+    }
+  }
+}
+
+/**
  * Scan a single movie's Drive folder and reconcile movie_files rows.
+ * The subtitle cache is warmed in the background unless opts.awaitCacheWarm.
  * @returns {Promise<{skipped?:boolean, files:object[], unclassified:object[], folder:{id:string}|null}>}
  */
-async function scanMovie(movieId) {
+async function scanMovie(movieId, opts = {}) {
   const movieRes = await pool.query(
     `SELECT m.id, m.name_cs, m.name_en, m.drive_folder_id, e.year AS edition_year
      FROM movies m JOIN editions e ON m.edition_id = e.id
@@ -107,6 +138,11 @@ async function scanMovie(movieId) {
     }
   }
 
+  const warming = warmSubtitleCache(movieId).catch((error) =>
+    logger.warn('[MovieScan] Subtitle cache warm-up failed', { movieId, error: error.message })
+  );
+  if (opts.awaitCacheWarm) await warming;
+
   const filesRes = await pool.query(
     'SELECT * FROM movie_files WHERE movie_id = $1 ORDER BY file_kind',
     [movieId]
@@ -146,7 +182,7 @@ async function scanAll() {
 
   for (const movie of res.rows) {
     try {
-      await scanMovie(movie.id);
+      await scanMovie(movie.id, { awaitCacheWarm: true });
       scanned += 1;
     } catch (error) {
       errors += 1;
