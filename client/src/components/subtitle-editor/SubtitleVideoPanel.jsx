@@ -1,10 +1,12 @@
 import { movieFileApi } from '../../utils/api'
+import { renderSubtitleMarkup } from '../../utils/subtitleMarkup'
 
 /**
  * Player panel for the subtitle editor. Deliberately renders NO native
  * <track> children: the browser fetches those once, so edits would not show
  * until saved. Instead the current cue of each language is drawn in a custom
- * overlay straight from the in-memory editing state (EN above CS).
+ * overlay straight from the in-memory editing state (EN above CS). Inline
+ * markup (<i>, <b>, …) is rendered like the native track renderer does.
  */
 function activeCueText(cues, timeMs) {
   if (!cues) return null
@@ -40,12 +42,12 @@ function SubtitleVideoPanel({ movieId, hasProxy, videoRef, currentTimeMs, enCues
         <div className="pointer-events-none absolute inset-x-0 bottom-14 flex flex-col items-center gap-1 px-4">
           {enText && (
             <div className="max-w-[90%] whitespace-pre-line text-center text-white text-base md:text-lg bg-black/70 rounded px-2 py-0.5">
-              {enText}
+              {renderSubtitleMarkup(enText)}
             </div>
           )}
           {csText && (
             <div className="max-w-[90%] whitespace-pre-line text-center text-yellow-200 text-base md:text-lg bg-black/70 rounded px-2 py-0.5">
-              {csText}
+              {renderSubtitleMarkup(csText)}
             </div>
           )}
         </div>

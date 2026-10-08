@@ -29,8 +29,10 @@ const PASS_THROUGH_HEADERS = ['content-length', 'content-range', 'content-type']
  * @param {import('http').ServerResponse} res
  * @param {string} fileId Drive file id
  * @param {string} [fallbackMime] content-type if Drive doesn't send one
+ * @param {object} [opts]
+ * @param {number} [opts.timeoutMs] upstream deadline (default 30 minutes)
  */
-async function proxyDriveMedia(req, res, fileId, fallbackMime) {
+async function proxyDriveMedia(req, res, fileId, fallbackMime, opts = {}) {
   const token = await googleDrive.getAccessToken();
   const headers = { Authorization: `Bearer ${token}` };
   if (req.headers.range) headers.Range = req.headers.range;
@@ -43,7 +45,7 @@ async function proxyDriveMedia(req, res, fileId, fallbackMime) {
         params: { alt: 'media', supportsAllDrives: true },
         headers,
         responseType: 'stream',
-        signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+        signal: AbortSignal.timeout(opts.timeoutMs || UPSTREAM_TIMEOUT_MS),
         // 416 (range not satisfiable) is a legitimate response to mirror.
         validateStatus: (s) => s === 200 || s === 206 || s === 416,
       }
@@ -67,9 +69,17 @@ async function proxyDriveMedia(req, res, fileId, fallbackMime) {
   // Tear down the upstream request if the client goes away mid-stream.
   const abort = () => upstream.data.destroy();
   res.on('close', abort);
-  upstream.data.on('error', () => {
-    if (!res.headersSent) res.status(502);
-    res.end();
+  // Mid-stream failure: destroy rather than end. A clean end() looks like a
+  // finished (just short) download, so ffmpeg would treat it as end of input
+  // and write a truncated proxy; a torn connection makes it reconnect with a
+  // Range request (or fail loudly) instead.
+  upstream.data.on('error', (err) => {
+    if (!res.headersSent) {
+      res.status(502);
+      res.end();
+    } else {
+      res.destroy(err);
+    }
   });
   upstream.data.pipe(res);
 }

@@ -587,6 +587,9 @@ router.get('/public/movies/:id', async (req, res) => {
     }
     
     const movie = result.rows[0];
+    // Internal workflow fields (staff email) — not for the public API.
+    delete movie.files_ready_at;
+    delete movie.files_ready_by;
 
     // Add image URLs if image_url exists
     if (movie.image_url) {

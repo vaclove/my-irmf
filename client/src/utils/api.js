@@ -149,6 +149,9 @@ export const movieFileApi = {
   importFile: (movieId, data) => api.post(`/movies/${movieId}/files/import`, data),
   deleteFile: (movieId, fileKind, removeFromDrive = false) =>
     api.delete(`/movies/${movieId}/files/${fileKind}`, { params: { remove_from_drive: removeFromDrive } }),
+  // Overwrite the original subtitles with the alass-synced copy (lang: cs | en).
+  promoteSyncedSubtitles: (movieId, lang) => api.post(`/movies/${movieId}/files/subtitles/${lang}/use-synced`),
+  setReady: (movieId, ready) => api.put(`/movies/${movieId}/files/ready`, { ready }),
   // Raw URLs for <video>/<track> elements (not axios). withCredentials via cookies.
   streamUrl: (movieId, fileKind) => `${API_BASE_URL}/movies/${movieId}/files/stream/${fileKind}`,
   subtitleUrl: (movieId, lang) => `${API_BASE_URL}/movies/${movieId}/files/subtitles/${lang}.vtt`,

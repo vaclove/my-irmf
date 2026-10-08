@@ -52,6 +52,10 @@ const HEIGHT = parseInt(process.env.MOVIE_TRANSCODE_HEIGHT || '720', 10);
 const CRF = process.env.MOVIE_TRANSCODE_CRF || '23';
 const PRESET = process.env.MOVIE_TRANSCODE_PRESET || 'veryfast';
 const MAX_THREADS = process.env.MOVIE_TRANSCODE_MAX_THREADS || null;
+// An output shorter than its source by more than this is treated as truncated
+// (ffmpeg ends "successfully" when its input stream dies mid-way).
+const DURATION_TOLERANCE_S = 10;
+const DURATION_TOLERANCE_RATIO = 0.02;
 
 function log(msg, extra) {
   // Plain stdout — Container Apps captures it as execution logs.
@@ -91,8 +95,12 @@ async function upsertFileKindRow(movieId, fileKind, meta, defaultMime) {
 function startInputProxy() {
   return new Promise((resolve) => {
     const app = express();
+    // ffmpeg reads the whole master in one long request; the app's 30-minute
+    // upstream deadline would cut a slow transcode off mid-file.
     app.get('/:fileId', (req, res) =>
-      proxyDriveMedia(req, res, req.params.fileId, 'application/octet-stream')
+      proxyDriveMedia(req, res, req.params.fileId, 'application/octet-stream', {
+        timeoutMs: VISIBILITY_TIMEOUT_S * 1000,
+      })
     );
     const server = app.listen(0, '127.0.0.1', () => {
       resolve({ server, port: server.address().port });
@@ -125,10 +133,41 @@ function probeDuration(inputUrl) {
 }
 
 /**
+ * Guard against a truncated ffmpeg output. ffmpeg treats an input read error
+ * as end of input and still exits 0, so a Drive hiccup mid-stream yields a
+ * valid but short file (e.g. a 1-minute proxy of a feature film). Probe the
+ * output and throw when it is clearly shorter than the source. When the
+ * source duration is unknown, only an unreadable/empty output fails.
+ */
+async function assertCompleteOutput({ outputPath, expectedSeconds, label, stderrTail }) {
+  const actual = await probeDuration(outputPath);
+  const detail = stderrTail ? ` ffmpeg: ${stderrTail.slice(-500)}` : '';
+  if (!actual || actual <= 0) {
+    throw new Error(`${label} is unreadable or empty.${detail}`);
+  }
+  if (!expectedSeconds) return;
+  const tolerance = Math.max(DURATION_TOLERANCE_S, expectedSeconds * DURATION_TOLERANCE_RATIO);
+  if (expectedSeconds - actual > tolerance) {
+    const fmt = (sec) => {
+      const t = Math.round(sec);
+      const h = Math.floor(t / 3600);
+      const m = String(Math.floor((t % 3600) / 60)).padStart(2, '0');
+      const ss = String(t % 60).padStart(2, '0');
+      return `${h}:${m}:${ss}`;
+    };
+    throw new Error(
+      `${label} is incomplete: ${fmt(actual)} of ${fmt(expectedSeconds)} — the source stream ` +
+        `was probably interrupted. Retry.${detail}`
+    );
+  }
+}
+
+/**
  * Spawn ffmpeg with the given args (must end with '-progress pipe:1' and the
  * output path). Reports progress via onProgress (0–99, from out_time_us vs
- * durationSeconds). Resolves when done, rejects on nonzero exit. Exposes the
- * child via onSpawn so the caller can kill it on cancel.
+ * durationSeconds). Resolves with the stderr tail when done (non-fatal input
+ * errors end up there), rejects on nonzero exit. Exposes the child via onSpawn
+ * so the caller can kill it on cancel.
  */
 function spawnFfmpegWithProgress({ args, durationSeconds, onProgress, onSpawn }) {
   return new Promise((resolve, reject) => {
@@ -158,7 +197,7 @@ function spawnFfmpegWithProgress({ args, durationSeconds, onProgress, onSpawn })
     });
     child.on('error', (err) => reject(err));
     child.on('close', (code) => {
-      if (code === 0) resolve();
+      if (code === 0) resolve(stderrTail.trim());
       else {
         const err = new Error(stderrTail.trim() || `ffmpeg exited with code ${code}`);
         err.ffmpegCode = code;
@@ -172,7 +211,8 @@ function spawnFfmpegWithProgress({ args, durationSeconds, onProgress, onSpawn })
 function runFfmpeg({ inputUrl, tempPath, durationSeconds, onProgress, onSpawn }) {
   const args = [
     '-hide_banner', '-nostdin', '-y', '-loglevel', 'error',
-    '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '30',
+    '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_on_network_error', '1',
+    '-reconnect_delay_max', '30',
     '-i', inputUrl,
     '-map', '0:v:0', '-map', '0:a:0?',
     '-vf', `scale=-2:'min(${HEIGHT},ih)'`,
@@ -189,7 +229,8 @@ function runFfmpeg({ inputUrl, tempPath, durationSeconds, onProgress, onSpawn })
 function extractAudio({ inputUrl, tempPath, durationSeconds, onProgress, onSpawn }) {
   const args = [
     '-hide_banner', '-nostdin', '-y', '-loglevel', 'error',
-    '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '30',
+    '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_on_network_error', '1',
+    '-reconnect_delay_max', '30',
     '-i', inputUrl,
     '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le',
     '-progress', 'pipe:1', tempPath,
@@ -481,7 +522,7 @@ async function processJob(jobId, dequeueCount) {
     // Transcode.
     await pool.query("UPDATE movie_transcode_jobs SET phase = 'transcoding' WHERE id = $1", [jobId]);
     let lastPctWrite = 0;
-    await runFfmpeg({
+    const transcodeLog = await runFfmpeg({
       inputUrl,
       tempPath,
       durationSeconds,
@@ -497,6 +538,12 @@ async function processJob(jobId, dequeueCount) {
       },
     });
     if (cancelled) throw Object.assign(new Error('cancelled'), { cancelled: true });
+    await assertCompleteOutput({
+      outputPath: tempPath,
+      expectedSeconds: durationSeconds,
+      label: 'Preview',
+      stderrTail: transcodeLog,
+    });
 
     // Upload the proxy.
     await pool.query("UPDATE movie_transcode_jobs SET phase = 'uploading', progress_percent = 99 WHERE id = $1", [jobId]);
@@ -666,7 +713,7 @@ async function processSubtitleSyncJob(jobId, dequeueCount) {
       [jobId]
     );
     let lastPctWrite = 0;
-    await extractAudio({
+    const extractLog = await extractAudio({
       inputUrl,
       tempPath: wavPath,
       durationSeconds,
@@ -686,6 +733,13 @@ async function processSubtitleSyncJob(jobId, dequeueCount) {
     });
     activeChild = null;
     if (cancelled) throw Object.assign(new Error('cancelled'), { cancelled: true });
+    // Aligning against truncated audio would silently mis-time the tail.
+    await assertCompleteOutput({
+      outputPath: wavPath,
+      expectedSeconds: durationSeconds,
+      label: 'Extracted audio',
+      stderrTail: extractLog,
+    });
 
     // Fetch + normalize the subtitle to SRT (parseSubtitles converts VTT
     // timings to SRT form; serializeSrt renumbers and enforces LF endings).
