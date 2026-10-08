@@ -295,8 +295,10 @@ function MovieFilesSection({ movieId }) {
   }
 
   const removeAsset = async (kind) => {
-    const trashNote = trashOnRemove ? ' and move it to Drive trash' : ''
-    if (!window.confirm(`Remove this asset from the app${trashNote}?`)) return
+    const note = trashOnRemove
+      ? 'The file will be moved to Drive trash.'
+      : 'The file stays in Drive, renamed to *.removed.*, so it is not picked up again.'
+    if (!window.confirm(`Remove this asset from the app?\n\n${note}`)) return
     setBusy(true)
     try {
       await movieFileApi.deleteFile(movieId, kind, trashOnRemove)
@@ -305,6 +307,47 @@ function MovieFilesSection({ movieId }) {
       notifyMovieFilesChanged(movieId)
     } catch (error) {
       showError('Remove failed: ' + (error.response?.data?.error || error.message))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // Replace the original subtitles with the synced copy (overwrites the
+  // original Drive file in place; the synced copy goes to Drive trash).
+  const promoteSynced = async (syncedKind) => {
+    const lang = syncedKind.startsWith('subtitles_cs') ? 'cs' : 'en'
+    const label = lang === 'cs' ? 'Czech' : 'English'
+    if (
+      !window.confirm(
+        `Replace the original ${label} subtitles with the synced version?\n\n` +
+          'The original file is overwritten (its old version stays in Drive version history) ' +
+          'and the synced copy is removed.'
+      )
+    ) {
+      return
+    }
+    setBusy(true)
+    try {
+      await movieFileApi.promoteSyncedSubtitles(movieId, lang)
+      success(`${label} subtitles replaced with the synced version`)
+      await load()
+      notifyMovieFilesChanged(movieId)
+    } catch (error) {
+      showError('Replace failed: ' + (error.response?.data?.error || error.message))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const toggleReady = async () => {
+    const ready = !data?.ready
+    setBusy(true)
+    try {
+      const res = await movieFileApi.setReady(movieId, ready)
+      setData((d) => ({ ...d, ready: res.data.ready }))
+      success(ready ? 'Marked as ready' : 'Ready mark removed')
+    } catch (error) {
+      showError('Update failed: ' + (error.response?.data?.error || error.message))
     } finally {
       setBusy(false)
     }
@@ -525,6 +568,34 @@ function MovieFilesSection({ movieId }) {
           />
           <span>Also move to Drive trash when removing</span>
         </label>
+        <div className="flex-1" />
+        {data?.ready ? (
+          <div className="flex items-center gap-2 text-sm">
+            <span className="inline-flex items-center rounded-md bg-green-100 text-green-800 px-2 py-1 font-medium">
+              ✓ Ready
+            </span>
+            <span className="text-xs text-gray-500">
+              {data.ready.by && `${data.ready.by} · `}
+              {new Date(data.ready.at).toLocaleString()}
+            </span>
+            <button
+              onClick={toggleReady}
+              disabled={busy}
+              className="text-gray-500 hover:text-gray-700 disabled:opacity-50"
+            >
+              Unmark
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={toggleReady}
+            disabled={busy}
+            title="Mark the movie file, preview and subtitles as checked and ready"
+            className="border border-green-600 text-green-700 px-3 py-1.5 rounded-md hover:bg-green-50 text-sm disabled:opacity-50"
+          >
+            Mark as ready
+          </button>
+        )}
       </div>
 
       {/* Download jobs */}
@@ -917,6 +988,16 @@ function MovieFilesSection({ movieId }) {
                         ⚑ {qualitySummary.counts[qualityLangForKind(asset.key)].open} issue
                         {qualitySummary.counts[qualityLangForKind(asset.key)].open === 1 ? '' : 's'}
                       </Link>
+                    )}
+                    {row && asset.synced && (
+                      <button
+                        onClick={() => promoteSynced(asset.key)}
+                        disabled={busy || hasActiveSyncFor(asset.key.replace('_synced', ''))}
+                        title="Overwrite the original subtitles with this synced version"
+                        className="text-sm text-blue-600 hover:text-blue-800 disabled:opacity-50"
+                      >
+                        Use as original
+                      </button>
                     )}
                     {row && (
                       <Link

@@ -13,6 +13,18 @@ const PHASE_LABELS = {
 }
 // A running job whose row hasn't updated in this long likely lost its worker.
 const STALE_MS = 15 * 60 * 1000
+// Same tolerance as the worker's check: a preview shorter than its source by
+// more than max(10 s, 2 %) was cut off (e.g. an interrupted Drive stream).
+const DURATION_TOLERANCE_S = 10
+const DURATION_TOLERANCE_RATIO = 0.02
+
+function formatDuration(sec) {
+  const t = Math.round(sec)
+  const h = Math.floor(t / 3600)
+  const m = String(Math.floor((t % 3600) / 60)).padStart(2, '0')
+  const s = String(t % 60).padStart(2, '0')
+  return `${h}:${m}:${s}`
+}
 
 /**
  * Preview player: streams the web-playable 720p proxy with CZ/EN subtitle
@@ -25,6 +37,8 @@ function MoviePlayerSection({ movieId }) {
   const [jobs, setJobs] = useState([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
+  // Duration the browser reports for the loaded proxy, keyed by Drive file id.
+  const [proxyDuration, setProxyDuration] = useState(null)
   const wasPolling = useRef(false)
 
   const load = useCallback(async () => {
@@ -146,6 +160,22 @@ function MoviePlayerSection({ movieId }) {
   const activeJob = jobs.find((j) => ACTIVE_STATUSES.includes(j.status))
   const latest = jobs[0]
 
+  // Source duration from the job that produced this proxy (null for proxies
+  // imported by hand — nothing to compare against).
+  const sourceSeconds = proxy
+    ? Number(
+        jobs.find((j) => j.status === 'completed' && j.drive_file_id === proxy.drive_file_id)
+          ?.duration_seconds
+      ) || null
+    : null
+  const actualSeconds =
+    proxy && proxyDuration?.id === proxy.drive_file_id ? proxyDuration.seconds : null
+  const truncated =
+    sourceSeconds != null &&
+    actualSeconds != null &&
+    sourceSeconds - actualSeconds >
+      Math.max(DURATION_TOLERANCE_S, sourceSeconds * DURATION_TOLERANCE_RATIO)
+
   return (
     <div className="space-y-4">
       {proxy ? (
@@ -158,6 +188,12 @@ function MoviePlayerSection({ movieId }) {
             crossOrigin="use-credentials"
             className="w-full max-h-[70vh] bg-black rounded-md"
             src={movieFileApi.streamUrl(movieId, 'movie_proxy')}
+            onLoadedMetadata={(e) => {
+              const seconds = e.currentTarget.duration
+              if (Number.isFinite(seconds)) {
+                setProxyDuration({ id: proxy.drive_file_id, seconds })
+              }
+            }}
           >
             {hasCs && (
               <track
@@ -192,9 +228,25 @@ function MoviePlayerSection({ movieId }) {
               />
             )}
           </video>
+          {truncated && !activeJob && (
+            <div className="rounded-md bg-red-50 border border-red-200 p-3 text-sm text-red-800 flex flex-wrap items-center gap-3">
+              <span className="flex-1">
+                This preview is incomplete: it is {formatDuration(actualSeconds)} long, but the
+                movie is {formatDuration(sourceSeconds)}. Its generation was probably interrupted.
+              </span>
+              <button
+                onClick={generate}
+                disabled={busy}
+                className="bg-red-600 text-white px-3 py-1.5 rounded-md hover:bg-red-700 disabled:opacity-50"
+              >
+                Regenerate
+              </button>
+            </div>
+          )}
           <div className="flex flex-wrap items-center gap-3 text-sm">
             <span className="text-gray-500">
-              720p preview{proxy.file_size != null && ` · ${formatBytes(Number(proxy.file_size))}`}
+              720p preview
+              {actualSeconds != null && ` · ${formatDuration(actualSeconds)}`}{proxy.file_size != null && ` · ${formatBytes(Number(proxy.file_size))}`}
               {!hasCs && !hasEn && ' · no subtitles yet'}
             </span>
             <div className="flex-1" />
@@ -272,8 +324,11 @@ function MoviePlayerSection({ movieId }) {
         <TranscodeProgress job={activeJob} onCancel={() => cancel(activeJob.id)} />
       )}
 
-      {/* Terminal failure on the latest job (when no active job / no proxy) */}
-      {!activeJob && latest && ['failed', 'cancelled'].includes(latest.status) && !proxy && (
+      {/* Terminal failure on the latest job. Shown even over an existing proxy
+          when a regenerate failed (e.g. the worker rejected a truncated output). */}
+      {!activeJob &&
+        latest &&
+        (latest.status === 'failed' || (latest.status === 'cancelled' && !proxy)) && (
         <div className="rounded-md bg-yellow-50 border border-yellow-200 p-3 text-sm text-yellow-800">
           <div>
             Last preview attempt {latest.status}

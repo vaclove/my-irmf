@@ -9,6 +9,8 @@
  *   CZ subtitles: {slug}.cs.{srt|vtt}
  *   EN subtitles: {slug}.en.{srt|vtt}
  *   synced subs:  {slug}.cs.synced.srt / {slug}.en.synced.srt (alass re-timed)
+ *   detached:     {name}.removed.{ext}  removed from the app but kept in Drive;
+ *                 never auto-classified again (manual import still works)
  *   folder name:  sanitized raw name_cs
  */
 
@@ -91,6 +93,23 @@ function extensionOf(fileName) {
   return m ? m[1].toLowerCase() : '';
 }
 
+/**
+ * Is this file detached ({name}.removed.{ext})? Removing an asset without
+ * trashing it renames the file this way so the next scan doesn't pick it up
+ * again by its convention name.
+ */
+function isDetachedFile(fileName) {
+  return /\.removed\.[a-z0-9]+$/i.test(String(fileName || ''));
+}
+
+/** The detached name for a file: insert '.removed' before the extension. */
+function detachedFileName(fileName) {
+  const name = String(fileName || 'file');
+  if (isDetachedFile(name)) return name;
+  const m = name.match(/^(.*)\.([a-z0-9]+)$/i);
+  return m ? `${m[1]}.removed.${m[2]}` : `${name}.removed`;
+}
+
 /** Is this file name the transcoded web-playable proxy ({slug}.proxy.mp4)? */
 function isProxyFile(fileName) {
   return /\.proxy\.mp4$/i.test(String(fileName || ''));
@@ -101,6 +120,7 @@ function isProxyFile(fileName) {
  *   *.proxy.mp4     -> movie_proxy
  *   *.cs.(srt|vtt)  -> subtitles_cs
  *   *.en.(srt|vtt)  -> subtitles_en
+ *   *.removed.*     -> null (detached on purpose)
  *   a video file    -> 'movie' ONLY if it is the sole (non-proxy) video in the
  *                      folder (caller passes videoCountInFolder)
  * Everything else   -> null (unclassified / importable).
@@ -114,6 +134,9 @@ function isProxyFile(fileName) {
 function classifyByName(fileName, mimeType, opts = {}) {
   const name = String(fileName || '').toLowerCase();
   const ext = extensionOf(name);
+
+  // Detached files were removed from the app on purpose — never re-adopt them.
+  if (isDetachedFile(name)) return null;
 
   // Proxy first: it's an .mp4 and would otherwise be counted as the movie.
   if (isProxyFile(name)) return 'movie_proxy';
@@ -160,5 +183,7 @@ module.exports = {
   classifyByName,
   isVideoFile,
   isProxyFile,
+  isDetachedFile,
+  detachedFileName,
   extensionOf,
 };

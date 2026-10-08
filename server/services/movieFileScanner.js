@@ -11,7 +11,7 @@
 const { pool } = require('../models/database');
 const { logger } = require('../utils/logger');
 const googleDrive = require('./googleDrive');
-const { classifyByName, isVideoFile } = require('../utils/movieFileNaming');
+const { classifyByName, isDetachedFile, isVideoFile } = require('../utils/movieFileNaming');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -91,7 +91,10 @@ async function scanMovie(movieId) {
   }
 
   // Auto-classify convention-named files into any still-unoccupied kind.
-  const videoCount = children.filter((c) => isVideoFile(c.name, c.mimeType)).length;
+  // Detached (*.removed.*) videos don't count against the sole-video rule.
+  const videoCount = children.filter(
+    (c) => isVideoFile(c.name, c.mimeType) && !isDetachedFile(c.name)
+  ).length;
   for (const file of children) {
     if (classifiedFileIds.has(file.id)) continue;
     const kind = classifyByName(file.name, file.mimeType, {

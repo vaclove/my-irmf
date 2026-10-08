@@ -503,6 +503,14 @@ function Movies() {
                         >
                           EN
                         </span>
+                        {movie.files_ready_at && (
+                          <span
+                            className="inline-flex items-center justify-center w-6 h-6 rounded text-xs font-bold bg-green-600 text-white"
+                            title={`Files marked ready${movie.files_ready_by ? ` by ${movie.files_ready_by}` : ''}`}
+                          >
+                            ✓
+                          </span>
+                        )}
                       </div>
                     </td>
                   )}

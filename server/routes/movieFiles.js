@@ -22,6 +22,7 @@ const {
 const { scanMovie, upsertFileRow } = require('../services/movieFileScanner');
 const {
   conventionFileName,
+  detachedFileName,
   extensionOf,
   isVideoFile,
   SUBTITLE_EXTENSIONS,
@@ -39,6 +40,18 @@ const STREAMABLE_KINDS = ['movie', 'movie_proxy'];
 
 function notConfigured(res) {
   return res.status(503).json({ error: 'Google Drive is not configured' });
+}
+
+/** Drive "file not found" (already deleted/trashed elsewhere). */
+function isDriveNotFound(error) {
+  return error?.code === 404 || error?.response?.status === 404;
+}
+
+/** The manual "files ready" mark from a loadMovie() row, or null. */
+function readyOf(movie) {
+  return movie.files_ready_at
+    ? { at: movie.files_ready_at, by: movie.files_ready_by || null }
+    : null;
 }
 
 /**
@@ -66,7 +79,8 @@ function validateKindForFile(fileKind, fileName, mimeType) {
 /** Load a movie row with edition_year, or null. */
 async function loadMovie(movieId) {
   const res = await pool.query(
-    `SELECT m.id, m.name_cs, m.name_en, m.drive_folder_id, e.year AS edition_year
+    `SELECT m.id, m.name_cs, m.name_en, m.drive_folder_id, m.files_ready_at,
+            m.files_ready_by, e.year AS edition_year
      FROM movies m JOIN editions e ON m.edition_id = e.id
      WHERE m.id = $1`,
     [movieId]
@@ -102,6 +116,22 @@ async function downloadSubtitleText(driveFileId) {
   return decodeSubtitleBuffer(Buffer.concat(chunks));
 }
 
+/**
+ * Mark a subtitle track's open quality flags stale (its file was replaced or
+ * removed, so the findings no longer describe it). Non-fatal.
+ */
+async function staleOpenFlags(req, movieId, lang) {
+  try {
+    await pool.query(
+      `UPDATE subtitle_quality_flags SET status = 'stale'
+       WHERE movie_id = $1 AND lang = $2 AND status = 'open'`,
+      [movieId, lang]
+    );
+  } catch (flagError) {
+    logError(flagError, req, { operation: 'stale_subtitle_quality_flags', movieId });
+  }
+}
+
 /** Load the movie_files row for a subtitle language, or null. */
 async function loadSubtitleRow(movieId, lang) {
   const row = await pool.query(
@@ -128,13 +158,14 @@ router.get('/', async (req, res) => {
         folder: movie.drive_folder_id ? { id: movie.drive_folder_id } : null,
         unclassified: [],
         drive_configured: false,
+        ready: readyOf(movie),
       });
     }
 
     // Live scan reconciles rows and surfaces unclassified files.
     try {
       const result = await scanMovie(movieId);
-      return res.json({ ...result, drive_configured: true });
+      return res.json({ ...result, drive_configured: true, ready: readyOf(movie) });
     } catch (driveError) {
       logError(driveError, req, { operation: 'movie_files_scan', movieId });
       const dbRows = await pool.query(
@@ -147,6 +178,7 @@ router.get('/', async (req, res) => {
         unclassified: [],
         drive_configured: true,
         drive_error: driveError.message,
+        ready: readyOf(movie),
       });
     }
   } catch (error) {
@@ -285,6 +317,7 @@ router.post('/subtitles', async (req, res) => {
     const targetName = conventionFileName(movie, file_kind, ext);
     const body = Buffer.from(content_base64, 'base64');
 
+    const prior = await loadSubtitleRow(movieId, file_kind.replace('subtitles_', ''));
     const created = await googleDrive.uploadSmallFile({
       folderId,
       name: targetName,
@@ -292,6 +325,16 @@ router.post('/subtitles', async (req, res) => {
       body,
     });
     await upsertFileRow(movieId, file_kind, created);
+    // Replacing: trash the old file, otherwise it lingers under the same
+    // convention name and the scanner re-adopts it once this one is removed.
+    if (prior && prior.drive_file_id !== created.id) {
+      await googleDrive.trashFile(prior.drive_file_id).catch((trashError) => {
+        if (!isDriveNotFound(trashError)) {
+          logError(trashError, req, { operation: 'trash_replaced_subtitles', movieId });
+        }
+      });
+    }
+    if (prior) await staleOpenFlags(req, movieId, file_kind.replace('subtitles_', ''));
     const row = await pool.query(
       'SELECT * FROM movie_files WHERE movie_id = $1 AND file_kind = $2',
       [movieId, file_kind]
@@ -558,7 +601,119 @@ router.put('/subtitles/:lang/cues', async (req, res) => {
   }
 });
 
-// DELETE /:fileKind — drop the pointer row; optionally trash the Drive file.
+// POST /subtitles/:lang/use-synced — make the alass-synced copy the original:
+// its cues overwrite the original file in place (same Drive id and name, so
+// Drive's version history keeps the old timing), then the synced copy is
+// trashed. Open flags on the synced copy move over to the original.
+router.post('/subtitles/:lang/use-synced', async (req, res) => {
+  const { movieId, lang } = req.params;
+  if (!['cs', 'en'].includes(lang)) {
+    return res.status(400).json({ error: 'Unsupported subtitle language' });
+  }
+  if (!googleDrive.isConfigured()) return notConfigured(res);
+  try {
+    const movie = await loadMovie(movieId);
+    if (!movie) return res.status(404).json({ error: 'Movie not found' });
+
+    const synced = await loadSubtitleRow(movieId, `${lang}_synced`);
+    if (!synced) return res.status(404).json({ error: 'No synced subtitles to use' });
+
+    const activeSync = await pool.query(
+      `SELECT id FROM subtitle_sync_jobs
+       WHERE movie_id = $1 AND subtitle_kind = $2 AND status IN ('pending', 'running')`,
+      [movieId, `subtitles_${lang}`]
+    );
+    if (activeSync.rows.length > 0) {
+      return res.status(409).json({ error: 'A sync job is still running for this track' });
+    }
+
+    const syncedText = await downloadSubtitleText(synced.drive_file_id);
+    let cues;
+    try {
+      cues = parseSubtitles(syncedText, 'srt');
+    } catch (parseError) {
+      return res.status(422).json({ error: parseError.message });
+    }
+
+    const original = await loadSubtitleRow(movieId, lang);
+    const kind = `subtitles_${lang}`;
+    // Keep the original's format; a missing original becomes a fresh .srt.
+    const ext = original && extensionOf(original.file_name) === 'vtt' ? 'vtt' : 'srt';
+    const body = Buffer.from(ext === 'vtt' ? serializeVtt(cues) : serializeSrt(cues), 'utf8');
+
+    let meta;
+    if (original) {
+      meta = await googleDrive.updateFileContent({
+        fileId: original.drive_file_id,
+        mimeType: subtitleMime(ext),
+        body,
+      });
+    } else {
+      const folderId = await googleDrive.ensureMovieFolder(movie);
+      meta = await googleDrive.uploadSmallFile({
+        folderId,
+        name: conventionFileName(movie, kind, ext),
+        mimeType: subtitleMime(ext),
+        body,
+      });
+    }
+    await upsertFileRow(movieId, kind, meta);
+
+    await googleDrive.trashFile(synced.drive_file_id).catch((trashError) => {
+      if (!isDriveNotFound(trashError)) {
+        logError(trashError, req, { operation: 'trash_promoted_synced_subtitles', movieId });
+      }
+    });
+    await pool.query('DELETE FROM movie_files WHERE movie_id = $1 AND file_kind = $2', [
+      movieId,
+      `${kind}_synced`,
+    ]);
+
+    // The original's findings described the old text; the synced copy's
+    // findings still match cue-for-cue, so re-home them onto the original.
+    await staleOpenFlags(req, movieId, lang);
+    try {
+      await pool.query(
+        `UPDATE subtitle_quality_flags SET lang = $2, file_drive_id = $3, file_md5 = $4
+         WHERE movie_id = $1 AND lang = $5 AND status = 'open'`,
+        [movieId, lang, meta.id, meta.md5Checksum || null, `${lang}_synced`]
+      );
+    } catch (flagError) {
+      logError(flagError, req, { operation: 'rehome_subtitle_quality_flags', movieId });
+    }
+
+    res.json({ file: await loadSubtitleRow(movieId, lang) });
+  } catch (error) {
+    if (error.statusCode === 413) {
+      return res.status(413).json({ error: error.message });
+    }
+    logError(error, req, { operation: 'use_synced_subtitles', movieId });
+    if (!res.headersSent) res.status(500).json({ error: error.message });
+  }
+});
+
+// PUT /ready — set or clear the manual "files ready" mark ({ ready: bool }).
+router.put('/ready', async (req, res) => {
+  const { movieId } = req.params;
+  try {
+    const ready = req.body?.ready === true;
+    const result = await pool.query(
+      `UPDATE movies SET files_ready_at = $2, files_ready_by = $3
+       WHERE id = $1 RETURNING files_ready_at, files_ready_by`,
+      [movieId, ready ? new Date() : null, ready ? req.user?.email || null : null]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Movie not found' });
+    res.json({ ready: readyOf(result.rows[0]) });
+  } catch (error) {
+    logError(error, req, { operation: 'set_movie_files_ready', movieId });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// DELETE /:fileKind — drop the pointer row and either trash the Drive file or
+// rename it to {name}.removed.{ext}. The rename matters: the folder scan that
+// runs on every page load would otherwise re-adopt the file by its convention
+// name and the asset would come straight back.
 router.delete('/:fileKind', async (req, res) => {
   const { movieId, fileKind } = req.params;
   const removeFromDrive = req.query.remove_from_drive === 'true';
@@ -573,17 +728,36 @@ router.delete('/:fileKind', async (req, res) => {
     if (existing.rows.length === 0) {
       return res.status(404).json({ error: 'File not found' });
     }
+    const row = existing.rows[0];
 
-    if (removeFromDrive) {
-      if (!googleDrive.isConfigured()) return notConfigured(res);
-      await googleDrive.trashFile(existing.rows[0].drive_file_id);
+    let renamedTo = null;
+    if (googleDrive.isConfigured()) {
+      try {
+        if (removeFromDrive) {
+          await googleDrive.trashFile(row.drive_file_id);
+        } else {
+          const target = detachedFileName(row.file_name);
+          if (target !== row.file_name) {
+            await googleDrive.renameFile(row.drive_file_id, target);
+            renamedTo = target;
+          }
+        }
+      } catch (driveError) {
+        // Already gone from Drive — removing the pointer is all that's left.
+        if (!isDriveNotFound(driveError)) throw driveError;
+      }
+    } else if (removeFromDrive) {
+      return notConfigured(res);
     }
 
     await pool.query(
       'DELETE FROM movie_files WHERE movie_id = $1 AND file_kind = $2',
       [movieId, fileKind]
     );
-    res.json({ message: 'File removed', trashed: removeFromDrive });
+    if (fileKind.startsWith('subtitles_')) {
+      await staleOpenFlags(req, movieId, fileKind.replace('subtitles_', ''));
+    }
+    res.json({ message: 'File removed', trashed: removeFromDrive, renamed_to: renamedTo });
   } catch (error) {
     logError(error, req, { operation: 'delete_movie_file', movieId });
     res.status(500).json({ error: error.message });
