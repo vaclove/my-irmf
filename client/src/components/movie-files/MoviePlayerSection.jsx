@@ -17,6 +17,7 @@ const STALE_MS = 15 * 60 * 1000
 // more than max(10 s, 2 %) was cut off (e.g. an interrupted Drive stream).
 const DURATION_TOLERANCE_S = 10
 const DURATION_TOLERANCE_RATIO = 0.02
+const MIN_PLAUSIBLE_SECONDS = 60
 
 function formatDuration(sec) {
   const t = Math.round(sec)
@@ -170,11 +171,14 @@ function MoviePlayerSection({ movieId }) {
     : null
   const actualSeconds =
     proxy && proxyDuration?.id === proxy.drive_file_id ? proxyDuration.seconds : null
+  // Without a source duration (older jobs, hand-imported proxies) only an
+  // absurdly short preview is flagged.
   const truncated =
-    sourceSeconds != null &&
     actualSeconds != null &&
-    sourceSeconds - actualSeconds >
-      Math.max(DURATION_TOLERANCE_S, sourceSeconds * DURATION_TOLERANCE_RATIO)
+    (sourceSeconds != null
+      ? sourceSeconds - actualSeconds >
+        Math.max(DURATION_TOLERANCE_S, sourceSeconds * DURATION_TOLERANCE_RATIO)
+      : actualSeconds < MIN_PLAUSIBLE_SECONDS)
 
   return (
     <div className="space-y-4">
@@ -231,8 +235,9 @@ function MoviePlayerSection({ movieId }) {
           {truncated && !activeJob && (
             <div className="rounded-md bg-red-50 border border-red-200 p-3 text-sm text-red-800 flex flex-wrap items-center gap-3">
               <span className="flex-1">
-                This preview is incomplete: it is {formatDuration(actualSeconds)} long, but the
-                movie is {formatDuration(sourceSeconds)}. Its generation was probably interrupted.
+                This preview is incomplete: it is {formatDuration(actualSeconds)} long
+                {sourceSeconds != null && `, but the movie is ${formatDuration(sourceSeconds)}`}.
+                Its generation was probably interrupted.
               </span>
               <button
                 onClick={generate}

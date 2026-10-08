@@ -144,8 +144,8 @@ function probeDuration(inputUrl) {
  * Guard against a truncated ffmpeg output. ffmpeg treats an input read error
  * as end of input and still exits 0, so a Drive hiccup mid-stream yields a
  * valid but short file (e.g. a 1-minute proxy of a feature film). Probe the
- * output and throw when it is clearly shorter than the source. When the
- * source duration is unknown, only an unreadable/empty output fails.
+ * output and throw when it is clearly shorter than the source (callers
+ * refuse to run without a source duration).
  */
 async function assertCompleteOutput({ outputPath, expectedSeconds, label, stderrTail }) {
   const actual = await probeDuration(outputPath);
@@ -521,12 +521,14 @@ async function processJob(jobId, dequeueCount) {
 
     // Probe.
     const durationSeconds = await probeDuration(inputUrl);
-    if (durationSeconds != null) {
-      await pool.query('UPDATE movie_transcode_jobs SET duration_seconds = $2 WHERE id = $1', [
-        jobId,
-        durationSeconds,
-      ]);
-    }
+    // No duration means the source couldn't be read (typically Drive refusing
+    // it, e.g. downloadQuotaExceeded) — and without it the output can't be
+    // checked for truncation, so stop here rather than publish a broken file.
+    if (!durationSeconds) throw new Error('Could not read the source video');
+    await pool.query('UPDATE movie_transcode_jobs SET duration_seconds = $2 WHERE id = $1', [
+      jobId,
+      durationSeconds,
+    ]);
 
     // Transcode.
     await pool.query("UPDATE movie_transcode_jobs SET phase = 'transcoding' WHERE id = $1", [jobId]);
@@ -712,12 +714,14 @@ async function processSubtitleSyncJob(jobId, dequeueCount) {
 
     // Probe the reference video.
     const durationSeconds = await probeDuration(inputUrl);
-    if (durationSeconds != null) {
-      await pool.query('UPDATE subtitle_sync_jobs SET duration_seconds = $2 WHERE id = $1', [
-        jobId,
-        durationSeconds,
-      ]);
-    }
+    // No duration means the source couldn't be read (typically Drive refusing
+    // it, e.g. downloadQuotaExceeded) — and without it the output can't be
+    // checked for truncation, so stop here rather than publish a broken file.
+    if (!durationSeconds) throw new Error('Could not read the source video');
+    await pool.query('UPDATE subtitle_sync_jobs SET duration_seconds = $2 WHERE id = $1', [
+      jobId,
+      durationSeconds,
+    ]);
 
     // Extract mono audio (the bulk of the wall time — streams the whole video).
     await pool.query(
