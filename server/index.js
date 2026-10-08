@@ -56,13 +56,28 @@ if (process.env.NODE_ENV === 'production') {
 // Initialize authentication
 initializeAuth();
 
+// Blob endpoint of the movie storage account (e.g.
+// https://irmfmovies.blob.core.windows.net): the browser uploads masters there
+// and the player streams previews from there via SAS URLs.
+const movieBlobOrigin = (() => {
+  const conn = process.env.MOVIE_STORAGE_CONNECTION_STRING || '';
+  const explicit = conn.match(/BlobEndpoint=(https:\/\/[^;/]+)/i);
+  if (explicit) return explicit[1];
+  const account = conn.match(/AccountName=([^;]+)/i);
+  const suffix = conn.match(/EndpointSuffix=([^;]+)/i);
+  return account ? `https://${account[1]}.blob.${suffix ? suffix[1] : 'core.windows.net'}` : null;
+})();
+
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       ...helmet.contentSecurityPolicy.getDefaultDirectives(),
       "img-src": ["'self'", "data:", "https://irmf.cz", "https://lh3.googleusercontent.com", "https://s3.irmf.cz"],
-      // Browser uploads movie files straight to Google Drive resumable-session URLs
-      "connect-src": ["'self'", "https://www.googleapis.com"],
+      // Browser uploads movie files straight to Google Drive resumable-session
+      // URLs (legacy editions) or Azure Blob SAS URLs.
+      "connect-src": ["'self'", "https://www.googleapis.com", ...(movieBlobOrigin ? [movieBlobOrigin] : [])],
+      // The player's /stream URL redirects to a blob SAS URL.
+      "media-src": ["'self'", ...(movieBlobOrigin ? [movieBlobOrigin] : [])],
     },
   },
 }));
