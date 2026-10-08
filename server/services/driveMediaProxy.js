@@ -102,8 +102,9 @@ async function proxyDriveMedia(req, res, fileId, fallbackMime, opts = {}) {
       break;
     } catch (error) {
       const info = await describeUpstreamError(error);
+      const retryable = isRetryable(error, info);
       const clientGone = res.destroyed || req.socket?.destroyed;
-      if (attempt < MAX_ATTEMPTS && isRetryable(error, info) && !clientGone) {
+      if (attempt < MAX_ATTEMPTS && retryable && !clientGone) {
         await sleep(RETRY_BASE_MS * 2 ** (attempt - 1));
         continue;
       }
@@ -112,7 +113,12 @@ async function proxyDriveMedia(req, res, fileId, fallbackMime, opts = {}) {
         `${info.reason ? ` (${info.reason})` : ''}: ${info.message}` +
         ` [after ${attempt} attempt${attempt === 1 ? '' : 's'}]`;
       if (opts.onError) opts.onError(detail);
-      if (!res.headersSent) res.status(502).json({ error: detail });
+      // Permanent refusals (downloadQuotaExceeded, notFound, permissions) keep
+      // their 4xx status: ffmpeg reconnects on 5xx, and hammering Drive with
+      // retries for a quota-blocked file only burns more of the quota.
+      const status =
+        !retryable && info.status >= 400 && info.status < 500 ? info.status : 502;
+      if (!res.headersSent) res.status(status).json({ error: detail });
       return;
     }
   }
