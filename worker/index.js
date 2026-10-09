@@ -68,6 +68,49 @@ function log(msg, extra) {
   console.log(`[transcode-worker] ${msg}`, extra ? JSON.stringify(extra) : '');
 }
 
+// Shared-drive folder for temporary copies made to get around Drive's
+// per-file download quota (see openDriveSource).
+const QUOTA_COPY_FOLDER = '_transfer-copies';
+
+/** Drive API errors carry the JSON body as their message; make it readable. */
+function driveErrorText(error) {
+  try {
+    const body = JSON.parse(error.message);
+    const reason = body?.error?.errors?.[0]?.reason;
+    return `Drive ${body?.error?.code || ''}${reason ? ` (${reason})` : ''}: ${body?.error?.message || error.message}`;
+  } catch {
+    return error.message;
+  }
+}
+
+function isDownloadQuotaError(error) {
+  return /downloadQuotaExceeded|download quota/i.test(String(error?.message || ''));
+}
+
+/**
+ * Open a Drive file for reading. When Drive refuses with downloadQuotaExceeded,
+ * copy the file server-side (copies don't count against the download quota
+ * and start with a fresh one) and read the copy instead. Returns
+ * {stream, cleanup} — cleanup trashes the temporary copy.
+ */
+async function openDriveSource(driveId, meta) {
+  try {
+    return { stream: await googleDrive.downloadFileStream(driveId), cleanup: async () => {} };
+  } catch (error) {
+    if (!isDownloadQuotaError(error)) throw error;
+    const folderId = await googleDrive.findOrCreateChildFolder(googleDrive.getDriveId(), QUOTA_COPY_FOLDER);
+    const copy = await googleDrive.copyFile(driveId, { parentId: folderId, name: `${meta.name}.copy` });
+    log('download quota hit; reading a temporary copy', { driveId, copyId: copy.id });
+    const cleanup = () => googleDrive.trashFile(copy.id).catch(() => {});
+    try {
+      return { stream: await googleDrive.downloadFileStream(copy.id), cleanup };
+    } catch (copyError) {
+      await cleanup();
+      throw copyError;
+    }
+  }
+}
+
 /** Hide SAS signatures (ffmpeg echoes its input URL in errors). */
 function redact(message) {
   return String(message || '').replace(/([?&]sig=)[^&\s]+/g, '$1REDACTED');
@@ -936,8 +979,9 @@ async function transferDriveToAzure(job, movie, onProgress) {
   const ext = extensionOf(meta.name) || 'bin';
   const blobName = movieStorage.blobNameFor(movie, kind, ext);
   let written;
+  const source = await openDriveSource(driveId, meta);
   try {
-    written = await movieStorage.uploadStream(blobName, await googleDrive.downloadFileStream(driveId), {
+    written = await movieStorage.uploadStream(blobName, source.stream, {
       fileKind: kind,
       contentType: meta.mimeType,
       onProgress,
@@ -952,6 +996,8 @@ async function transferDriveToAzure(job, movie, onProgress) {
   } catch (error) {
     await movieStorage.deleteBlob(blobName).catch(() => {});
     throw error;
+  } finally {
+    await source.cleanup();
   }
 
   // Previews live only in Azure; masters and subtitles keep the Drive file as
@@ -1138,7 +1184,7 @@ async function processTransferJob(jobId, dequeueCount, queue) {
     }
     return true;
   } catch (error) {
-    const message = redact(error.message || 'Unknown error');
+    const message = redact(driveErrorText(error) || 'Unknown error');
     await pool.query(
       `UPDATE movie_file_transfer_jobs SET status = 'failed', error_message = $2,
          finished_at = CURRENT_TIMESTAMP WHERE id = $1`,
