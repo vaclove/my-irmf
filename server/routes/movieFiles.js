@@ -13,6 +13,7 @@
 const express = require('express');
 const { pool } = require('../models/database');
 const { logError } = require('../utils/logger');
+const { logAuditEvent } = require('../utils/auditLogger');
 const googleDrive = require('../services/googleDrive');
 const movieStorage = require('../services/movieStorage');
 const fileTransferQueue = require('../services/fileTransferQueue');
@@ -192,6 +193,34 @@ async function staleOpenFlags(req, movieId, lang) {
   } catch (flagError) {
     logError(flagError, req, { operation: 'stale_subtitle_quality_flags', movieId });
   }
+}
+
+/** The audit-relevant fields of a movie_files row, or null. */
+function auditSnapshot(row) {
+  if (!row) return null;
+  return {
+    file_kind: row.file_kind,
+    file_name: row.file_name,
+    file_size: row.file_size,
+    storage: row.storage,
+    md5_checksum: row.md5_checksum,
+  };
+}
+
+/**
+ * Record a file change in the audit log (resource movie_files, id = the
+ * movie). Action is CREATE when the slot was empty, else UPDATE, unless given.
+ */
+function auditFileChange(req, operation, { before = null, after = null, action, extra = {} } = {}) {
+  return logAuditEvent({
+    req,
+    action: action || (before ? 'UPDATE' : 'CREATE'),
+    resource: 'movie_files',
+    resourceId: req.params.movieId,
+    oldData: auditSnapshot(before),
+    newData: (after || Object.keys(extra).length) ? { ...auditSnapshot(after), ...extra } : null,
+    additionalMetadata: { operation },
+  });
 }
 
 /** Load the movie_files row for a subtitle language, or null. */
@@ -394,6 +423,7 @@ router.post('/upload-complete', async (req, res) => {
         );
       }
       const fresh = await movieStorage.loadRow(movieId, file_kind);
+      await auditFileChange(req, 'upload', { before: existing, after: fresh });
       if (file_kind === 'movie') {
         // Awaited so the job rows exist before we respond (the client reloads
         // the player right after and needs to see them to start polling).
@@ -414,11 +444,14 @@ router.post('/upload-complete', async (req, res) => {
     const kindError = validateKindForFile(file_kind, meta.name, meta.mimeType);
     if (kindError) return res.status(400).json({ error: kindError });
 
+    const prior = await movieStorage.loadRow(movieId, file_kind);
     await upsertFileRow(movieId, file_kind, meta);
+    const fresh = await movieStorage.loadRow(movieId, file_kind);
+    await auditFileChange(req, 'upload', { before: prior, after: fresh });
     if (file_kind === 'movie') {
       await transcodeQueue.enqueueForMovie(movieId, req.user?.email);
     }
-    res.json({ file: await movieStorage.loadRow(movieId, file_kind) });
+    res.json({ file: fresh });
   } catch (error) {
     logError(error, req, { operation: 'upload_complete', movieId });
     res.status(500).json({ error: error.message });
@@ -451,6 +484,11 @@ router.post('/subtitles', async (req, res) => {
 
     const prior = await movieStorage.loadRow(movieId, file_kind);
     const fresh = await writeSubtitles(req, movie, file_kind, body, { ext });
+    await auditFileChange(req, 'upload_subtitles', {
+      before: prior,
+      after: fresh,
+      extra: { uploaded_name: file_name },
+    });
     if (prior) await staleOpenFlags(req, movieId, file_kind.replace('subtitles_', ''));
     res.json({ file: fresh });
   } catch (error) {
@@ -527,7 +565,9 @@ router.post('/import', async (req, res) => {
           await googleDrive.trashFile(existing.drive_file_id).catch(() => {});
         }
         if (existing) await staleOpenFlags(req, movieId, file_kind.replace('subtitles_', ''));
-        return res.json({ file: await movieStorage.loadRow(movieId, file_kind) });
+        const fresh = await movieStorage.loadRow(movieId, file_kind);
+        await auditFileChange(req, 'import', { before: existing, after: fresh });
+        return res.json({ file: fresh });
       }
 
       if (!fileTransferQueue.isConfigured()) {
@@ -546,17 +586,24 @@ router.post('/import', async (req, res) => {
       if (!job) {
         return res.status(409).json({ error: 'A copy of this asset into Azure is already running' });
       }
+      // The row changes when the transfer finishes; log the request now.
+      await auditFileChange(req, 'import', {
+        before: existing,
+        extra: { file_kind, drive_file_id, drive_file_name: meta.name, transfer_job_id: job.id },
+      });
       return res.status(202).json({ transfer: job, file: existing });
     }
 
     await upsertFileRow(movieId, file_kind, meta);
+    const fresh = await movieStorage.loadRow(movieId, file_kind);
+    await auditFileChange(req, 'import', { before: existing, after: fresh });
     // Importing a master as the movie kicks off proxy generation. Awaited so the
     // job row exists before we respond (the client reloads the player right after
     // and needs to see the pending job to start polling).
     if (file_kind === 'movie') {
       await transcodeQueue.enqueueForMovie(movieId, req.user?.email);
     }
-    res.json({ file: await movieStorage.loadRow(movieId, file_kind) });
+    res.json({ file: fresh });
   } catch (error) {
     logError(error, req, { operation: 'import_movie_file', movieId });
     res.status(500).json({ error: error.message });
@@ -745,6 +792,11 @@ router.put('/subtitles/:lang/cues', async (req, res) => {
       }
       throw writeError;
     }
+    await auditFileChange(req, 'edit_subtitles', {
+      before: row,
+      after: fresh,
+      extra: { cue_count: clean.length, overwrite_drive: overwrite_drive === true },
+    });
 
     // Reconcile open quality flags against the saved text (non-fatal):
     // suggestion applied -> accepted; text changed some other way (or the
@@ -833,7 +885,9 @@ router.post('/subtitles/:lang/adopt-drive', async (req, res) => {
     });
     if (!sameFormat) await movieStorage.deleteBlob(row.blob_name).catch(() => {});
     await staleOpenFlags(req, movieId, lang);
-    res.json({ file: await loadSubtitleRow(movieId, lang) });
+    const fresh = await loadSubtitleRow(movieId, lang);
+    await auditFileChange(req, 'adopt_drive_subtitles', { before: row, after: fresh });
+    res.json({ file: fresh });
   } catch (error) {
     if (error.statusCode === 413) {
       return res.status(413).json({ error: error.message });
@@ -892,6 +946,11 @@ router.post('/subtitles/:lang/use-synced', async (req, res) => {
       etag = check.etag;
     }
     const fresh = await writeSubtitles(req, movie, kind, body, { ext, ifMatch: etag });
+    await auditFileChange(req, 'use_synced_subtitles', {
+      before: original,
+      after: fresh,
+      extra: { replaced_by: synced.file_name },
+    });
 
     // Remove the synced copy (blob + Drive mirror, or the legacy Drive file).
     if (synced.storage === 'azure') {
@@ -1050,6 +1109,7 @@ router.put('/ready', async (req, res) => {
       [movieId, ready ? new Date() : null, ready ? req.user?.email || null : null]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Movie not found' });
+    await auditFileChange(req, 'set_files_ready', { action: 'UPDATE', extra: { ready } });
     res.json({ ready: readyOf(result.rows[0]) });
   } catch (error) {
     logError(error, req, { operation: 'set_movie_files_ready', movieId });
@@ -1099,6 +1159,11 @@ router.delete('/:fileKind', async (req, res) => {
     if (fileKind.startsWith('subtitles_')) {
       await staleOpenFlags(req, movieId, fileKind.replace('subtitles_', ''));
     }
+    await auditFileChange(req, 'delete', {
+      before: row,
+      action: 'DELETE',
+      extra: { trashed_on_drive: removeFromDrive, renamed_to: renamedTo },
+    });
     res.json({ message: 'File removed', trashed: removeFromDrive, renamed_to: renamedTo });
   } catch (error) {
     logError(error, req, { operation: 'delete_movie_file', movieId });
