@@ -187,6 +187,7 @@ function AuditLogs() {
       editions: 'bg-green-100 text-green-800',
       tags: 'bg-purple-100 text-purple-800',
       invitations: 'bg-yellow-100 text-yellow-800',
+      movie_files: 'bg-indigo-100 text-indigo-800',
       authentication: 'bg-red-100 text-red-800',
       audit_logs: 'bg-gray-100 text-gray-800'
     }
@@ -287,6 +288,8 @@ function AuditLogs() {
                   <option value="editions">Editions</option>
                   <option value="tags">Tags</option>
                   <option value="invitations">Invitations</option>
+                  <option value="movies">Movies</option>
+                  <option value="movie_files">Movie Files</option>
                   <option value="authentication">Authentication</option>
                   <option value="audit_logs">Audit Logs</option>
                 </select>
