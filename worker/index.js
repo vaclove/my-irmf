@@ -1015,6 +1015,49 @@ async function transferDriveToAzure(job, movie, onProgress) {
   return { targetRef: movieStorage.fileRef({ storage: 'azure', blob_name: blobName }) };
 }
 
+/**
+ * Backup shortcut: if the movie's Drive folder already holds a file of the
+ * blob's size, hash the blob and, on an md5 match, point the row's Drive copy
+ * at that file. Returns the transfer outcome, or null to upload normally.
+ * Costs one read of the blob (Cold: ~$0.03/GB) instead of a full upload.
+ */
+async function linkExistingDriveCopy(job, movie, { blobName, folderId, total, current, onProgress }) {
+  const candidates = (await googleDrive.listFolderChildren(folderId)).filter(
+    (f) => f.md5Checksum && Number(f.size) === Number(total)
+  );
+  if (candidates.length === 0) return null;
+
+  const { tap, result } = hashingTap(await movieStorage.openBlobStream(blobName));
+  let read = 0;
+  for await (const chunk of tap) {
+    read += chunk.length;
+    onProgress(read);
+  }
+  const { md5 } = result();
+  const match = candidates.find((f) => f.md5Checksum === md5);
+  if (!match) return null;
+
+  const updated = await pool.query(
+    `UPDATE movie_files SET drive_file_id = $3, drive_md5_checksum = $4,
+       md5_checksum = COALESCE(md5_checksum, $4)
+     WHERE movie_id = $1 AND file_kind = $2 AND blob_name = $5
+     RETURNING id`,
+    [job.movie_id, job.file_kind, match.id, md5, blobName]
+  );
+  if (updated.rows.length === 0) return { superseded: true };
+
+  const conventionName = conventionFileName(movie, job.file_kind, extensionOf(blobName) || 'bin');
+  if (match.name !== conventionName) {
+    await googleDrive.renameFile(match.id, conventionName).catch(() => {});
+  }
+  // The previous Drive copy belonged to an older version of the file.
+  if (current.drive_file_id && current.drive_file_id !== match.id) {
+    await googleDrive.trashFile(current.drive_file_id).catch(() => {});
+  }
+  log('backup linked to an identical Drive file', { jobId: job.id, driveId: match.id });
+  return { targetRef: match.id };
+}
+
 /** azure_to_drive: write the Drive backup of an Azure master. */
 async function transferAzureToDrive(job, movie, onProgress) {
   const { name: blobName } = movieStorage.parseRef(job.source_ref);
@@ -1027,6 +1070,13 @@ async function transferAzureToDrive(job, movie, onProgress) {
 
   const ext = extensionOf(blobName) || 'bin';
   const folderId = await googleDrive.ensureMovieFolder(movie);
+
+  // Already on Drive? (Typically: downloaded from Drive and re-uploaded by
+  // hand.) Hash the blob and link an identical file instead of uploading a
+  // second copy.
+  const linked = await linkExistingDriveCopy(job, movie, { blobName, folderId, total, current, onProgress });
+  if (linked) return linked;
+
   const sessionUrl = await googleDrive.createResumableSession({
     folderId,
     name: conventionFileName(movie, job.file_kind, ext),
