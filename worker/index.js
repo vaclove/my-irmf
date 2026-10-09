@@ -225,12 +225,19 @@ function spawnFfmpegWithProgress({ args, durationSeconds, onProgress, onSpawn })
 
 /** Run ffmpeg to produce the proxy at tempPath. */
 function runFfmpeg({ inputUrl, tempPath, durationSeconds, onProgress, onSpawn }) {
-  const args = [
-    '-hide_banner', '-nostdin', '-y', '-loglevel', 'error',
+  const reconnect = [
     '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_on_network_error', '1',
     '-reconnect_on_http_error', '5xx', '-reconnect_delay_max', '30',
-    '-i', inputUrl,
-    '-map', '0:v:0', '-map', '0:a:0?',
+  ];
+  // The source is opened twice — one input for video, one for audio — so each
+  // demuxer reads its track front to back. With a single HTTP input the MP4
+  // demuxer jumps between the audio and video samples and every jump is a
+  // new range request: measured 0.1x realtime vs 1.7x with two inputs.
+  const args = [
+    '-hide_banner', '-nostdin', '-y', '-loglevel', 'error',
+    ...reconnect, '-i', inputUrl,
+    ...reconnect, '-i', inputUrl,
+    '-map', '0:v:0', '-map', '1:a:0?',
     '-vf', `scale=-2:'min(${HEIGHT},ih)'`,
     '-c:v', 'libx264', '-preset', PRESET, '-crf', String(CRF), '-pix_fmt', 'yuv420p',
     '-c:a', 'aac', '-b:a', '128k', '-ac', '2',
