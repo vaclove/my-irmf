@@ -995,13 +995,23 @@ router.post('/subtitles/:lang/use-synced', async (req, res) => {
 });
 
 // GET /transfers — Drive <-> Azure copy jobs of this movie (not hidden).
+// Failed or cancelled imports are left out once the file is in Azure anyway
+// (uploaded by hand or imported later): they no longer need attention.
 router.get('/transfers', async (req, res) => {
   const { movieId } = req.params;
   try {
     const result = await pool.query(
-      `SELECT * FROM movie_file_transfer_jobs
-       WHERE movie_id = $1 AND dismissed_at IS NULL
-       ORDER BY created_at DESC LIMIT 20`,
+      `SELECT j.* FROM movie_file_transfer_jobs j
+       WHERE j.movie_id = $1 AND j.dismissed_at IS NULL
+         AND NOT (
+           j.direction = 'drive_to_azure'
+           AND j.status IN ('failed', 'cancelled')
+           AND EXISTS (
+             SELECT 1 FROM movie_files f
+             WHERE f.movie_id = j.movie_id AND f.file_kind = j.file_kind AND f.storage = 'azure'
+           )
+         )
+       ORDER BY j.created_at DESC LIMIT 20`,
       [movieId]
     );
     res.json({ jobs: result.rows });
