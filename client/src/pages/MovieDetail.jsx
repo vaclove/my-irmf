@@ -4,6 +4,7 @@ import { movieApi, editionApi, api } from '../utils/api'
 import { useToast } from '../contexts/ToastContext'
 import MovieForm from '../components/MovieForm'
 import MovieFilesSection from '../components/movie-files/MovieFilesSection'
+import SubtitleExportSection from '../components/movie-files/SubtitleExportSection'
 import MoviePlayerSection from '../components/movie-files/MoviePlayerSection'
 
 // Tabs shown on the detail page. Future sections are added as new entries here.
@@ -172,6 +173,9 @@ function MovieDetail() {
       <div className={activeTab === 'files' ? '' : 'hidden'}>
         <div className="bg-white shadow rounded-lg p-6">
           <MovieFilesSection movieId={movie.id} movie={movie} />
+        </div>
+        <div className="bg-white shadow rounded-lg p-6 mt-6">
+          <SubtitleExportSection movieId={movie.id} />
         </div>
       </div>
 

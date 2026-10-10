@@ -1,8 +1,8 @@
 {
   "name": "my-irmf-transcode-worker",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "private": true,
-  "description": "Out-of-process movie worker (Azure Container Apps Job): preview transcodes, subtitle sync, Drive<->Azure file transfers and DB backups, driven by a storage queue.",
+  "description": "Out-of-process movie worker (Azure Container Apps Job): preview transcodes, subtitle sync, burned-in subtitle exports, Drive<->Azure file transfers and DB backups, driven by a storage queue.",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"

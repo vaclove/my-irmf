@@ -3,12 +3,13 @@
 #   docker build -f worker/Dockerfile -t irmf-transcode-worker .
 FROM node:20-slim
 
-# ffmpeg + ffprobe for transcoding and audio extraction; pg_dump for DB
+# ffmpeg + ffprobe for transcoding and audio extraction (Debian's ffmpeg has
+# libass for burned-in subtitles; Roboto is their font); pg_dump for DB
 # backups. Debian bookworm's stock postgresql-client is 15, which cannot dump
 # a newer Azure server, so install a pinned major from apt.postgresql.org
 # (pg_dump 17 handles servers up to 17).
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ffmpeg ca-certificates curl gnupg \
+  && apt-get install -y --no-install-recommends ffmpeg fonts-roboto-unhinted ca-certificates curl gnupg \
   && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
        | gpg --dearmor -o /usr/share/keyrings/pgdg.gpg \
   && echo "deb [signed-by=/usr/share/keyrings/pgdg.gpg] http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
@@ -42,8 +43,10 @@ COPY server/services/driveMediaProxy.js ./server/services/driveMediaProxy.js
 COPY server/services/driveChunkedUpload.js ./server/services/driveChunkedUpload.js
 COPY server/services/subtitleCache.js ./server/services/subtitleCache.js
 COPY server/services/movieStorage.js ./server/services/movieStorage.js
+COPY server/services/exportStorage.js ./server/services/exportStorage.js
 COPY server/utils/movieFileNaming.js ./server/utils/movieFileNaming.js
 COPY server/utils/subtitles.js ./server/utils/subtitles.js
+COPY server/utils/subtitleBurn.js ./server/utils/subtitleBurn.js
 
 # Worker code.
 COPY worker/index.js ./worker/index.js

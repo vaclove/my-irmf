@@ -204,6 +204,19 @@ export const subtitleSyncApi = {
   dismiss: (id) => api.post(`/subtitle-syncs/${id}/dismiss`),
 }
 
+// Burned-in subtitle exports API (worker renders the master with CS/EN subtitles)
+export const subtitleBurnApi = {
+  getForMovie: (movieId) => api.get(`/subtitle-burns/movie/${movieId}`),
+  check: (data) => api.post('/subtitle-burns/check', data),
+  create: (data) => api.post('/subtitle-burns', data),
+  cancel: (id) => api.post(`/subtitle-burns/${id}/cancel`),
+  retry: (id) => api.post(`/subtitle-burns/${id}/retry`),
+  dismiss: (id) => api.post(`/subtitle-burns/${id}/dismiss`),
+  // Raw URLs (redirects to a short-lived Blob Storage link).
+  downloadUrl: (id) => `${API_BASE_URL}/subtitle-burns/${id}/download`,
+  playUrl: (id) => `${API_BASE_URL}/subtitle-burns/${id}/play`,
+}
+
 // Subtitle quality gate API (lint runs + per-cue flags with LLM suggestions)
 export const subtitleQualityApi = {
   createRun: (data) => api.post('/subtitle-quality/runs', data),
