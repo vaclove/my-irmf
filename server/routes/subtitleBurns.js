@@ -257,14 +257,18 @@ router.post('/:id/cancel', async (req, res) => {
   try {
     const job = await loadJob(req.params.id);
     if (!job) return res.status(404).json({ error: 'Job not found' });
-    if (job.status === 'pending') {
+    // Guarded on status: the worker may pick the job up between the read and
+    // this write, and a running job must stay 'running' until it stops.
+    const cancelledPending = await pool.query(
+      `UPDATE subtitle_burn_jobs SET status = 'cancelled', cancel_requested = true,
+         finished_at = CURRENT_TIMESTAMP WHERE id = $1 AND status = 'pending' RETURNING id`,
+      [job.id]
+    );
+    if (cancelledPending.rows.length === 0) {
       await pool.query(
-        `UPDATE subtitle_burn_jobs SET status = 'cancelled', cancel_requested = true,
-           finished_at = CURRENT_TIMESTAMP WHERE id = $1`,
+        `UPDATE subtitle_burn_jobs SET cancel_requested = true WHERE id = $1 AND status = 'running'`,
         [job.id]
       );
-    } else if (job.status === 'running') {
-      await pool.query('UPDATE subtitle_burn_jobs SET cancel_requested = true WHERE id = $1', [job.id]);
     }
     res.json({ message: 'Cancellation requested' });
   } catch (error) {

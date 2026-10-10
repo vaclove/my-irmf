@@ -1244,16 +1244,20 @@ async function processBurnJob(jobId, dequeueCount) {
     log('burn completed', { jobId, blobName, bytes: total });
 
     // A new export replaces the movie's previous one of the same kind.
+    // Marked only after the blob is gone, so a failed delete is retried by
+    // the next export (the lifecycle rule removes it eventually anyway).
     const older = await pool.query(
-      `UPDATE subtitle_burn_jobs SET blob_deleted_at = CURRENT_TIMESTAMP
-       WHERE movie_id = $1 AND kind = $2 AND id <> $3 AND blob_name IS NOT NULL AND blob_deleted_at IS NULL
-       RETURNING blob_name`,
+      `SELECT id, blob_name FROM subtitle_burn_jobs
+       WHERE movie_id = $1 AND kind = $2 AND id <> $3 AND blob_name IS NOT NULL AND blob_deleted_at IS NULL`,
       [job.movie_id, job.kind, jobId]
     );
     for (const row of older.rows) {
-      await exportStorage.deleteBlob(row.blob_name).catch((e) =>
-        log('failed to delete replaced export', { jobId, blobName: row.blob_name, error: e.message })
-      );
+      try {
+        await exportStorage.deleteBlob(row.blob_name);
+        await pool.query('UPDATE subtitle_burn_jobs SET blob_deleted_at = CURRENT_TIMESTAMP WHERE id = $1', [row.id]);
+      } catch (e) {
+        log('failed to delete replaced export', { jobId, blobName: row.blob_name, error: e.message });
+      }
     }
     return true;
   } catch (error) {
