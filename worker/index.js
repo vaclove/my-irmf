@@ -1,7 +1,7 @@
 /**
  * Movie worker — runs as an Azure Container Apps Job triggered by a
  * storage-queue message. One execution drains the queue, then exits so the
- * platform scales to zero. Four job types share the queue, discriminated by
+ * platform scales to zero. Five job types share the queue, discriminated by
  * the message's `type` field (absent = transcode, for back-compat):
  *
  *   transcode      reads the master (Azure Blob via a read URL, or Drive for
@@ -12,6 +12,10 @@
  *                  separate file (Azure + Drive mirror) next to the original
  *   file_transfer  copies a file Drive -> Azure (import) or an Azure master
  *                  -> Drive (backup); see movie_file_transfer_jobs
+ *   subtitle_burn  renders the master (or a ~60 s preview clip of it) with
+ *                  CS/EN subtitles burned in onto a scratch volume, uploads
+ *                  the MP4 to the temporary 'exports' container; see
+ *                  subtitle_burn_jobs
  *   db_backup      runs pg_dump against DATABASE_URL, uploads the dump to the
  *                  shared drive's Backups folder, prunes to the newest N
  *
@@ -21,7 +25,9 @@
  * Env: DATABASE_URL, GOOGLE_SERVICE_ACCOUNT_KEY (or _PATH), GOOGLE_SHARED_DRIVE_ID,
  *      AZURE_STORAGE_CONNECTION_STRING, TRANSCODE_QUEUE_NAME,
  *      MOVIE_STORAGE_CONNECTION_STRING, MOVIE_STORAGE_CONTAINER,
- *      MOVIE_TRANSCODE_HEIGHT/CRF/PRESET, FFMPEG_PATH/FFPROBE_PATH (optional),
+ *      MOVIE_EXPORT_CONTAINER, MOVIE_TRANSCODE_HEIGHT/CRF/PRESET,
+ *      SUBTITLE_BURN_PRESET/CRF, SUBTITLE_BURN_UHD_PRESET/CRF, SUBTITLE_BURN_TMPDIR,
+ *      FFMPEG_PATH/FFPROBE_PATH (optional),
  *      ALASS_PATH, ALASS_NO_SPLIT, ALASS_SPLIT_PENALTY (optional),
  *      PG_DUMP_PATH, DB_BACKUP_FOLDER_NAME (optional).
  */
@@ -42,6 +48,15 @@ const { uploadStreamToDrive } = require('../server/services/driveChunkedUpload')
 const { conventionFileName, extensionOf } = require('../server/utils/movieFileNaming');
 const { parseSubtitles, serializeSrt } = require('../server/utils/subtitles');
 const movieStorage = require('../server/services/movieStorage');
+const exportStorage = require('../server/services/exportStorage');
+const {
+  computeLayout,
+  parseCropdetect,
+  letterboxCrop,
+  parseCues,
+  densestWindowStart,
+  buildAss,
+} = require('../server/utils/subtitleBurn');
 
 const QUEUE_NAME = process.env.TRANSCODE_QUEUE_NAME || 'movie-transcodes';
 const VISIBILITY_TIMEOUT_S = 8 * 60 * 60; // 8h — matches the job replica timeout
@@ -58,6 +73,25 @@ const HEIGHT = parseInt(process.env.MOVIE_TRANSCODE_HEIGHT || '720', 10);
 const CRF = process.env.MOVIE_TRANSCODE_CRF || '23';
 const PRESET = process.env.MOVIE_TRANSCODE_PRESET || 'veryfast';
 const MAX_THREADS = process.env.MOVIE_TRANSCODE_MAX_THREADS || null;
+// Burned-in exports are screening copies: near-transparent quality. UHD uses a
+// faster preset so a feature film stays well inside the 8 h replica timeout.
+const BURN_PRESET = process.env.SUBTITLE_BURN_PRESET || 'medium';
+const BURN_CRF = process.env.SUBTITLE_BURN_CRF || '18';
+const BURN_UHD_PRESET = process.env.SUBTITLE_BURN_UHD_PRESET || 'faster';
+const BURN_UHD_CRF = process.env.SUBTITLE_BURN_UHD_CRF || '18';
+// Audio codecs that go into the MP4 untouched; anything else becomes AAC.
+const BURN_COPY_AUDIO = ['aac', 'ac3', 'eac3', 'mp3'];
+// Where burns render before upload: an Azure Files volume in production — a
+// feature film doesn't fit the replica's ephemeral disk (~8 GB).
+const BURN_TMPDIR = process.env.SUBTITLE_BURN_TMPDIR || process.env.MOVIE_TRANSCODE_TMPDIR || os.tmpdir();
+// The volume is shared by all executions: sweep only files older than any run.
+const BURN_STALE_MS = 12 * 60 * 60 * 1000;
+const CROP_SAMPLES = 8;
+const CROP_SAMPLE_TIMEOUT_MS = 2 * 60 * 1000;
+const RECONNECT_ARGS = [
+  '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_on_network_error', '1',
+  '-reconnect_on_http_error', '5xx', '-reconnect_delay_max', '30',
+];
 // An output shorter than its source by more than this is treated as truncated
 // (ffmpeg ends "successfully" when its input stream dies mid-way).
 const DURATION_TOLERANCE_S = 10;
@@ -179,6 +213,29 @@ async function assertCompleteOutput({ outputPath, expectedSeconds, label, stderr
 }
 
 /**
+ * Data handler for ffmpeg's `-progress` output: reports 0–99 (out_time_us vs
+ * durationSeconds) via onProgress.
+ */
+function progressParser(durationSeconds, onProgress) {
+  let progressBuf = '';
+  return (d) => {
+    progressBuf += d.toString();
+    const lines = progressBuf.split('\n');
+    progressBuf = lines.pop(); // keep the partial line
+    for (const line of lines) {
+      const [key, value] = line.split('=');
+      if (key === 'out_time_us' && durationSeconds) {
+        const outSec = Number(value) / 1e6;
+        if (Number.isFinite(outSec)) {
+          const pct = Math.min(99, Math.round((outSec / durationSeconds) * 100));
+          onProgress(pct);
+        }
+      }
+    }
+  };
+}
+
+/**
  * Spawn ffmpeg with the given args (must end with '-progress pipe:1' and the
  * output path). Reports progress via onProgress (0–99, from out_time_us vs
  * durationSeconds). Resolves with the stderr tail when done (non-fatal input
@@ -191,23 +248,7 @@ function spawnFfmpegWithProgress({ args, durationSeconds, onProgress, onSpawn })
     if (onSpawn) onSpawn(child);
 
     let stderrTail = '';
-    let progressBuf = '';
-
-    child.stdout.on('data', (d) => {
-      progressBuf += d.toString();
-      const lines = progressBuf.split('\n');
-      progressBuf = lines.pop(); // keep the partial line
-      for (const line of lines) {
-        const [key, value] = line.split('=');
-        if (key === 'out_time_us' && durationSeconds) {
-          const outSec = Number(value) / 1e6;
-          if (Number.isFinite(outSec)) {
-            const pct = Math.min(99, Math.round((outSec / durationSeconds) * 100));
-            onProgress(pct);
-          }
-        }
-      }
-    });
+    child.stdout.on('data', progressParser(durationSeconds, onProgress));
     child.stderr.on('data', (d) => {
       stderrTail = (stderrTail + d.toString()).slice(-2000);
     });
@@ -877,6 +918,375 @@ async function processSubtitleSyncJob(jobId, dequeueCount) {
   }
 }
 
+/** ffprobe the input: duration, first video stream geometry, first audio stream. */
+function probeMedia(inputUrl) {
+  return new Promise((resolve) => {
+    const args = [
+      '-v', 'error',
+      '-show_entries',
+      'format=duration:stream=codec_type,codec_name,width,height,sample_aspect_ratio,channels',
+      '-of', 'json',
+      inputUrl,
+    ];
+    const child = spawn(FFPROBE, args);
+    let out = '';
+    child.stdout.on('data', (d) => (out += d));
+    child.on('error', () => resolve(null));
+    child.on('close', () => {
+      try {
+        const parsed = JSON.parse(out);
+        const streams = parsed.streams || [];
+        const v = streams.find((s) => s.codec_type === 'video');
+        const a = streams.find((s) => s.codec_type === 'audio');
+        const [sarNum, sarDen] = String(v?.sample_aspect_ratio || '').split(':').map(Number);
+        resolve({
+          duration: parsed.format?.duration ? Number(parsed.format.duration) : null,
+          video: v?.width && v?.height
+            ? { width: v.width, height: v.height, sar: sarNum > 0 && sarDen > 0 ? sarNum / sarDen : 1 }
+            : null,
+          audio: a ? { codec: a.codec_name, channels: a.channels || 2 } : null,
+        });
+      } catch {
+        resolve(null);
+      }
+    });
+  });
+}
+
+/** Run cropdetect over one second of video at `at` seconds; {y1, y2} or null. */
+function cropdetectAt(inputUrl, at, onSpawn) {
+  return new Promise((resolve) => {
+    const args = [
+      '-hide_banner', '-nostdin',
+      ...RECONNECT_ARGS, '-ss', String(Math.floor(at)), '-i', inputUrl,
+      '-map', '0:v:0', '-frames:v', '24', '-an',
+      '-vf', 'cropdetect=limit=0.094:round=2:reset=0',
+      '-f', 'null', '-',
+    ];
+    const child = spawn(FFMPEG, args);
+    if (onSpawn) onSpawn(child);
+    let stderrTail = '';
+    child.stderr.on('data', (d) => {
+      stderrTail = (stderrTail + d.toString()).slice(-4000);
+    });
+    const timer = setTimeout(() => child.kill('SIGKILL'), CROP_SAMPLE_TIMEOUT_MS);
+    child.on('error', () => {
+      clearTimeout(timer);
+      resolve(null);
+    });
+    child.on('close', () => {
+      clearTimeout(timer);
+      resolve(parseCropdetect(stderrTail));
+    });
+  });
+}
+
+/** Sample the movie for a letterbox baked into the master; crop or null. */
+async function detectLetterbox({ inputUrl, durationSeconds, width, height, onSpawn, isCancelled }) {
+  const samples = [];
+  for (let i = 1; i <= CROP_SAMPLES; i++) {
+    if (isCancelled()) return null;
+    samples.push(await cropdetectAt(inputUrl, (durationSeconds * i) / (CROP_SAMPLES + 1), onSpawn));
+  }
+  return letterboxCrop(samples, width, height);
+}
+
+/** ffmpeg args for a burn: a regular MP4 at outputPath, progress on stdout. */
+function burnArgs({ inputUrl, media, layout, assPath, outputPath, startSeconds, lengthSeconds }) {
+  const { canvas, picture, crop } = layout;
+  const seek = startSeconds > 0 ? ['-ss', startSeconds.toFixed(3)] : [];
+  const uhd = canvas.height > 1080;
+  // Video and audio over separate inputs, as in runFfmpeg.
+  const args = ['-hide_banner', '-nostdin', '-y', '-loglevel', 'error', ...RECONNECT_ARGS, ...seek, '-i', inputUrl];
+  if (media.audio) args.push(...RECONNECT_ARGS, ...seek, '-i', inputUrl);
+  args.push('-map', '0:v:0');
+  if (media.audio) args.push('-map', '1:a:0');
+  const vf = [
+    crop ? `crop=${crop.w}:${crop.h}:${crop.x}:${crop.y}` : null,
+    `scale=${picture.width}:${picture.height}:flags=lanczos`,
+    'format=yuv420p',
+    'setsar=1',
+    `pad=${canvas.width}:${canvas.height}:${picture.x}:${picture.y}:color=black`,
+    `subtitles=filename='${assPath}'`,
+  ].filter(Boolean);
+  args.push(
+    '-vf', vf.join(','),
+    '-c:v', 'libx264',
+    '-preset', uhd ? BURN_UHD_PRESET : BURN_PRESET,
+    '-crf', String(uhd ? BURN_UHD_CRF : BURN_CRF),
+    '-profile:v', 'high', '-tune', 'film', '-pix_fmt', 'yuv420p'
+  );
+  if (media.audio) {
+    if (BURN_COPY_AUDIO.includes(media.audio.codec)) args.push('-c:a', 'copy');
+    else args.push('-c:a', 'aac', '-b:a', media.audio.channels > 2 ? '640k' : '320k');
+  }
+  if (lengthSeconds) args.push('-t', lengthSeconds.toFixed(3));
+  if (MAX_THREADS) args.push('-threads', String(MAX_THREADS));
+  args.push('-max_muxing_queue_size', '4096');
+  // A regular (not fragmented) MP4: VLC seeks fragmented ones badly — a few
+  // seconds of grey smear after every jump. Previews get the index up front
+  // for in-browser playback; full exports are played from local disk, where
+  // rewriting tens of GB for it isn't worth it.
+  if (lengthSeconds) args.push('-movflags', '+faststart');
+  args.push('-progress', 'pipe:1', outputPath);
+  return args;
+}
+
+/** File name of an export: {slug}.cs-en.mp4 / {slug}.cs-en.preview.mp4. */
+function burnFileName(movie, job) {
+  const slug = conventionFileName(movie, 'movie', 'mp4').replace(/\.mp4$/, '');
+  const langs = [job.subtitle_cs_ref && 'cs', job.subtitle_en_ref && 'en'].filter(Boolean).join('-');
+  return `${slug}.${langs}${job.kind === 'preview' ? '.preview' : ''}.mp4`;
+}
+
+/** Process a subtitle burn job. Returns true if the message should be deleted. */
+async function processBurnJob(jobId, dequeueCount) {
+  if (dequeueCount > MAX_DEQUEUE) {
+    await pool.query(
+      `UPDATE subtitle_burn_jobs SET status = 'failed', phase = NULL,
+         error_message = 'Export crashed repeatedly and was abandoned',
+         finished_at = CURRENT_TIMESTAMP WHERE id = $1 AND status <> 'completed'`,
+      [jobId]
+    );
+    log('poison burn message abandoned', { jobId, dequeueCount });
+    return true;
+  }
+
+  const jobRes = await pool.query('SELECT * FROM subtitle_burn_jobs WHERE id = $1', [jobId]);
+  if (jobRes.rows.length === 0) return true; // row gone (movie deleted) — drop message
+  const job = jobRes.rows[0];
+  if (!['pending', 'running'].includes(job.status)) {
+    log('burn job not runnable, skipping', { jobId, status: job.status });
+    return true;
+  }
+  if (!exportStorage.isConfigured()) {
+    log('Export storage not configured; leaving burn message for redelivery', { jobId });
+    return false;
+  }
+
+  // Restart from scratch on redelivery; keep cancel_requested (see processJob).
+  await pool.query(
+    `UPDATE subtitle_burn_jobs SET status = 'running', phase = 'probing',
+       attempt_count = attempt_count + 1, started_at = COALESCE(started_at, CURRENT_TIMESTAMP),
+       error_message = NULL, progress_percent = 0, bytes_transferred = 0
+     WHERE id = $1`,
+    [jobId]
+  );
+  const preCancel = await pool.query('SELECT cancel_requested FROM subtitle_burn_jobs WHERE id = $1', [jobId]);
+  if (preCancel.rows[0]?.cancel_requested) {
+    await pool.query(
+      `UPDATE subtitle_burn_jobs SET status = 'cancelled', phase = NULL,
+         finished_at = CURRENT_TIMESTAMP WHERE id = $1`,
+      [jobId]
+    );
+    log('burn job cancelled before start', { jobId });
+    return true;
+  }
+
+  const assPath = path.join(process.env.MOVIE_TRANSCODE_TMPDIR || os.tmpdir(), `irmf-burn-${jobId}.ass`);
+  const outputPath = path.join(BURN_TMPDIR, `irmf-burn-${jobId}.mp4`);
+  let proxyServer = null;
+  let activeChild = null;
+  let cancelled = false;
+  let upstreamError = null;
+  let blobName = null;
+  const uploadAbort = new AbortController();
+  const cancelledError = () => Object.assign(new Error('cancelled'), { cancelled: true });
+
+  const cancelTimer = setInterval(async () => {
+    try {
+      const r = await pool.query('SELECT cancel_requested FROM subtitle_burn_jobs WHERE id = $1', [jobId]);
+      if (r.rows[0]?.cancel_requested) {
+        cancelled = true;
+        if (activeChild) activeChild.kill('SIGKILL');
+        uploadAbort.abort();
+      }
+    } catch {
+      // transient; try again next tick
+    }
+  }, CANCEL_POLL_MS);
+
+  try {
+    const movieRes = await pool.query(
+      `SELECT m.id, m.name_cs, m.name_en, m.drive_folder_id, e.year AS edition_year
+       FROM movies m JOIN editions e ON m.edition_id = e.id WHERE m.id = $1`,
+      [job.movie_id]
+    );
+    if (movieRes.rows.length === 0) throw new Error('Movie not found');
+    const movie = movieRes.rows[0];
+
+    // Subtitles first: cheap, and a broken file should fail before the master is touched.
+    const readCues = async (ref, label) => {
+      if (!ref) return [];
+      try {
+        return parseCues((await movieStorage.readSubtitleRef(ref)).text);
+      } catch (e) {
+        throw new Error(`${label} subtitles: ${e.message}`);
+      }
+    };
+    const cs = await readCues(job.subtitle_cs_ref, 'CS');
+    const en = await readCues(job.subtitle_en_ref, 'EN');
+
+    const input = await resolveInput(job.source_ref, (d) => (upstreamError = d));
+    proxyServer = input.server;
+    const { inputUrl } = input;
+
+    const media = await probeMedia(inputUrl);
+    // Without a duration the output can't be checked for truncation.
+    if (!media?.duration || !media.video) throw new Error('Could not read the source video');
+    await pool.query('UPDATE subtitle_burn_jobs SET duration_seconds = $2 WHERE id = $1', [jobId, media.duration]);
+
+    const crop = await detectLetterbox({
+      inputUrl,
+      durationSeconds: media.duration,
+      width: media.video.width,
+      height: media.video.height,
+      onSpawn: (c) => (activeChild = c),
+      isCancelled: () => cancelled,
+    });
+    activeChild = null;
+    if (cancelled) throw cancelledError();
+    const layout = computeLayout({ ...media.video, crop });
+
+    const durationMs = media.duration * 1000;
+    let startMs = 0;
+    let lengthMs = null;
+    if (job.kind === 'preview') {
+      lengthMs = Math.min(Number(job.preview_length_seconds || 60) * 1000, durationMs);
+      startMs =
+        job.preview_start_seconds != null
+          ? Math.max(0, Math.min(Number(job.preview_start_seconds) * 1000, durationMs - lengthMs))
+          : densestWindowStart([cs, en], lengthMs, durationMs);
+    }
+    const ass = buildAss({ cs, en, layout, offsetMs: startMs, lengthMs, title: movie.name_cs || movie.name_en || '' });
+    fs.writeFileSync(assPath, ass.script, 'utf8');
+
+    const fileName = burnFileName(movie, job);
+    blobName = exportStorage.blobNameFor(movie, job.kind, fileName);
+    const renderInfo = {
+      canvas: layout.canvas,
+      picture: layout.picture,
+      crop: layout.crop,
+      layout: ass.mode,
+      paired_ratio: ass.ratio,
+      source: media.video,
+      audio: media.audio
+        ? { codec: media.audio.codec, channels: media.audio.channels, copied: BURN_COPY_AUDIO.includes(media.audio.codec) }
+        : null,
+      start_seconds: startMs / 1000,
+      length_seconds: lengthMs != null ? lengthMs / 1000 : media.duration,
+    };
+    await pool.query(
+      `UPDATE subtitle_burn_jobs SET phase = 'rendering', render_info = $2, file_name = $3 WHERE id = $1`,
+      [jobId, JSON.stringify(renderInfo), fileName]
+    );
+    log('burn starting', { jobId, kind: job.kind, layout: ass.mode, canvas: layout.canvas, crop: layout.crop });
+
+    const expectedSeconds = renderInfo.length_seconds;
+    let lastPctWrite = 0;
+    const renderLog = await spawnFfmpegWithProgress({
+      args: burnArgs({
+        inputUrl,
+        media,
+        layout,
+        assPath,
+        outputPath,
+        startSeconds: startMs / 1000,
+        lengthSeconds: lengthMs != null ? lengthMs / 1000 : null,
+      }),
+      durationSeconds: expectedSeconds,
+      onSpawn: (c) => (activeChild = c),
+      onProgress: (pct) => {
+        const now = Date.now();
+        if (now - lastPctWrite < 2000) return;
+        lastPctWrite = now;
+        pool
+          .query('UPDATE subtitle_burn_jobs SET progress_percent = $2 WHERE id = $1', [jobId, Math.round(pct * 0.9)])
+          .catch(() => {});
+      },
+    });
+    activeChild = null;
+    if (cancelled) throw cancelledError();
+
+    await pool.query("UPDATE subtitle_burn_jobs SET phase = 'verifying', progress_percent = 90 WHERE id = $1", [jobId]);
+    await assertCompleteOutput({ outputPath, expectedSeconds, label: 'Export', stderrTail: renderLog });
+
+    // Upload (90–99 % of the bar).
+    const total = fs.statSync(outputPath).size;
+    await pool.query("UPDATE subtitle_burn_jobs SET phase = 'uploading', file_size = $2 WHERE id = $1", [jobId, total]);
+    let lastBytesWrite = 0;
+    const uploaded = await exportStorage.uploadStream(blobName, fs.createReadStream(outputPath), {
+      abortSignal: uploadAbort.signal,
+      onProgress: (n) => {
+        const now = Date.now();
+        if (now - lastBytesWrite < 2000) return;
+        lastBytesWrite = now;
+        pool
+          .query('UPDATE subtitle_burn_jobs SET bytes_transferred = $2, progress_percent = $3 WHERE id = $1', [
+            jobId,
+            n,
+            90 + Math.floor((n / total) * 9),
+          ])
+          .catch(() => {});
+      },
+    });
+    if (cancelled) throw cancelledError();
+    if (uploaded.size !== total) throw new Error(`Upload incomplete: ${uploaded.size} of ${total} bytes`);
+
+    await pool.query(
+      `UPDATE subtitle_burn_jobs SET status = 'completed', phase = NULL, progress_percent = 100,
+         blob_name = $2, file_size = $3, bytes_transferred = $3,
+         expires_at = CURRENT_TIMESTAMP + make_interval(days => $4),
+         finished_at = CURRENT_TIMESTAMP
+       WHERE id = $1`,
+      [jobId, blobName, total, exportStorage.RETENTION_DAYS[job.kind]]
+    );
+    log('burn completed', { jobId, blobName, bytes: total });
+
+    // A new export replaces the movie's previous one of the same kind.
+    // Marked only after the blob is gone, so a failed delete is retried by
+    // the next export (the lifecycle rule removes it eventually anyway).
+    const older = await pool.query(
+      `SELECT id, blob_name FROM subtitle_burn_jobs
+       WHERE movie_id = $1 AND kind = $2 AND id <> $3 AND blob_name IS NOT NULL AND blob_deleted_at IS NULL`,
+      [job.movie_id, job.kind, jobId]
+    );
+    for (const row of older.rows) {
+      try {
+        await exportStorage.deleteBlob(row.blob_name);
+        await pool.query('UPDATE subtitle_burn_jobs SET blob_deleted_at = CURRENT_TIMESTAMP WHERE id = $1', [row.id]);
+      } catch (e) {
+        log('failed to delete replaced export', { jobId, blobName: row.blob_name, error: e.message });
+      }
+    }
+    return true;
+  } catch (error) {
+    if (blobName) await exportStorage.deleteBlob(blobName).catch(() => {});
+    if (cancelled || error.cancelled) {
+      await pool.query(
+        `UPDATE subtitle_burn_jobs SET status = 'cancelled', phase = NULL,
+           finished_at = CURRENT_TIMESTAMP WHERE id = $1`,
+        [jobId]
+      );
+      log('burn job cancelled', { jobId });
+    } else {
+      const message = redact((error.message || 'Unknown error') + (upstreamError ? ` — ${upstreamError}` : ''));
+      await pool.query(
+        `UPDATE subtitle_burn_jobs SET status = 'failed', phase = NULL,
+           error_message = $2, finished_at = CURRENT_TIMESTAMP WHERE id = $1`,
+        [jobId, message.slice(0, 1000)]
+      );
+      log('burn job failed', { jobId, error: message });
+    }
+    return true; // terminal — drop the message (retry is user-driven)
+  } finally {
+    clearInterval(cancelTimer);
+    if (proxyServer) proxyServer.close();
+    fs.promises.unlink(assPath).catch(() => {});
+    fs.promises.unlink(outputPath).catch(() => {});
+  }
+}
+
 /**
  * Create + enqueue a preview transcode for a movie's current master (after an
  * import). Mirrors server/services/transcodeQueue.enqueueForMovie.
@@ -1217,6 +1627,21 @@ async function processTransferJob(jobId, dequeueCount, queue) {
   }
 }
 
+/** Remove renders orphaned by crashed executions from the shared burn volume. */
+function sweepBurnFiles() {
+  try {
+    for (const name of fs.readdirSync(BURN_TMPDIR)) {
+      if (!/^irmf-burn-.*\.mp4$/.test(name)) continue;
+      const file = path.join(BURN_TMPDIR, name);
+      if (Date.now() - fs.statSync(file).mtimeMs > BURN_STALE_MS) {
+        fs.promises.unlink(file).catch(() => {});
+      }
+    }
+  } catch {
+    // ignore
+  }
+}
+
 /** Remove any orphaned temp files from crashed prior executions. */
 function sweepTempFiles() {
   const dir = process.env.MOVIE_TRANSCODE_TMPDIR || os.tmpdir();
@@ -1225,6 +1650,7 @@ function sweepTempFiles() {
       if (
         /^irmf-proxy-.*\.mp4$/.test(name) ||
         /^irmf-sync-.*\.(wav|srt)$/.test(name) ||
+        /^irmf-burn-.*\.ass$/.test(name) ||
         /^irmf-dbbackup-.*\.dump$/.test(name)
       ) {
         fs.promises.unlink(path.join(dir, name)).catch(() => {});
@@ -1242,6 +1668,7 @@ async function main() {
     return;
   }
   sweepTempFiles();
+  sweepBurnFiles();
 
   const queue = QueueServiceClient.fromConnectionString(conn).getQueueClient(QUEUE_NAME);
   await queue.createIfNotExists();
@@ -1281,7 +1708,9 @@ async function main() {
             ? await processSubtitleSyncJob(jobId, msg.dequeueCount)
             : jobType === 'file_transfer'
               ? await processTransferJob(jobId, msg.dequeueCount, queue)
-              : await processJob(jobId, msg.dequeueCount);
+              : jobType === 'subtitle_burn'
+                ? await processBurnJob(jobId, msg.dequeueCount)
+                : await processJob(jobId, msg.dequeueCount);
     } catch (e) {
       // Unexpected crash: leave the message so it redelivers (dequeueCount rises).
       log('unexpected job error; leaving message', { jobId, error: e.message });
@@ -1293,10 +1722,15 @@ async function main() {
   }
 }
 
-main()
-  .then(() => pool.end())
-  .then(() => process.exit(0))
-  .catch((err) => {
-    log('fatal', { error: err.message });
-    process.exit(1);
-  });
+if (require.main === module) {
+  main()
+    .then(() => pool.end())
+    .then(() => process.exit(0))
+    .catch((err) => {
+      log('fatal', { error: err.message });
+      process.exit(1);
+    });
+}
+
+// For local render checks (node -e "require('./worker')...").
+module.exports = { probeMedia, detectLetterbox, burnArgs, spawnFfmpegWithProgress };

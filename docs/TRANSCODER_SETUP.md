@@ -140,6 +140,80 @@ The app needs the same `MOVIE_STORAGE_CONNECTION_STRING` (App Service setting).
 The account's blob CORS rules must allow `PUT` from the app origins — browsers
 upload masters straight to Blob Storage through short-lived SAS URLs.
 
+### Screening exports (burned-in subtitles)
+
+`subtitle_burn` messages render the master with CS/EN subtitles burned into
+the picture (Files tab → *Screening export*): a ~60 s preview clip or the full
+movie, 1920x1080 (3840x2160 for 4K masters), H.264 CRF 18 with the original
+audio (AAC/AC-3/E-AC-3/MP3 copied, anything else re-encoded to AAC). The
+worker crops a letterbox baked into the master, pushes a wider-than-16:9
+picture up so the subtitles sit in the black band below it. The output is a
+regular MP4 (VLC seeks fragmented MP4 badly: seconds of grey smear after a
+jump), rendered onto an Azure Files scratch volume — a feature film does not
+fit the replica's ~8 GB ephemeral disk — and then uploaded to Blob Storage.
+Rough render times on 4 vCPU: 1–2 h for an HD feature,
+several hours in 4K (`SUBTITLE_BURN_UHD_PRESET` defaults to `faster` to stay
+inside the 8 h replica timeout). Knobs: `SUBTITLE_BURN_PRESET`/`_CRF`,
+`SUBTITLE_BURN_UHD_PRESET`/`_CRF`; `SUBTITLE_BURN_ENABLED=false` disables it
+app-side.
+
+The scratch volume is a 300 GB share in its own storage account in the job's
+region, mounted at `/mnt/burn` (`SUBTITLE_BURN_TMPDIR`); the worker deletes
+each render after the upload and sweeps leftovers older than 12 h:
+
+```bash
+az storage account create -g $RG -n irmfburnscratch -l $LOC --sku Standard_LRS --kind StorageV2 \
+  --min-tls-version TLS1_2 --allow-blob-public-access false
+az storage share-rm create -g $RG --storage-account irmfburnscratch --name burn-scratch --quota 300
+KEY=$(az storage account keys list -g $RG -n irmfburnscratch --query "[0].value" -o tsv)
+az containerapp env storage set -g $RG -n $ENV --storage-name burnscratch \
+  --azure-file-account-name irmfburnscratch --azure-file-account-key "$KEY" \
+  --azure-file-share-name burn-scratch --access-mode ReadWrite
+```
+
+Then add to the job template (e.g. `az rest --method patch` on the job with
+the full `properties.template`; the CLI has no volume flags for jobs) a volume
+`{name: burn-scratch, storageType: AzureFile, storageName: burnscratch,
+mountOptions: "dir_mode=0777,file_mode=0777"}` (the worker runs as a non-root
+user), a `volumeMounts` entry `{volumeName: burn-scratch, mountPath: /mnt/burn}`
+on the container, and the env var `SUBTITLE_BURN_TMPDIR=/mnt/burn`.
+
+Exports are temporary downloads in the private `exports` container of the
+`irmfmovies` account (created on first use; override with
+`MOVIE_EXPORT_CONTAINER`). A lifecycle rule deletes them — full exports after
+20 days, previews after 3 (`RETENTION_DAYS` in
+`server/services/exportStorage.js` must match):
+
+```bash
+cat > /tmp/exports-policy.json <<'JSON'
+{
+  "rules": [
+    {
+      "enabled": true, "name": "exports-full-20d", "type": "Lifecycle",
+      "definition": {
+        "actions": { "baseBlob": { "delete": { "daysAfterCreationGreaterThan": 20 } } },
+        "filters": { "blobTypes": ["blockBlob"], "prefixMatch": ["exports/full/"] }
+      }
+    },
+    {
+      "enabled": true, "name": "exports-preview-3d", "type": "Lifecycle",
+      "definition": {
+        "actions": { "baseBlob": { "delete": { "daysAfterCreationGreaterThan": 3 } } },
+        "filters": { "blobTypes": ["blockBlob"], "prefixMatch": ["exports/preview/"] }
+      }
+    }
+  ]
+}
+JSON
+# Replaces the account's whole policy — merge with any existing rules first
+# (az storage account management-policy show ...).
+az storage account management-policy create -g $RG --account-name irmfmovies --policy @/tmp/exports-policy.json
+```
+
+The rule runs about once a day, so blobs may linger a day past their expiry;
+the app stops offering a download at `expires_at`. Blob soft delete keeps
+deleted exports recoverable (and billed) for another 14 days.
+
 ## 4. CI (optional)
 
 `.github/workflows/transcoder.yml` rebuilds and updates the job image on pushes

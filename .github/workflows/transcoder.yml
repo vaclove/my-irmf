@@ -18,8 +18,10 @@ on:
       - 'server/services/driveChunkedUpload.js'
       - 'server/services/subtitleCache.js'
       - 'server/services/movieStorage.js'
+      - 'server/services/exportStorage.js'
       - 'server/utils/movieFileNaming.js'
       - 'server/utils/subtitles.js'
+      - 'server/utils/subtitleBurn.js'
       - 'server/models/database.js'
       - '.github/workflows/transcoder.yml'
   workflow_dispatch:
