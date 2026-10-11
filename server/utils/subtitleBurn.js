@@ -6,6 +6,8 @@
  * Look — the same for every movie:
  *   CS  bottom, white, full size (the main language)
  *   EN  directly above, light yellow, ~88 % of the CS size
+ *   one language only: white and larger — two lines of it need much less
+ *   room than two lines of each
  *   Roboto Medium with a black outline and a soft shadow. Sizes are fractions
  *   of the canvas height, so 1080p and 2160p renders look the same on screen.
  *
@@ -28,6 +30,7 @@ const { parseSubtitles } = require('./subtitles');
 const FONT = 'Roboto Medium';
 const CS_SIZE = 0.048; // of the canvas height: 52 px at 1080p
 const EN_SIZE = 0.042; // 45 px at 1080p
+const SINGLE_SIZE = 0.06; // 65 px at 1080p, when only one language is burned in
 const LINE_HEIGHT = 1.2; // libass line box of Roboto, in font sizes
 const GAP = 0.012; // between the EN and CS blocks
 const MARGIN_BOTTOM = 0.035;
@@ -46,9 +49,10 @@ const MAX_LINE_CHARS = 42;
 
 const even = (n) => Math.max(2, Math.round(n / 2) * 2);
 
-/** Font sizes and spacing in canvas pixels. */
-function metrics(canvasHeight) {
+/** Font sizes and spacing in canvas pixels; `single` = one language only. */
+function metrics(canvasHeight, { single = false } = {}) {
   const H = canvasHeight;
+  const singleSize = Math.round(H * SINGLE_SIZE);
   const csSize = Math.round(H * CS_SIZE);
   const enSize = Math.round(H * EN_SIZE);
   const gap = Math.round(H * GAP);
@@ -58,35 +62,37 @@ function metrics(canvasHeight) {
   return {
     csSize,
     enSize,
+    singleSize,
     gap,
     margin,
     outline: Math.round(H * OUTLINE * 10) / 10,
     shadow: Math.round(H * SHADOW * 10) / 10,
     // Bottom margin of the EN zone in the zones layout.
     enZoneMargin: Math.round(margin + csLines + gap),
-    // Room for two lines of each language.
-    blockHeight: Math.ceil(margin + csLines + gap + enLines),
+    // Room for two lines of each language (or of the only one).
+    blockHeight: Math.ceil(single ? margin + 2 * singleSize * LINE_HEIGHT : margin + csLines + gap + enLines),
   };
 }
 
 /**
  * Canvas and picture placement for a master.
- * @param {{width:number, height:number, sar?:number, crop?:{x,y,w,h}|null}} source
- *   coded size, sample aspect ratio, and the letterbox crop (if any)
+ * @param {{width:number, height:number, sar?:number, crop?:{x,y,w,h}|null, single?:boolean}} source
+ *   coded size, sample aspect ratio, the letterbox crop (if any), and
+ *   whether only one language is burned in
  */
-function computeLayout({ width, height, sar = 1, crop = null }) {
+function computeLayout({ width, height, sar = 1, crop = null, single = false }) {
   const uhd = width > 2560 || height > 1440;
   const W = uhd ? 3840 : 1920;
   const H = uhd ? 2160 : 1080;
-  const m = metrics(H);
+  const m = metrics(H, { single });
   const srcW = (crop ? crop.w : width) * (sar > 0 ? sar : 1);
   const srcH = crop ? crop.h : height;
   const scale = Math.min(W / srcW, H / srcH);
   const pw = Math.min(W, even(srcW * scale));
   const ph = Math.min(H, even(srcH * scale));
   const free = H - ph;
-  // Centered when the band below already holds two lines of each language,
-  // otherwise pushed up (at most to the top edge) to make room.
+  // Centered when the band below already holds two lines of each language
+  // (or of the only one), otherwise pushed up (at most to the top edge) to make room.
   const py = free / 2 >= m.blockHeight ? Math.floor(free / 4) * 2 : Math.max(0, Math.floor((free - m.blockHeight) / 2) * 2);
   return {
     canvas: { width: W, height: H },
@@ -363,6 +369,9 @@ function buildAss({ cs = [], en = [], layout, offsetMs = 0, lengthMs = null, tit
     .sort((a, b) => a.start - b.start);
 
   const enMarginV = mode === 'zones' ? m.enZoneMargin : m.margin;
+  // One language: the same large white style whichever it is.
+  const csStyle = mode === 'single' ? [m.singleSize, CS_COLOUR] : [m.csSize, CS_COLOUR];
+  const enStyle = mode === 'single' ? [m.singleSize, CS_COLOUR] : [m.enSize, EN_COLOUR];
   const lines = [
     '[Script Info]',
     `Title: ${String(title).replace(/[\r\n]/g, ' ')}`,
@@ -375,8 +384,8 @@ function buildAss({ cs = [], en = [], layout, offsetMs = 0, lengthMs = null, tit
     '',
     '[V4+ Styles]',
     'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-    styleLine('CS', m.csSize, CS_COLOUR, side, m.margin, m),
-    styleLine('EN', m.enSize, EN_COLOUR, side, enMarginV, m),
+    styleLine('CS', ...csStyle, side, m.margin, m),
+    styleLine('EN', ...enStyle, side, enMarginV, m),
     // The spacer line between EN and CS in a paired block.
     styleLine('Gap', Math.max(1, Math.round(m.gap / LINE_HEIGHT)), CS_COLOUR, side, m.margin, m),
     '',
