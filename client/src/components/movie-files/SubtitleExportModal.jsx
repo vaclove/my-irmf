@@ -32,7 +32,7 @@ function layoutText(check) {
   if (check.layout === 'zones') {
     return `CS and EN timings differ (only ${Math.round(check.paired_ratio * 100)} % of cues match): each language keeps its own fixed place, EN above CS.`
   }
-  return 'One language only.'
+  return 'One language only: larger white subtitles.'
 }
 
 /**

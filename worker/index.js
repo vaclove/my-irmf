@@ -1146,7 +1146,7 @@ async function processBurnJob(jobId, dequeueCount) {
     });
     activeChild = null;
     if (cancelled) throw cancelledError();
-    const layout = computeLayout({ ...media.video, crop });
+    const layout = computeLayout({ ...media.video, crop, single: !cs.length || !en.length });
 
     const durationMs = media.duration * 1000;
     let startMs = 0;
