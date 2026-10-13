@@ -933,11 +933,17 @@ links a film record, like every other accompanying event, so it has a detail pag
 = that day) with `all_day: true`, `start_date`, `end_date`, sorted after the day's timed entries;
 `?date=` matches every covered day. Film screenings carry `all_day` + `end_date`.
 
-`MoviesSchedule.php` (identical on both sites) lists all-day entries at the bottom of each day under
-„Celodenní program" / "All-day events"; the time column says „Celý den" / "All day", plus the span
+`MoviesSchedule.php` (identical on both sites) lists all-day entries at the bottom of each day,
+right after the last timed entry and without a heading of their own (a „Celodenní program" heading
+was tried and removed the same day). The time column says „Celý den" / "All day", plus the span
 („22.–25. 10.", "22–25 Oct") for multi-day events, and no runtime. `MoviesPage.php` shows such a
 screening as „čt 22. 10. – ne 25. 10. celý den" and counts it as upcoming until its last day.
 Without all-day data both templates behave exactly as before.
 
-Backups of the previous templates: `~/backups/MoviesSchedule-pre-all-day-20261013.php` and
-`~/backups/MoviesPage-pre-all-day-20261013.php` on both accounts.
+**Film detail of an accompanying event** (`section = 'accompanying'`: exhibitions, swaps,
+workshops, …) has no Země / Rok / Sekce / … block. These are not films, so it shows only the
+synopsis next to the still.
+
+Backups of the previous templates on both accounts: `~/backups/MoviesSchedule-pre-all-day-20261013.php`,
+`~/backups/MoviesPage-pre-all-day-20261013.php`, then `MoviesPage-pre-accompanying-details-20261013.php`
+and `MoviesSchedule-pre-no-allday-heading-20261013.php`.
