@@ -212,7 +212,6 @@ function BurnedInPositioner({ movieId, subtitleKind, position, onChange, autoDet
             key={source.url}
             src={source.url}
             crossOrigin={source.direct ? 'anonymous' : undefined}
-            muted
             playsInline
             preload="metadata"
             className="absolute inset-0 w-full h-full object-contain"
