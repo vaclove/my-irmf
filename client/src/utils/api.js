@@ -197,6 +197,7 @@ export const subtitleTranslationApi = {
 // Subtitle sync jobs API (worker-side alass timing alignment)
 export const subtitleSyncApi = {
   create: (data) => api.post('/subtitle-syncs', data),
+  shift: (data) => api.post('/subtitle-syncs/shift', data),
   getForMovie: (movieId) => api.get(`/subtitle-syncs/movie/${movieId}`),
   getById: (id) => api.get(`/subtitle-syncs/${id}`),
   cancel: (id) => api.post(`/subtitle-syncs/${id}/cancel`),

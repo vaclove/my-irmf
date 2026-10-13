@@ -6,6 +6,10 @@
  * (subtitles_{lang}_synced) next to the untouched original. Jobs run
  * out-of-process in the transcode worker via the shared storage queue; the app
  * inserts the row, enqueues the message, and the client polls progress here.
+ *
+ * POST /shift is the manual alternative: it moves every cue by a fixed offset
+ * (e.g. -1 h when the subtitles were timed against a 01:00:00:00 timecode) and
+ * writes the same synced file, synchronously and without the worker.
  */
 
 const express = require('express');
@@ -14,11 +18,14 @@ const { logError } = require('../utils/logger');
 const { logAuditEvent } = require('../utils/auditLogger');
 const subtitleSyncQueue = require('../services/subtitleSyncQueue');
 const movieStorage = require('../services/movieStorage');
+const { cacheSubtitleTextSafe } = require('../services/subtitleCache');
+const { parseSubtitles, serializeSrt, shiftCues } = require('../utils/subtitles');
 
 const router = express.Router();
 
 const TERMINAL_STATUSES = ['completed', 'failed', 'cancelled'];
 const SUBTITLE_KINDS = ['subtitles_cs', 'subtitles_en'];
+const MAX_SHIFT_MS = 24 * 3600 * 1000;
 
 function notConfigured(res) {
   return res
@@ -124,6 +131,104 @@ router.post('/', async (req, res) => {
       return res.status(409).json({ error: 'A sync job is already active for this subtitle track' });
     }
     logError(error, req, { operation: 'create_subtitle_sync_job' });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /shift — move a subtitle track by a fixed offset into its synced copy.
+// Body: { movie_id, subtitle_kind, offset_ms } (negative = earlier).
+router.post('/shift', async (req, res) => {
+  try {
+    const { movie_id, subtitle_kind, offset_ms } = req.body;
+    if (!movie_id) return res.status(400).json({ error: 'movie_id is required' });
+    if (!SUBTITLE_KINDS.includes(subtitle_kind)) {
+      return res
+        .status(400)
+        .json({ error: "subtitle_kind must be 'subtitles_cs' or 'subtitles_en'" });
+    }
+    const offsetMs = Number(offset_ms);
+    if (!Number.isInteger(offsetMs) || offsetMs === 0 || Math.abs(offsetMs) > MAX_SHIFT_MS) {
+      return res
+        .status(400)
+        .json({ error: 'offset_ms must be a non-zero whole number of milliseconds within ±24 h' });
+    }
+
+    const movieRes = await pool.query(
+      `SELECT m.id, m.name_cs, m.name_en, m.drive_folder_id, e.year AS edition_year
+       FROM movies m JOIN editions e ON m.edition_id = e.id
+       WHERE m.id = $1`,
+      [movie_id]
+    );
+    if (movieRes.rows.length === 0) return res.status(404).json({ error: 'Movie not found' });
+    const movie = movieRes.rows[0];
+
+    const { source } = await resolveFiles(movie_id, subtitle_kind);
+    if (!source) {
+      return res.status(400).json({ error: 'Movie has no subtitle file of this kind to shift' });
+    }
+
+    // A running alass job would overwrite the result when it finishes.
+    const active = await pool.query(
+      `SELECT id FROM subtitle_sync_jobs
+         WHERE movie_id = $1 AND subtitle_kind = $2 AND status IN ('pending', 'running')`,
+      [movie_id, subtitle_kind]
+    );
+    if (active.rows.length > 0) {
+      return res.status(409).json({ error: 'A sync job is already active for this subtitle track' });
+    }
+
+    const { text } = await movieStorage.readSubtitleRef(movieStorage.fileRef(source));
+    const { cues, dropped } = shiftCues(parseSubtitles(text), offsetMs);
+    if (cues.length === 0) {
+      return res.status(400).json({ error: 'The shift would move every cue before the start of the movie' });
+    }
+    const body = Buffer.from(serializeSrt(cues), 'utf8');
+
+    const syncedKind = `${subtitle_kind}_synced`;
+    const previous = await movieStorage.loadRow(movie_id, syncedKind);
+    const saved = await movieStorage.writeSubtitleFile(movie, syncedKind, body, {
+      ext: 'srt',
+      onMirrorError: (mirrorError) =>
+        logError(mirrorError, req, { operation: 'mirror_subtitles_to_drive', movieId: movie.id }),
+    });
+    if (saved.storage === 'drive') {
+      await cacheSubtitleTextSafe(
+        saved.drive_file_id,
+        { bytes: body, md5: saved.md5_checksum || null },
+        (cacheError) => logError(cacheError, req, { operation: 'cache_subtitle_text', movieId: movie.id })
+      );
+    }
+
+    // Quality flags on a previous synced copy point at cues that moved.
+    const qualityLang = `${subtitle_kind.replace('subtitles_', '')}_synced`;
+    await pool
+      .query(
+        `UPDATE subtitle_quality_flags SET status = 'stale'
+         WHERE movie_id = $1 AND lang = $2 AND status = 'open'`,
+        [movie_id, qualityLang]
+      )
+      .catch((flagError) =>
+        logError(flagError, req, { operation: 'stale_subtitle_quality_flags', movieId: movie.id })
+      );
+
+    await logAuditEvent({
+      req,
+      action: previous ? 'UPDATE' : 'CREATE',
+      resource: 'movie_files',
+      resourceId: movie_id,
+      newData: {
+        file_kind: syncedKind,
+        file_name: saved.file_name,
+        source_kind: subtitle_kind,
+        offset_ms: offsetMs,
+        dropped_cues: dropped,
+      },
+      additionalMetadata: { operation: 'shift_subtitles' },
+    });
+
+    res.json({ file: saved, cue_count: cues.length, dropped_cues: dropped });
+  } catch (error) {
+    logError(error, req, { operation: 'shift_subtitles' });
     res.status(500).json({ error: error.message });
   }
 });

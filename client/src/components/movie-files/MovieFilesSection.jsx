@@ -7,6 +7,7 @@ import { notifyMovieFilesChanged } from '../../utils/movieFilesBus'
 import FileUploadModal from './FileUploadModal'
 import DownloadFromLinkModal from './DownloadFromLinkModal'
 import TranslateSubtitlesModal from './TranslateSubtitlesModal'
+import ShiftSubtitlesModal from './ShiftSubtitlesModal'
 
 const ACTIVE_STATUSES = ['pending', 'running']
 
@@ -152,6 +153,7 @@ function MovieFilesSection({ movieId }) {
   const [uploadKind, setUploadKind] = useState(null)
   const [showDownload, setShowDownload] = useState(false)
   const [translateKind, setTranslateKind] = useState(null)
+  const [shiftKind, setShiftKind] = useState(null)
   const [jobs, setJobs] = useState([])
   const [translationJobs, setTranslationJobs] = useState([])
   const [syncJobs, setSyncJobs] = useState([])
@@ -1201,6 +1203,16 @@ function MovieFilesSection({ movieId }) {
                         Sync timing
                       </button>
                     )}
+                    {row && SYNCED_KIND[asset.key] && (
+                      <button
+                        onClick={() => setShiftKind(asset.key)}
+                        disabled={busy || hasActiveSyncFor(asset.key)}
+                        title="Move all subtitle timings by a fixed amount (e.g. −1 hour)"
+                        className="text-sm text-blue-600 hover:text-blue-800 disabled:opacity-50"
+                      >
+                        Shift timing
+                      </button>
+                    )}
                     {row && (
                       <button
                         onClick={() => startQualityCheck(qualityLangForKind(asset.key))}
@@ -1348,6 +1360,19 @@ function MovieFilesSection({ movieId }) {
         translation={translateKind ? TRANSLATE_FROM_KIND[translateKind] : null}
         targetExists={!!(translateKind && fileForKind(TRANSLATE_FROM_KIND[translateKind].targetKind))}
         onCreated={refreshTranslationJobs}
+      />
+
+      <ShiftSubtitlesModal
+        isOpen={!!shiftKind}
+        onClose={() => setShiftKind(null)}
+        movieId={movieId}
+        subtitleKind={shiftKind}
+        label={SYNC_KIND_LABELS[shiftKind]}
+        syncedExists={!!(shiftKind && fileForKind(SYNCED_KIND[shiftKind]))}
+        onShifted={async () => {
+          await load()
+          notifyMovieFilesChanged(movieId)
+        }}
       />
     </div>
   )
