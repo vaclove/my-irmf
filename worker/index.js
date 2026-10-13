@@ -80,7 +80,10 @@ const BURN_CRF = process.env.SUBTITLE_BURN_CRF || '18';
 const BURN_UHD_PRESET = process.env.SUBTITLE_BURN_UHD_PRESET || 'faster';
 const BURN_UHD_CRF = process.env.SUBTITLE_BURN_UHD_CRF || '18';
 // Audio codecs that go into the MP4 untouched; anything else becomes AAC.
+// Preview clips are played in the browser, which can't decode AC-3/E-AC-3.
 const BURN_COPY_AUDIO = ['aac', 'ac3', 'eac3', 'mp3'];
+const BURN_COPY_AUDIO_PREVIEW = ['aac', 'mp3'];
+const copiesAudio = (codec, preview) => (preview ? BURN_COPY_AUDIO_PREVIEW : BURN_COPY_AUDIO).includes(codec);
 // Where burns render before upload: an Azure Files volume in production — a
 // feature film doesn't fit the replica's ephemeral disk (~8 GB).
 const BURN_TMPDIR = process.env.SUBTITLE_BURN_TMPDIR || process.env.MOVIE_TRANSCODE_TMPDIR || os.tmpdir();
@@ -1017,7 +1020,7 @@ function burnArgs({ inputUrl, media, layout, assPath, outputPath, startSeconds, 
     '-profile:v', 'high', '-tune', 'film', '-pix_fmt', 'yuv420p'
   );
   if (media.audio) {
-    if (BURN_COPY_AUDIO.includes(media.audio.codec)) args.push('-c:a', 'copy');
+    if (copiesAudio(media.audio.codec, !!lengthSeconds)) args.push('-c:a', 'copy');
     else args.push('-c:a', 'aac', '-b:a', media.audio.channels > 2 ? '640k' : '320k');
   }
   if (lengthSeconds) args.push('-t', lengthSeconds.toFixed(3));
@@ -1187,7 +1190,11 @@ async function processBurnJob(jobId, dequeueCount) {
       paired_ratio: ass.ratio,
       source: media.video,
       audio: media.audio
-        ? { codec: media.audio.codec, channels: media.audio.channels, copied: BURN_COPY_AUDIO.includes(media.audio.codec) }
+        ? {
+            codec: media.audio.codec,
+            channels: media.audio.channels,
+            copied: copiesAudio(media.audio.codec, job.kind === 'preview'),
+          }
         : null,
       start_seconds: startMs / 1000,
       length_seconds: lengthMs != null ? lengthMs / 1000 : media.duration,

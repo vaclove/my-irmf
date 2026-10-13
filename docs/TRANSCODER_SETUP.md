@@ -145,7 +145,8 @@ upload masters straight to Blob Storage through short-lived SAS URLs.
 `subtitle_burn` messages render the master with CS/EN subtitles burned into
 the picture (Files tab → *Screening export*): a ~60 s preview clip or the full
 movie, 1920x1080 (3840x2160 for 4K masters), H.264 CRF 18 with the original
-audio (AAC/AC-3/E-AC-3/MP3 copied, anything else re-encoded to AAC). The
+audio (AAC/AC-3/E-AC-3/MP3 copied, anything else re-encoded to AAC; preview
+clips re-encode AC-3/E-AC-3 too, as browsers can't play them). The
 worker crops a letterbox baked into the master, pushes a wider-than-16:9
 picture up so the subtitles sit in the black band below it. The output is a
 regular MP4 (VLC seeks fragmented MP4 badly: seconds of grey smear after a
