@@ -80,6 +80,15 @@ function msFromTimestamp(ts) {
   );
 }
 
+/** ms -> "01:02:03,456" (SRT form, always with hours) */
+function srtTimestamp(ms) {
+  const h = String(Math.floor(ms / 3600000)).padStart(2, '0');
+  const min = String(Math.floor((ms % 3600000) / 60000)).padStart(2, '0');
+  const s = String(Math.floor((ms % 60000) / 1000)).padStart(2, '0');
+  const mil = String(ms % 1000).padStart(3, '0');
+  return `${h}:${min}:${s},${mil}`;
+}
+
 function normalize(text) {
   let t = String(text == null ? '' : text);
   if (t.charCodeAt(0) === 0xfeff) t = t.slice(1); // strip BOM
@@ -137,12 +146,7 @@ function parseVtt(text) {
     if (!m) continue;
     const toSrtTs = (ts) => {
       const ms = msFromTimestamp(ts);
-      if (ms == null) return null;
-      const h = String(Math.floor(ms / 3600000)).padStart(2, '0');
-      const min = String(Math.floor((ms % 3600000) / 60000)).padStart(2, '0');
-      const s = String(Math.floor((ms % 60000) / 1000)).padStart(2, '0');
-      const mil = String(ms % 1000).padStart(3, '0');
-      return `${h}:${min}:${s},${mil}`;
+      return ms == null ? null : srtTimestamp(ms);
     };
     const start = toSrtTs(m[1]);
     const end = toSrtTs(m[2]);
@@ -164,6 +168,33 @@ function parseSubtitles(text, ext) {
   return parseSrt(text);
 }
 
+/**
+ * Move every cue by a fixed offset (negative = earlier). Cues that would end
+ * at or before 0 are dropped; a cue straddling 0 starts at 0. Anything after
+ * the end timestamp on the timing line (SRT position hints) is kept.
+ * @returns {{cues: Array, dropped: number}}
+ */
+function shiftCues(cues, offsetMs) {
+  const shifted = [];
+  for (const cue of cues) {
+    const m = cue.timing.match(TIMING_RE);
+    if (cue.startMs == null || cue.endMs == null || !m) {
+      throw new Error(`Cue ${cue.n} has an unreadable timing line: ${cue.timing}`);
+    }
+    const endMs = cue.endMs + offsetMs;
+    if (endMs <= 0) continue;
+    const startMs = Math.max(0, cue.startMs + offsetMs);
+    shifted.push({
+      ...cue,
+      n: shifted.length + 1,
+      timing: `${srtTimestamp(startMs)} --> ${srtTimestamp(endMs)}${m[3]}`,
+      startMs,
+      endMs,
+    });
+  }
+  return { cues: shifted, dropped: cues.length - shifted.length };
+}
+
 /** Serialize cues back to SRT (renumbered 1..N, LF endings, trailing newline). */
 function serializeSrt(cues) {
   return cues.map((c, i) => `${i + 1}\n${c.timing}\n${c.text}\n`).join('\n') + '\n';
@@ -183,5 +214,7 @@ module.exports = {
   parseVtt,
   parseSubtitles,
   serializeSrt,
+  shiftCues,
+  srtTimestamp,
   serializeVtt,
 };
