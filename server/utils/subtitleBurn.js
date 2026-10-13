@@ -8,6 +8,10 @@
  *   EN  directly above, light yellow, ~88 % of the CS size
  *   one language only: white and larger — two lines of it need much less
  *   room than two lines of each
+ *   added to a master with subtitles already burned in: the new language in
+ *   the second (yellow) colour at the CS size, at a height chosen in the app
+ *   so it clears the existing ones; the picture stays untouched (no crop,
+ *   centered, same size)
  *   Roboto Medium with a black outline and a soft shadow. Sizes are fractions
  *   of the canvas height, so 1080p and 2160p renders look the same on screen.
  *
@@ -76,11 +80,12 @@ function metrics(canvasHeight, { single = false } = {}) {
 
 /**
  * Canvas and picture placement for a master.
- * @param {{width:number, height:number, sar?:number, crop?:{x,y,w,h}|null, single?:boolean}} source
- *   coded size, sample aspect ratio, the letterbox crop (if any), and
- *   whether only one language is burned in
+ * @param {{width:number, height:number, sar?:number, crop?:{x,y,w,h}|null, single?:boolean, centered?:boolean}} source
+ *   coded size, sample aspect ratio, the letterbox crop (if any), whether
+ *   only one language is burned in, and whether to keep the picture centered
+ *   (subtitles added to burned-in ones are placed by hand against it)
  */
-function computeLayout({ width, height, sar = 1, crop = null, single = false }) {
+function computeLayout({ width, height, sar = 1, crop = null, single = false, centered = false }) {
   const uhd = width > 2560 || height > 1440;
   const W = uhd ? 3840 : 1920;
   const H = uhd ? 2160 : 1080;
@@ -93,7 +98,10 @@ function computeLayout({ width, height, sar = 1, crop = null, single = false }) 
   const free = H - ph;
   // Centered when the band below already holds two lines of each language
   // (or of the only one), otherwise pushed up (at most to the top edge) to make room.
-  const py = free / 2 >= m.blockHeight ? Math.floor(free / 4) * 2 : Math.max(0, Math.floor((free - m.blockHeight) / 2) * 2);
+  const py =
+    centered || free / 2 >= m.blockHeight
+      ? Math.floor(free / 4) * 2
+      : Math.max(0, Math.floor((free - m.blockHeight) / 2) * 2);
   return {
     canvas: { width: W, height: H },
     picture: { x: Math.floor((W - pw) / 4) * 2, y: py, width: pw, height: ph },
@@ -318,13 +326,19 @@ const joinAss = (items) => items.map((i) => i.ass).join('\\N');
  * @param {number} [opts.offsetMs] shift (preview clips start at 0)
  * @param {number} [opts.lengthMs] clip events to [0, lengthMs] after the shift
  * @param {string} [opts.title]
+ * @param {number} [opts.addedPosition] the master already has subtitles
+ *   burned in: bottom edge of the added language as a fraction of the canvas
+ *   height
  * @returns {{script: string, mode: string, ratio: number|null, events: number}}
  */
-function buildAss({ cs = [], en = [], layout, offsetMs = 0, lengthMs = null, title = '' }) {
+function buildAss({ cs = [], en = [], layout, offsetMs = 0, lengthMs = null, title = '', addedPosition = null }) {
   const { width: W, height: H } = layout.canvas;
   const m = layout.metrics;
   const side = Math.round(W * MARGIN_SIDE);
-  const { layout: mode, ratio } = chooseLayout(cs, en);
+  const chosen = chooseLayout(cs, en);
+  const added = addedPosition != null;
+  const mode = added ? 'added' : chosen.layout;
+  const ratio = added ? null : chosen.ratio;
 
   let events = [];
   if (mode === 'paired') {
@@ -368,10 +382,18 @@ function buildAss({ cs = [], en = [], layout, offsetMs = 0, lengthMs = null, tit
     .filter((e) => e.end > e.start && e.end > 0)
     .sort((a, b) => a.start - b.start);
 
-  const enMarginV = mode === 'zones' ? m.enZoneMargin : m.margin;
+  let csMarginV = m.margin;
+  let enMarginV = mode === 'zones' ? m.enZoneMargin : m.margin;
   // One language: the same large white style whichever it is.
-  const csStyle = mode === 'single' ? [m.singleSize, CS_COLOUR] : [m.csSize, CS_COLOUR];
-  const enStyle = mode === 'single' ? [m.singleSize, CS_COLOUR] : [m.enSize, EN_COLOUR];
+  let csStyle = mode === 'single' ? [m.singleSize, CS_COLOUR] : [m.csSize, CS_COLOUR];
+  let enStyle = mode === 'single' ? [m.singleSize, CS_COLOUR] : [m.enSize, EN_COLOUR];
+  if (added) {
+    // The burned-in language is the white one: the added one is yellow,
+    // bottom-anchored at the chosen height (growing upwards).
+    const marginV = Math.max(m.margin, Math.round(H * (1 - Math.min(1, Math.max(0, addedPosition)))));
+    csStyle = enStyle = [m.csSize, EN_COLOUR];
+    csMarginV = enMarginV = marginV;
+  }
   const lines = [
     '[Script Info]',
     `Title: ${String(title).replace(/[\r\n]/g, ' ')}`,
@@ -384,7 +406,7 @@ function buildAss({ cs = [], en = [], layout, offsetMs = 0, lengthMs = null, tit
     '',
     '[V4+ Styles]',
     'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-    styleLine('CS', ...csStyle, side, m.margin, m),
+    styleLine('CS', ...csStyle, side, csMarginV, m),
     styleLine('EN', ...enStyle, side, enMarginV, m),
     // The spacer line between EN and CS in a paired block.
     styleLine('Gap', Math.max(1, Math.round(m.gap / LINE_HEIGHT)), CS_COLOUR, side, m.margin, m),

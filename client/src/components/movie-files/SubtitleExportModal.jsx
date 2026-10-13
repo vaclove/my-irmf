@@ -1,14 +1,16 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import Modal from '../Modal'
 import { subtitleBurnApi } from '../../utils/api'
 import { useToast } from '../../contexts/ToastContext'
+import BurnedInPositioner from './BurnedInPositioner'
 
 const LANGS = [
   { lang: 'cs', label: 'Czech', original: 'subtitles_cs', synced: 'subtitles_cs_synced' },
   { lang: 'en', label: 'English', original: 'subtitles_en', synced: 'subtitles_en_synced' },
 ]
 const MAX_LINE_CHARS = 42
+const DEFAULT_ADDED_POSITION = 0.78
 
 /** Default per language: the synced file when there is one, else the original. */
 function defaultChoice(sources, { original, synced }) {
@@ -25,7 +27,11 @@ function parseTime(text) {
   return t.split(':').reduce((acc, part) => acc * 60 + Number(part), 0)
 }
 
-function layoutText(check) {
+function layoutText(check, existingLang) {
+  if (existingLang) {
+    const existing = LANGS.find((l) => l.lang === existingLang).label
+    return `Added to the ${existing} subtitles already burned into the picture: yellow, at the height set below. The picture is left as it is.`
+  }
   if (check.layout === 'paired') {
     return `CS and EN share timings (${Math.round(check.paired_ratio * 100)} % of cues match): each subtitle renders as one block, EN above CS.`
   }
@@ -38,16 +44,31 @@ function layoutText(check) {
 /**
  * Start a burned-in subtitle export: choose which CS/EN files to burn in
  * (synced copies preferred), see readability warnings for them, and for a
- * preview optionally where the clip starts.
+ * preview optionally where the clip starts. When the master already has one
+ * language burned in, the other one is placed against the movie's preview.
+ * `lastAdded` (the movie's latest export over burned-in subtitles) prefills
+ * that.
  */
-function SubtitleExportModal({ onClose, movieId, kind, sources, onCreated }) {
+function SubtitleExportModal({ onClose, movieId, kind, sources, lastAdded, onCreated }) {
   const { info, error: showError } = useToast()
   // Mounted per opening (the parent renders it only while open), so the
   // defaults come from the files as they are now.
+  const [existingLang, setExistingLang] = useState(lastAdded?.existing_subtitles_lang || '')
+  const [position, setPosition] = useState(
+    lastAdded?.added_position != null ? Number(lastAdded.added_position) : DEFAULT_ADDED_POSITION
+  )
   const [choice, setChoice] = useState(() => ({
-    cs: defaultChoice(sources, LANGS[0]),
-    en: defaultChoice(sources, LANGS[1]),
+    cs: lastAdded?.existing_subtitles_lang === 'cs' ? '' : defaultChoice(sources, LANGS[0]),
+    en: lastAdded?.existing_subtitles_lang === 'en' ? '' : defaultChoice(sources, LANGS[1]),
   }))
+  const onPositionChange = useCallback((p) => setPosition(p), [])
+
+  const changeExisting = (lang) => {
+    setExistingLang(lang)
+    if (lang) setChoice((c) => ({ ...c, [lang]: '' }))
+  }
+  const addedLang = existingLang ? LANGS.find((l) => l.lang !== existingLang) : null
+  const addedKind = addedLang ? choice[addedLang.lang] : ''
   const [startText, setStartText] = useState('')
   const [check, setCheck] = useState(null)
   const [checkError, setCheckError] = useState(null)
@@ -85,7 +106,8 @@ function SubtitleExportModal({ onClose, movieId, kind, sources, onCreated }) {
 
   const previewStart = parseTime(startText)
   const startInvalid = kind === 'preview' && Number.isNaN(previewStart)
-  const canSubmit = (choice.cs || choice.en) && !startInvalid && !submitting && !checkError
+  const canSubmit =
+    (choice.cs || choice.en) && (!existingLang || addedKind) && !startInvalid && !submitting && !checkError
 
   const submit = async () => {
     setSubmitting(true)
@@ -96,6 +118,8 @@ function SubtitleExportModal({ onClose, movieId, kind, sources, onCreated }) {
         cs: choice.cs || null,
         en: choice.en || null,
         preview_start_seconds: kind === 'preview' ? previewStart : null,
+        existing_subtitles_lang: existingLang || null,
+        added_position: existingLang ? position : null,
       })
       info(kind === 'preview' ? 'Preview clip queued' : 'Export queued')
       if (onCreated) await onCreated()
@@ -115,7 +139,7 @@ function SubtitleExportModal({ onClose, movieId, kind, sources, onCreated }) {
       isOpen
       onClose={onClose}
       title={kind === 'preview' ? 'Preview clip with burned-in subtitles' : 'Export with burned-in subtitles'}
-      size="medium"
+      size={existingLang ? 'large' : 'medium'}
     >
       <div className="space-y-4">
         <p className="text-sm text-gray-600">
@@ -131,15 +155,47 @@ function SubtitleExportModal({ onClose, movieId, kind, sources, onCreated }) {
               <select
                 value={choice[l.lang]}
                 onChange={(e) => setChoice((c) => ({ ...c, [l.lang]: e.target.value }))}
-                className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                disabled={existingLang === l.lang}
+                className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm disabled:bg-gray-100"
               >
-                <option value="">Don&apos;t burn in</option>
+                <option value="">{existingLang === l.lang ? 'Already burned in' : 'Don\u2019t burn in'}</option>
                 {sources[l.synced] && <option value={l.synced}>Synced</option>}
                 {sources[l.original] && <option value={l.original}>Original</option>}
               </select>
             </div>
           ))}
         </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Subtitles already burned into the master
+          </label>
+          <select
+            value={existingLang}
+            onChange={(e) => changeExisting(e.target.value)}
+            className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+          >
+            <option value="">None</option>
+            {LANGS.map((l) => (
+              <option key={l.lang} value={l.lang}>
+                {l.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {existingLang && !addedKind && (
+          <div className="text-sm text-gray-500">Choose the {addedLang.label} subtitles to add.</div>
+        )}
+        {existingLang && addedKind && (
+          <BurnedInPositioner
+            movieId={movieId}
+            subtitleKind={addedKind}
+            position={position}
+            onChange={onPositionChange}
+            autoDetect={lastAdded?.added_position == null}
+          />
+        )}
 
         {kind === 'preview' && (
           <div>
@@ -162,7 +218,7 @@ function SubtitleExportModal({ onClose, movieId, kind, sources, onCreated }) {
         )}
         {check && !checking && (
           <div className="rounded-md bg-gray-50 border border-gray-200 p-3 text-sm text-gray-700 space-y-1">
-            <div>{layoutText(check)}</div>
+            <div>{layoutText(check, existingLang)}</div>
             {LANGS.filter(({ lang }) => check[lang]).map(({ lang, label }) => (
               <div key={lang}>
                 {label}: {check[lang].cues} subtitles

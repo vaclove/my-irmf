@@ -209,6 +209,8 @@ export const subtitleSyncApi = {
 export const subtitleBurnApi = {
   getForMovie: (movieId) => api.get(`/subtitle-burns/movie/${movieId}`),
   check: (data) => api.post('/subtitle-burns/check', data),
+  // Direct read URL of the preview proxy (for positioning over burned-in subtitles).
+  previewSource: (movieId) => api.get(`/subtitle-burns/movie/${movieId}/preview-source`),
   create: (data) => api.post('/subtitle-burns', data),
   cancel: (id) => api.post(`/subtitle-burns/${id}/cancel`),
   retry: (id) => api.post(`/subtitle-burns/${id}/retry`),
