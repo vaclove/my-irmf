@@ -7,6 +7,11 @@ import MovieFormModal from '../components/MovieFormModal'
 import { formatCountryWithFlags, getCountryName } from '../utils/countryFlags'
 import { formatLanguageCodesForDisplay } from '../utils/languageCodes'
 
+const NO_FILES_SECTION_KEYS = ['workshop', 'concert', 'discussion', 'other']
+// Matched against diacritics-stripped, lowercased Czech section names, since
+// side-program sections are custom per edition and have no fixed key
+const NO_FILES_SECTION_LABELS = ['doprovodn', 'workshop', 'diskuz', 'diskus', 'koncert', 'ostatn']
+
 function Movies() {
   const navigate = useNavigate()
   const { error: showError } = useToast()
@@ -65,6 +70,16 @@ function Movies() {
   const getSectionColor = useCallback((sectionKey) => {
     const section = sections.find(s => s.value === sectionKey)
     return section?.color || '#6B7280' // Default gray color
+  }, [sections])
+
+  // Non-screening entries (no section, side program, workshop, discussion, concert, other)
+  // have no movie file or subtitles to track
+  const hasNoFiles = useCallback((movie) => {
+    if (!movie.section) return true
+    if (NO_FILES_SECTION_KEYS.includes(movie.section)) return true
+    const label = sections.find(s => s.value === movie.section)?.label || ''
+    const normalized = label.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+    return NO_FILES_SECTION_LABELS.some(prefix => normalized.startsWith(prefix))
   }, [sections])
 
   useEffect(() => {
@@ -475,7 +490,9 @@ function Movies() {
                       )}
                     </td>
                   )}
-                  {visibleColumns.files && (
+                  {visibleColumns.files && (hasNoFiles(movie) ? (
+                    <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} text-sm`} />
+                  ) : (
                     <td
                       className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} text-sm cursor-pointer`}
                       onClick={(e) => {
@@ -513,7 +530,7 @@ function Movies() {
                         )}
                       </div>
                     </td>
-                  )}
+                  ))}
                   {visibleColumns.runtime && (
                     <td className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} text-sm text-gray-500`}>
                       {movie.runtime ? `${movie.runtime} min` : '-'}
