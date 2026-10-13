@@ -29,6 +29,8 @@ const Programming = () => {
     venue_id: '',
     scheduled_date: '',
     scheduled_time: '',
+    all_day: false,
+    end_date: '',
     movie_id: '',
     block_id: '',
     discussion_time: 0,
@@ -71,7 +73,9 @@ const Programming = () => {
 
   // Check for overlaps when form data changes
   useEffect(() => {
-    if (showForm) {
+    if (showForm && formData.all_day) {
+      setOverlapWarning(null)
+    } else if (showForm) {
       const timeoutId = setTimeout(() => {
         checkOverlap(
           formData.venue_id,
@@ -85,7 +89,7 @@ const Programming = () => {
 
       return () => clearTimeout(timeoutId)
     }
-  }, [formData.venue_id, formData.scheduled_date, formData.scheduled_time, formData.movie_id, formData.block_id, formData.discussion_time, showForm])
+  }, [formData.venue_id, formData.scheduled_date, formData.scheduled_time, formData.all_day, formData.movie_id, formData.block_id, formData.discussion_time, showForm])
 
   const fetchData = async () => {
     try {
@@ -161,6 +165,8 @@ const Programming = () => {
       venue_id: '',
       scheduled_date: selectedDate || '',
       scheduled_time: '',
+      all_day: false,
+      end_date: '',
       movie_id: '',
       block_id: '',
       discussion_time: 0,
@@ -240,6 +246,8 @@ const Programming = () => {
       venue_id: selectedVenue || '',
       scheduled_date: selectedDate || '',
       scheduled_time: '',
+      all_day: false,
+      end_date: '',
       movie_id: '',
       block_id: '',
       discussion_time: 0,
@@ -259,6 +267,8 @@ const Programming = () => {
       venue_id: venueId,
       scheduled_date: selectedDate || '',
       scheduled_time: time,
+      all_day: false,
+      end_date: '',
       movie_id: '',
       block_id: '',
       discussion_time: 0,
@@ -296,6 +306,8 @@ const Programming = () => {
       venue_id: entry.venue_id,
       scheduled_date: formatDate(entry.scheduled_date),
       scheduled_time: formatTime(entry.scheduled_time),
+      all_day: entry.all_day || false,
+      end_date: entry.end_date || '',
       movie_id: entry.movie_id || '',
       block_id: entry.block_id || '',
       discussion_time: entry.discussion_time || 0,
@@ -315,8 +327,13 @@ const Programming = () => {
   const handleSubmit = async (e) => {
     e.preventDefault()
     
-    if (!formData.venue_id || !formData.scheduled_date || !formData.scheduled_time) {
+    if (!formData.venue_id || !formData.scheduled_date || (!formData.all_day && !formData.scheduled_time)) {
       error('Please fill in venue, date, and time')
+      return
+    }
+
+    if (formData.all_day && formData.end_date && formData.end_date < formData.scheduled_date) {
+      error('End date cannot be before the start date')
       return
     }
 
@@ -335,6 +352,8 @@ const Programming = () => {
       const entryData = {
         edition_id: selectedEdition.id,
         ...formData,
+        scheduled_time: formData.all_day ? null : formData.scheduled_time,
+        end_date: formData.all_day && formData.end_date ? formData.end_date : null,
         movie_id: formData.movie_id || null,
         block_id: formData.block_id || null,
         discussion_time: parseInt(formData.discussion_time) || 0
@@ -405,6 +424,7 @@ const Programming = () => {
   }
 
   const formatTime = (timeString) => {
+    if (!timeString) return 'All day'
     return timeString.slice(0, 5) // Remove seconds
   }
 
@@ -676,7 +696,12 @@ const Programming = () => {
                   </label>
                   <select
                     value={formData.scheduled_date}
-                    onChange={(e) => setFormData({...formData, scheduled_date: e.target.value})}
+                    onChange={(e) => setFormData({
+                      ...formData,
+                      scheduled_date: e.target.value,
+                      // Drop an end date that would no longer be after the start
+                      end_date: formData.end_date > e.target.value ? formData.end_date : ''
+                    })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                     required
                   >
@@ -690,27 +715,66 @@ const Programming = () => {
                 </div>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Time *
+              <div className="flex items-center">
+                <input
+                  type="checkbox"
+                  id="all_day"
+                  checked={formData.all_day}
+                  onChange={(e) => setFormData({...formData, all_day: e.target.checked})}
+                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                />
+                <label htmlFor="all_day" className="ml-2 block text-sm font-medium text-gray-700">
+                  All-day event
                 </label>
-                <select
-                  value={formData.scheduled_time}
-                  onChange={(e) => setFormData({...formData, scheduled_time: e.target.value})}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
-                >
-                  <option value="">Select Time</option>
-                  {generateTimeSlots().map(time => (
-                    <option key={time} value={time}>
-                      {time}
-                    </option>
-                  ))}
-                </select>
+                <span className="ml-2 text-xs text-gray-500">(No time; listed at the bottom of each day on the public schedule)</span>
               </div>
 
+              {formData.all_day ? (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    End Date
+                  </label>
+                  <select
+                    value={formData.end_date}
+                    onChange={(e) => setFormData({...formData, end_date: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">Same day (single-day event)</option>
+                    {getFestivalDates()
+                      .filter(date => !formData.scheduled_date || date.value > formData.scheduled_date)
+                      .map(date => (
+                        <option key={date.value} value={date.value}>
+                          {date.label}
+                        </option>
+                      ))}
+                  </select>
+                  <p className="text-xs text-gray-500 mt-1">
+                    For events running over several days, e.g. an exhibition
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Time *
+                  </label>
+                  <select
+                    value={formData.scheduled_time}
+                    onChange={(e) => setFormData({...formData, scheduled_time: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    required
+                  >
+                    <option value="">Select Time</option>
+                    {generateTimeSlots().map(time => (
+                      <option key={time} value={time}>
+                        {time}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               {/* Overlap Warning - moved here after time selection */}
-              {overlapWarning && (
+              {overlapWarning && !formData.all_day && (
                 <div className="bg-yellow-50 border border-yellow-200 rounded-md p-4">
                   <div className="flex items-start">
                     <div className="flex-shrink-0">
@@ -736,7 +800,7 @@ const Programming = () => {
                 </div>
               )}
 
-              {checkingOverlap && (
+              {checkingOverlap && !formData.all_day && (
                 <div className="bg-blue-50 border border-blue-200 rounded-md p-4">
                   <div className="flex items-center">
                     <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-3"></div>
@@ -886,6 +950,7 @@ const Programming = () => {
                 </div>
               </div>
 
+              {!formData.all_day && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Additional Discussion Time (minutes)
@@ -899,6 +964,7 @@ const Programming = () => {
                   max="120"
                 />
               </div>
+              )}
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
@@ -1009,14 +1075,14 @@ const Programming = () => {
                 </button>
                 <button
                   type="submit"
-                  disabled={overlapWarning || checkingOverlap}
+                  disabled={!formData.all_day && (overlapWarning || checkingOverlap)}
                   className={`px-4 py-2 rounded-md transition-colors duration-200 ${
-                    overlapWarning || checkingOverlap
+                    !formData.all_day && (overlapWarning || checkingOverlap)
                       ? 'bg-gray-400 text-gray-700 cursor-not-allowed'
                       : 'bg-blue-600 text-white hover:bg-blue-700'
                   }`}
                 >
-                  {checkingOverlap ? 'Checking...' : editingEntry ? 'Update' : 'Add'}
+                  {checkingOverlap && !formData.all_day ? 'Checking...' : editingEntry ? 'Update' : 'Add'}
                 </button>
               </div>
             </form>
@@ -1093,6 +1159,7 @@ const Programming = () => {
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm font-medium text-gray-900">
                           {formatDate(entry.scheduled_date)}
+                          {entry.end_date && ` – ${formatDate(entry.end_date)}`}
                         </div>
                         <div className="text-sm text-gray-500">
                           {formatTime(entry.scheduled_time)}
@@ -1146,7 +1213,7 @@ const Programming = () => {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm text-gray-900">
-                        {entry.base_runtime ?? (entry.total_runtime - (entry.discussion_time || 0))} min
+                        {entry.all_day ? '—' : `${entry.base_runtime ?? (entry.total_runtime - (entry.discussion_time || 0))} min`}
                       </div>
                       {entry.discussion_time > 0 && (
                         <div className="text-xs text-gray-500">

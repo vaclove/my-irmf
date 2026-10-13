@@ -37,6 +37,7 @@ router.get('/screenings', async (req, res) => {
       LEFT JOIN movies m ON ps.movie_id = m.id
       LEFT JOIN movie_blocks mb ON ps.block_id = mb.id
       WHERE ps.edition_id = $1
+        AND ps.scheduled_time IS NOT NULL -- all-day events have no door to scan at
         AND (
           ps.scheduled_date > $2
           OR (ps.scheduled_date = $2 AND (ps.scheduled_time + (ps.total_runtime || ' minutes')::interval)::time >= $3)

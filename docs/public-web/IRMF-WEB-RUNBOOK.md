@@ -921,3 +921,23 @@ the FilmFreeway export by migration 056 (fills empty fields only).
 
 Backups of the previous template: `~/backups/MoviesPage-pre-trailer-links-20261007-0013.php`
 on both accounts.
+
+## 15. All-day events in the programme (2026-10-13)
+
+Data lives in my.irmf.cz: a programme entry with **no time** is an all-day event (exhibition,
+VR zone, …) and may run over several days (`programming_schedule.end_date`, migration 061). In the
+admin it is the "All-day event" checkbox in the entry form, with an optional end date. It still
+links a film record, like every other accompanying event, so it has a detail page and a still.
+
+`/api/public/programming` returns a multi-day event **once per day it covers** (`scheduled_date`
+= that day) with `all_day: true`, `start_date`, `end_date`, sorted after the day's timed entries;
+`?date=` matches every covered day. Film screenings carry `all_day` + `end_date`.
+
+`MoviesSchedule.php` (identical on both sites) lists all-day entries at the bottom of each day under
+„Celodenní program" / "All-day events"; the time column says „Celý den" / "All day", plus the span
+(„22.–25. 10.", "22–25 Oct") for multi-day events, and no runtime. `MoviesPage.php` shows such a
+screening as „čt 22. 10. – ne 25. 10. celý den" and counts it as upcoming until its last day.
+Without all-day data both templates behave exactly as before.
+
+Backups of the previous templates: `~/backups/MoviesSchedule-pre-all-day-20261013.php` and
+`~/backups/MoviesPage-pre-all-day-20261013.php` on both accounts.

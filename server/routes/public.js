@@ -463,6 +463,7 @@ router.get('/public/movies', async (req, res) => {
           ps.movie_id,
           ps.scheduled_date::text as scheduled_date,
           ps.scheduled_time,
+          ps.end_date::text as end_date,
           ps.ticket_link,
           v.name_cs as venue_name_cs,
           v.name_en as venue_name_en,
@@ -484,6 +485,7 @@ router.get('/public/movies', async (req, res) => {
           bm.movie_id,
           ps.scheduled_date::text as scheduled_date,
           ps.scheduled_time,
+          ps.end_date::text as end_date,
           ps.ticket_link,
           v.name_cs as venue_name_cs,
           v.name_en as venue_name_en,
@@ -509,6 +511,8 @@ router.get('/public/movies', async (req, res) => {
           screening_id: screening.screening_id,
           date: screening.scheduled_date,
           time: screening.scheduled_time,
+          all_day: !screening.scheduled_time,
+          end_date: screening.end_date,
           venue_cs: screening.venue_name_cs,
           venue_en: screening.venue_name_en,
           ticket_link: screening.ticket_link,
@@ -611,6 +615,7 @@ router.get('/public/movies/:id', async (req, res) => {
         ps.id as screening_id,
         ps.scheduled_date::text as scheduled_date,
         ps.scheduled_time,
+        ps.end_date::text as end_date,
         ps.ticket_link,
         ps.free_entry,
         v.name_cs as venue_name_cs,
@@ -632,6 +637,7 @@ router.get('/public/movies/:id', async (req, res) => {
         ps.id as screening_id,
         ps.scheduled_date::text as scheduled_date,
         ps.scheduled_time,
+        ps.end_date::text as end_date,
         ps.ticket_link,
         ps.free_entry,
         v.name_cs as venue_name_cs,
@@ -655,6 +661,8 @@ router.get('/public/movies/:id', async (req, res) => {
         screening_id: screening.screening_id,
         date: screening.scheduled_date,
         time: screening.scheduled_time,
+        all_day: !screening.scheduled_time,
+        end_date: screening.end_date,
         venue_cs: screening.venue_name_cs,
         venue_en: screening.venue_name_en,
         ticket_link: screening.ticket_link,
@@ -726,11 +734,49 @@ router.get('/public/programming', async (req, res) => {
       offset = 0
     } = req.query;
 
+    // A multi-day all-day entry becomes one row per day it covers, so consumers that
+    // group by scheduled_date list it on every day; start_date/end_date give the span
+    let fromWhere = `
+      FROM programming_schedule ps
+      CROSS JOIN LATERAL generate_series(
+        ps.scheduled_date::timestamp,
+        COALESCE(ps.end_date, ps.scheduled_date)::timestamp,
+        interval '1 day'
+      ) AS day(d)
+      JOIN venues v ON ps.venue_id = v.id
+      JOIN editions e ON ps.edition_id = e.id
+      LEFT JOIN movies m ON ps.movie_id = m.id
+      LEFT JOIN movie_blocks mb ON ps.block_id = mb.id
+      WHERE ps.hidden_from_public = false
+    `;
+    
+    const params = [];
+    let paramCount = 0;
+
+    // Add filters
+    if (edition_id) {
+      params.push(edition_id);
+      fromWhere += ` AND ps.edition_id = $${++paramCount}`;
+    }
+    
+    if (venue_id) {
+      params.push(venue_id);
+      fromWhere += ` AND ps.venue_id = $${++paramCount}`;
+    }
+    
+    if (date) {
+      params.push(date);
+      fromWhere += ` AND day.d::date = $${++paramCount}::date`;
+    }
+
     let query = `
       SELECT
         ps.id,
-        ps.scheduled_date::text as scheduled_date,
+        day.d::date::text as scheduled_date,
         ps.scheduled_time,
+        (ps.scheduled_time IS NULL) as all_day,
+        ps.scheduled_date::text as start_date,
+        COALESCE(ps.end_date, ps.scheduled_date)::text as end_date,
         ps.total_runtime,
         ps.title_override_cs,
         ps.title_override_en,
@@ -758,56 +804,21 @@ router.get('/public/programming', async (req, res) => {
         mb.description_en as block_description_en,
         e.year as edition_year,
         e.name as edition_name
-      FROM programming_schedule ps
-      JOIN venues v ON ps.venue_id = v.id
-      JOIN editions e ON ps.edition_id = e.id
-      LEFT JOIN movies m ON ps.movie_id = m.id
-      LEFT JOIN movie_blocks mb ON ps.block_id = mb.id
-      WHERE ps.hidden_from_public = false
+      ${fromWhere}
     `;
-    
-    const params = [];
-    let paramCount = 0;
 
-    // Add filters
-    if (edition_id) {
-      params.push(edition_id);
-      query += ` AND ps.edition_id = $${++paramCount}`;
-    }
-    
-    if (venue_id) {
-      params.push(venue_id);
-      query += ` AND ps.venue_id = $${++paramCount}`;
-    }
-    
-    if (date) {
-      params.push(date);
-      query += ` AND ps.scheduled_date = $${++paramCount}`;
-    }
+    // Get total count for pagination (before the pagination params are added)
+    const countResult = await pool.query(`SELECT COUNT(*) as total ${fromWhere}`, params);
 
-    // Order by date and time
-    query += ` ORDER BY ps.scheduled_date, ps.scheduled_time, v.sort_order`;
+    // Order by date and time, all-day entries last within each day
+    query += ` ORDER BY day.d, ps.scheduled_time NULLS LAST, v.sort_order`;
 
     // Add pagination
-    params.push(limit);
-    query += ` LIMIT $${++paramCount}`;
-    params.push(offset);
-    query += ` OFFSET $${++paramCount}`;
+    const pageParams = [...params, limit, offset];
+    query += ` LIMIT $${paramCount + 1} OFFSET $${paramCount + 2}`;
 
-    const result = await pool.query(query, params);
+    const result = await pool.query(query, pageParams);
 
-    // Get total count for pagination
-    let countQuery = `
-      SELECT COUNT(*) as total
-      FROM programming_schedule ps
-      WHERE ps.hidden_from_public = false
-    `;
-    
-    if (edition_id) countQuery += ` AND ps.edition_id = '${edition_id}'`;
-    if (venue_id) countQuery += ` AND ps.venue_id = '${venue_id}'`;
-    if (date) countQuery += ` AND ps.scheduled_date = '${date}'`;
-    
-    const countResult = await pool.query(countQuery);
     const total = parseInt(countResult.rows[0].total);
 
     // Add image URLs to movies and fetch block movies if needed
@@ -892,6 +903,8 @@ router.get('/public/programming/:id', async (req, res) => {
         ps.id,
         ps.scheduled_date::text as scheduled_date,
         ps.scheduled_time,
+        (ps.scheduled_time IS NULL) as all_day,
+        ps.end_date::text as end_date,
         ps.base_runtime,
         ps.discussion_time,
         ps.total_runtime,
