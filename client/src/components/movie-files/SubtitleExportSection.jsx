@@ -13,7 +13,12 @@ const PHASE_LABELS = {
   uploading: 'Uploading',
 }
 const KIND_LABELS = { preview: 'Preview clip', full: 'Full export' }
-const LAYOUT_LABELS = { paired: 'CS+EN paired', zones: 'CS+EN separate timings', single: 'one language' }
+const LAYOUT_LABELS = {
+  paired: 'CS+EN paired',
+  zones: 'CS+EN separate timings',
+  single: 'one language',
+  added: 'added to burned-in subtitles',
+}
 
 function languagesOf(job) {
   return [job.subtitle_cs_ref && 'CS', job.subtitle_en_ref && 'EN'].filter(Boolean).join(' + ')
@@ -241,6 +246,7 @@ function SubtitleExportSection({ movieId }) {
           movieId={movieId}
           kind={modalKind}
           sources={sources}
+          lastAdded={jobs.find((j) => j.existing_subtitles_lang)}
           onCreated={load}
         />
       )}

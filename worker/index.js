@@ -1136,7 +1136,10 @@ async function processBurnJob(jobId, dequeueCount) {
     if (!media?.duration || !media.video) throw new Error('Could not read the source video');
     await pool.query('UPDATE subtitle_burn_jobs SET duration_seconds = $2 WHERE id = $1', [jobId, media.duration]);
 
-    const crop = await detectLetterbox({
+    // Over subtitles already burned in, the picture stays exactly as it is
+    // (they may sit in a letterbox bar) so the position chosen in the app holds.
+    const overBurnedIn = !!job.existing_subtitles_lang;
+    const crop = overBurnedIn ? null : await detectLetterbox({
       inputUrl,
       durationSeconds: media.duration,
       width: media.video.width,
@@ -1146,7 +1149,12 @@ async function processBurnJob(jobId, dequeueCount) {
     });
     activeChild = null;
     if (cancelled) throw cancelledError();
-    const layout = computeLayout({ ...media.video, crop, single: !cs.length || !en.length });
+    const layout = computeLayout({
+      ...media.video,
+      crop,
+      single: !cs.length || !en.length,
+      centered: overBurnedIn,
+    });
 
     const durationMs = media.duration * 1000;
     let startMs = 0;
@@ -1158,7 +1166,15 @@ async function processBurnJob(jobId, dequeueCount) {
           ? Math.max(0, Math.min(Number(job.preview_start_seconds) * 1000, durationMs - lengthMs))
           : densestWindowStart([cs, en], lengthMs, durationMs);
     }
-    const ass = buildAss({ cs, en, layout, offsetMs: startMs, lengthMs, title: movie.name_cs || movie.name_en || '' });
+    const ass = buildAss({
+      cs,
+      en,
+      layout,
+      offsetMs: startMs,
+      lengthMs,
+      title: movie.name_cs || movie.name_en || '',
+      addedPosition: overBurnedIn ? Number(job.added_position) : null,
+    });
     fs.writeFileSync(assPath, ass.script, 'utf8');
 
     const fileName = burnFileName(movie, job);

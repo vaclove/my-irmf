@@ -157,6 +157,17 @@ inside the 8 h replica timeout). Knobs: `SUBTITLE_BURN_PRESET`/`_CRF`,
 `SUBTITLE_BURN_UHD_PRESET`/`_CRF`; `SUBTITLE_BURN_ENABLED=false` disables it
 app-side.
 
+**Masters with subtitles already burned in** (e.g. a foreign film with Czech
+subtitles in the picture): the export dialog's *Subtitles already burned into
+the master* option burns in only the other language, yellow, at a height
+chosen against the movie's preview (`added_position`, bottom edge as a
+fraction of the 16:9 frame). The browser detects the burned-in subtitles in
+frames of the preview proxy (`client/src/utils/burnedInDetect.js`: outlined
+bright text rows, sampled evenly and at the added subtitles' cue times) and
+suggests a place just above them. It reads the proxy straight from Blob
+Storage, so the blob CORS rule must allow `GET` from the app origins. Such
+exports keep the picture as it is: no letterbox crop, centered.
+
 The scratch volume is a 300 GB share in its own storage account in the job's
 region, mounted at `/mnt/burn` (`SUBTITLE_BURN_TMPDIR`); the worker deletes
 each render after the upload and sweeps leftovers older than 12 h:

@@ -68,7 +68,7 @@ function pickSubtitles(sources, { cs, en }) {
 }
 
 /** Shared validation + insert + enqueue used by create and retry. */
-async function createJob(req, res, { movieId, kind, cs, en, previewStart, operation }) {
+async function createJob(req, res, { movieId, kind, cs, en, previewStart, existingLang, addedPosition, operation }) {
   const movieRes = await pool.query('SELECT id FROM movies WHERE id = $1', [movieId]);
   if (movieRes.rows.length === 0) return res.status(404).json({ error: 'Movie not found' });
   if (!KINDS.includes(kind)) return res.status(400).json({ error: "kind must be 'preview' or 'full'" });
@@ -81,6 +81,19 @@ async function createJob(req, res, { movieId, kind, cs, en, previewStart, operat
   if (!master) return res.status(400).json({ error: 'The movie has no master file' });
   const picked = pickSubtitles(sources, { cs, en });
   if (picked.error) return res.status(400).json({ error: picked.error });
+  // Over subtitles already burned in: only the other language, at a position.
+  if (existingLang != null) {
+    if (!['cs', 'en'].includes(existingLang)) {
+      return res.status(400).json({ error: "existing_subtitles_lang must be 'cs' or 'en'" });
+    }
+    if (picked[existingLang]) {
+      return res.status(400).json({ error: `${existingLang.toUpperCase()} is already burned into the master` });
+    }
+    const pos = Number(addedPosition);
+    if (addedPosition == null || !(pos > 0 && pos <= 1)) {
+      return res.status(400).json({ error: 'added_position must be a number in (0, 1]' });
+    }
+  }
 
   const active = await pool.query(
     `SELECT id FROM subtitle_burn_jobs WHERE movie_id = $1 AND kind = $2 AND status IN ('pending', 'running')`,
@@ -93,8 +106,8 @@ async function createJob(req, res, { movieId, kind, cs, en, previewStart, operat
   const insert = await pool.query(
     `INSERT INTO subtitle_burn_jobs
        (movie_id, kind, source_ref, subtitle_cs_kind, subtitle_cs_ref, subtitle_en_kind, subtitle_en_ref,
-        preview_start_seconds, preview_length_seconds, status, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', $10) RETURNING ${JOB_COLUMNS}`,
+        preview_start_seconds, preview_length_seconds, existing_subtitles_lang, added_position, status, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', $12) RETURNING ${JOB_COLUMNS}`,
     [
       movieId,
       kind,
@@ -105,6 +118,8 @@ async function createJob(req, res, { movieId, kind, cs, en, previewStart, operat
       picked.en ? movieStorage.fileRef(picked.en) : null,
       kind === 'preview' && previewStart != null ? Number(previewStart) : null,
       kind === 'preview' ? PREVIEW_LENGTH_SECONDS : null,
+      existingLang ?? null,
+      existingLang != null ? Number(addedPosition) : null,
       req.user?.email || null,
     ]
   );
@@ -125,7 +140,15 @@ async function createJob(req, res, { movieId, kind, cs, en, previewStart, operat
     action: 'create',
     resource: 'subtitle_burn_job',
     resourceId: job.id,
-    newData: { movie_id: movieId, kind, cs: picked.cs?.file_kind || null, en: picked.en?.file_kind || null, operation },
+    newData: {
+      movie_id: movieId,
+      kind,
+      cs: picked.cs?.file_kind || null,
+      en: picked.en?.file_kind || null,
+      existing_subtitles_lang: existingLang ?? null,
+      added_position: existingLang != null ? Number(addedPosition) : null,
+      operation,
+    },
   });
 
   res.status(201).json({ job });
@@ -191,7 +214,7 @@ router.post('/check', async (req, res) => {
 router.post('/', async (req, res) => {
   if (!subtitleBurnQueue.isConfigured()) return notConfigured(res);
   try {
-    const { movie_id, kind, cs, en, preview_start_seconds } = req.body;
+    const { movie_id, kind, cs, en, preview_start_seconds, existing_subtitles_lang, added_position } = req.body;
     if (!movie_id) return res.status(400).json({ error: 'movie_id is required' });
     await createJob(req, res, {
       movieId: movie_id,
@@ -199,6 +222,8 @@ router.post('/', async (req, res) => {
       cs,
       en,
       previewStart: preview_start_seconds ?? null,
+      existingLang: existing_subtitles_lang || null,
+      addedPosition: added_position ?? null,
       operation: 'create',
     });
   } catch (error) {
@@ -207,6 +232,27 @@ router.post('/', async (req, res) => {
       return res.status(409).json({ error: 'An export of this kind is already running for this movie' });
     }
     logError(error, req, { operation: 'create_subtitle_burn' });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /movie/:movieId/preview-source — a direct read URL of the movie's
+// preview proxy, for positioning subtitles over burned-in ones. Direct (not
+// the /stream redirect) so the browser may read its pixels for the
+// burned-in subtitle detection: a cross-origin redirect would make the
+// request's origin opaque and the blob's CORS rule would not match.
+router.get('/movie/:movieId/preview-source', async (req, res) => {
+  try {
+    const row = await movieStorage.loadRow(req.params.movieId, 'movie_proxy');
+    res.setHeader('Cache-Control', 'private, no-store');
+    if (!row) return res.json({ url: null, direct: false });
+    if (row.storage === 'azure') {
+      return res.json({ url: await movieStorage.readUrl(row.blob_name), direct: true });
+    }
+    // Legacy Drive proxy: playable through the app, but its pixels can't be read.
+    res.json({ url: null, direct: false });
+  } catch (error) {
+    logError(error, req, { operation: 'get_subtitle_burn_preview_source' });
     res.status(500).json({ error: error.message });
   }
 });
@@ -293,6 +339,8 @@ router.post('/:id/retry', async (req, res) => {
       cs: old.subtitle_cs_kind,
       en: old.subtitle_en_kind,
       previewStart: old.preview_start_seconds,
+      existingLang: old.existing_subtitles_lang,
+      addedPosition: old.added_position,
       operation: 'retry',
     });
   } catch (error) {
