@@ -6,6 +6,15 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
 });
 
+// End date of an all-day entry: null for a single day, an error for one before the start
+const resolveEndDate = (startDate, endDate) => {
+  if (!endDate) return { endDate: null };
+  const cleanEnd = endDate.split('T')[0];
+  if (!startDate) return { error: 'Start date is required with an end date' };
+  if (cleanEnd < startDate) return { error: 'End date cannot be before the start date' };
+  return { endDate: cleanEnd > startDate ? cleanEnd : null };
+};
+
 // Helper function to check for time overlaps
 const checkTimeOverlap = async (venue_id, scheduled_date, scheduled_time, movie_id, block_id, discussion_time, excludeId = null) => {
   try {
@@ -44,6 +53,7 @@ const checkTimeOverlap = async (venue_id, scheduled_date, scheduled_time, movie_
       FROM programming_schedule ps
       LEFT JOIN movies m ON ps.movie_id = m.id
       WHERE ps.venue_id = $1 AND ps.scheduled_date = $2
+        AND ps.scheduled_time IS NOT NULL -- all-day entries never overlap
     `;
     
     const queryParams = [venue_id, scheduled_date];
@@ -153,6 +163,8 @@ router.get('/edition/:editionId', async (req, res) => {
         ps.block_id,
         ps.scheduled_date::text as scheduled_date,
         ps.scheduled_time,
+        ps.end_date::text as end_date,
+        (ps.scheduled_time IS NULL) as all_day,
         ps.base_runtime,
         ps.discussion_time,
         ps.total_runtime,
@@ -192,7 +204,7 @@ router.get('/edition/:editionId', async (req, res) => {
     let paramIndex = 2;
     
     if (date) {
-      query += ` AND ps.scheduled_date = $${paramIndex}`;
+      query += ` AND $${paramIndex}::date BETWEEN ps.scheduled_date AND COALESCE(ps.end_date, ps.scheduled_date)`;
       params.push(date);
       paramIndex++;
     }
@@ -203,7 +215,10 @@ router.get('/edition/:editionId', async (req, res) => {
       paramIndex++;
     }
     
-    query += ` ORDER BY ps.scheduled_date, ps.scheduled_time, v.sort_order`;
+    // All-day entries go last; with a date filter a multi-day one may have started on an earlier day
+    query += date
+      ? ` ORDER BY ps.scheduled_time NULLS LAST, v.sort_order`
+      : ` ORDER BY ps.scheduled_date, ps.scheduled_time NULLS LAST, v.sort_order`;
     
     const result = await pool.query(query, params);
     res.json(result.rows);
@@ -227,6 +242,8 @@ router.get('/:id', async (req, res) => {
         ps.block_id,
         ps.scheduled_date::text as scheduled_date,
         ps.scheduled_time,
+        ps.end_date::text as end_date,
+        (ps.scheduled_time IS NULL) as all_day,
         ps.base_runtime,
         ps.discussion_time,
         ps.total_runtime,
@@ -311,14 +328,18 @@ router.post('/', async (req, res) => {
       hidden_from_public,
       free_entry,
       goout_schedule_id,
-      goout_checkin_id
+      goout_checkin_id,
+      all_day,
+      end_date
     } = req.body;
 
 
+    const allDay = all_day === true;
+
     // Validate required fields
-    if (!edition_id || !venue_id || !scheduled_date || !scheduled_time) {
+    if (!edition_id || !venue_id || !scheduled_date || (!allDay && !scheduled_time)) {
       return res.status(400).json({ 
-        error: 'Edition ID, venue ID, date, and time are required' 
+        error: 'Edition ID, venue ID, date, and time (unless all-day) are required' 
       });
     }
     
@@ -329,40 +350,48 @@ router.post('/', async (req, res) => {
       });
     }
     
-    // Check for time overlaps
-    const overlapCheck = await checkTimeOverlap(
-      venue_id, scheduled_date, scheduled_time, 
-      movie_id, block_id, discussion_time
-    );
-    
-    if (overlapCheck.hasOverlap) {
-      const { conflictDetails } = overlapCheck;
-      return res.status(400).json({ 
-        error: `Time overlap detected! New entry (${conflictDetails.newStart}-${conflictDetails.newEnd}) overlaps with existing entry (${conflictDetails.existingStart}-${conflictDetails.existingEnd})` 
-      });
+    // Check for time overlaps (all-day entries have no time to overlap)
+    if (!allDay) {
+      const overlapCheck = await checkTimeOverlap(
+        venue_id, scheduled_date, scheduled_time, 
+        movie_id, block_id, discussion_time
+      );
+      
+      if (overlapCheck.hasOverlap) {
+        const { conflictDetails } = overlapCheck;
+        return res.status(400).json({ 
+          error: `Time overlap detected! New entry (${conflictDetails.newStart}-${conflictDetails.newEnd}) overlaps with existing entry (${conflictDetails.existingStart}-${conflictDetails.existingEnd})` 
+        });
+      }
     }
     
     // Ensure date is in YYYY-MM-DD format
     const cleanDate = scheduled_date.split('T')[0];
     console.log('Received scheduled_date:', scheduled_date);
     console.log('Clean date for DB:', cleanDate);
+
+    const { endDate, error: endDateError } = allDay ? resolveEndDate(cleanDate, end_date) : { endDate: null };
+    if (endDateError) {
+      return res.status(400).json({ error: endDateError });
+    }
     
     const result = await pool.query(`
       INSERT INTO programming_schedule (
         edition_id, venue_id, movie_id, block_id, scheduled_date, scheduled_time,
         discussion_time, title_override_cs, title_override_en, notes, ticket_link, highlighted,
-        hidden_from_public, goout_schedule_id, goout_checkin_id, free_entry
+        hidden_from_public, goout_schedule_id, goout_checkin_id, free_entry, end_date
       )
-      VALUES ($1, $2, $3, $4, $5::date, $6::time, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+      VALUES ($1, $2, $3, $4, $5::date, $6::time, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17::date)
       RETURNING *
     `, [
       edition_id, venue_id, movie_id || null, block_id || null,
-      cleanDate, scheduled_time, discussion_time || 0,
+      cleanDate, allDay ? null : scheduled_time, discussion_time || 0,
       title_override_cs || null, title_override_en || null, notes || null, ticket_link || null,
       highlighted || false,
       hidden_from_public || false,
       goout_schedule_id || null, goout_checkin_id || null,
-      free_entry || false
+      free_entry || false,
+      endDate
     ]);
     
     res.status(201).json(result.rows[0]);
@@ -391,7 +420,9 @@ router.put('/:id', async (req, res) => {
       hidden_from_public,
       free_entry,
       goout_schedule_id,
-      goout_checkin_id
+      goout_checkin_id,
+      all_day,
+      end_date
     } = req.body;
 
     // Validate that either movie_id or block_id is provided, but not both (if either is being updated)
@@ -402,8 +433,22 @@ router.put('/:id', async (req, res) => {
       });
     }
     
+    // all_day omitted (e.g. a timeline drag) keeps the entry's current kind
+    const allDay = all_day === undefined ? undefined : all_day === true;
+    if (allDay === false && !scheduled_time) {
+      return res.status(400).json({ error: 'Time is required unless the entry is all-day' });
+    }
+
+    // Ensure date is in YYYY-MM-DD format if provided
+    const cleanDate = scheduled_date ? scheduled_date.split('T')[0] : null;
+
+    const { endDate, error: endDateError } = allDay ? resolveEndDate(cleanDate, end_date) : { endDate: null };
+    if (endDateError) {
+      return res.status(400).json({ error: endDateError });
+    }
+
     // Check for time overlaps (excluding current entry)
-    if (venue_id && scheduled_date && scheduled_time) {
+    if (venue_id && scheduled_date && scheduled_time && allDay !== true) {
       // Use new movie/block IDs from request, or fall back to current ones
       let checkMovieId = movie_id;
       let checkBlockId = block_id;
@@ -436,9 +481,6 @@ router.put('/:id', async (req, res) => {
       }
     }
     
-    // Ensure date is in YYYY-MM-DD format if provided
-    const cleanDate = scheduled_date ? scheduled_date.split('T')[0] : null;
-    
     const result = await pool.query(`
       UPDATE programming_schedule
       SET
@@ -446,7 +488,8 @@ router.put('/:id', async (req, res) => {
         movie_id = CASE WHEN $2::UUID IS NOT NULL THEN $2 ELSE movie_id END,
         block_id = CASE WHEN $3::UUID IS NOT NULL THEN $3 ELSE block_id END,
         scheduled_date = COALESCE($4::date, scheduled_date),
-        scheduled_time = COALESCE($5::time, scheduled_time),
+        scheduled_time = CASE WHEN $16::boolean THEN NULL ELSE COALESCE($5::time, scheduled_time) END,
+        end_date = CASE WHEN $16::boolean IS NULL THEN end_date WHEN $16::boolean THEN $17::date ELSE NULL END,
         discussion_time = COALESCE($6, discussion_time),
         title_override_cs = $7,
         title_override_en = $8,
@@ -457,13 +500,13 @@ router.put('/:id', async (req, res) => {
         goout_schedule_id = COALESCE($13, goout_schedule_id),
         goout_checkin_id = COALESCE($14, goout_checkin_id),
         free_entry = COALESCE($15, free_entry)
-      WHERE id = $16
+      WHERE id = $18
       RETURNING *
     `, [
       venue_id, movie_id || null, block_id || null, cleanDate, scheduled_time, discussion_time,
       title_override_cs, title_override_en, notes, ticket_link, highlighted,
       hidden_from_public,
-      goout_schedule_id, goout_checkin_id, free_entry, id
+      goout_schedule_id, goout_checkin_id, free_entry, allDay ?? null, endDate, id
     ]);
     
     if (result.rows.length === 0) {
@@ -506,7 +549,7 @@ router.get('/availability/:venueId/:date', async (req, res) => {
     const bookedSlots = await pool.query(`
       SELECT scheduled_time, total_runtime
       FROM programming_schedule 
-      WHERE venue_id = $1 AND scheduled_date = $2
+      WHERE venue_id = $1 AND scheduled_date = $2 AND scheduled_time IS NOT NULL
       ORDER BY scheduled_time
     `, [venueId, date]);
     

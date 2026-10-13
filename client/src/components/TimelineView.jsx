@@ -108,8 +108,10 @@ const TimelineView = ({ schedule, venues, selectedDate, onEditEntry, onTimelineC
     }
   }
 
-  // Timeline requires a specific date - schedule should already be filtered
-  const filteredSchedule = schedule
+  // Timeline requires a specific date - schedule should already be filtered.
+  // All-day entries have no place on the time axis; they get their own row below.
+  const filteredSchedule = schedule.filter(entry => !entry.all_day)
+  const allDayEntries = schedule.filter(entry => entry.all_day)
 
   // Group entries by venue
   const entriesByVenue = {}
@@ -282,6 +284,33 @@ const TimelineView = ({ schedule, venues, selectedDate, onEditEntry, onTimelineC
               )
             })}
           </div>
+
+          {allDayEntries.length > 0 && (
+            <div className="mt-6 pt-4 border-t">
+              <div className="text-sm font-medium text-gray-700 mb-2">All-day events</div>
+              <div className="flex flex-wrap gap-2">
+                {allDayEntries.map(entry => {
+                  const colors = getVenueColor(entry.venue_name_cs)
+                  return (
+                    <button
+                      key={entry.id}
+                      type="button"
+                      onClick={() => onEditEntry && onEditEntry(entry)}
+                      className={`${colors.bg} ${colors.text} rounded px-3 py-2 text-left shadow-sm hover:shadow-md transition-shadow duration-200`}
+                    >
+                      <div className="text-xs font-medium">
+                        {entry.title_override_cs || entry.movie_name_cs || entry.block_name_cs}
+                      </div>
+                      <div className="text-xs opacity-90">
+                        {entry.venue_name_cs}
+                        {entry.end_date && ` • until ${entry.end_date.split('-').slice(1).reverse().map(Number).join('. ')}.`}
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
 
         </div>
       </div>
