@@ -116,6 +116,7 @@ SET access_token = 'new_token',
 3. The ticket is looked up (`findTicket`: purchase search by barcode, then the purchase by hash for exact ticket match, state and schedule)
 4. Ticket for this screening or festival pass of this edition: checked in to the screening's check-in at GoOut (422 = already used; a ticket can be checked in to each check-in once, so a pass works for every screening); anything else is rejected
 5. If GoOut does not answer within 1 s, the ticket is let in and stored with `goout_status = 'unverified'`
+6. The name on the ticket comes back in the check-in response and is stored in `badge_scans.holder_name`, so the scanner can show who came in
 
 ## API Documentation
 

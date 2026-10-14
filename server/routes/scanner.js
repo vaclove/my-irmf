@@ -4,18 +4,27 @@ const { pool } = require('../models/database');
 const { isValidTicketCode } = require('../utils/luhn');
 const { isGoOutTicketCode, verifyGoOutTicket } = require('../services/goout-ticket-verifier');
 
-// Name shown for a scan without a guest record
-function scanLabel(badgeNumber, gooutStatus) {
+const GOOUT_TICKET_TYPES = {
+  checked_in: 'GoOut ticket',
+  pass: 'Festival pass',
+  unverified: 'GoOut ticket (unverified)'
+};
+
+// Name shown for a scan without a guest record. GoOut tickets show the name
+// on the ticket when GoOut returned it, with the ticket type as category.
+function scanLabel(badgeNumber, gooutStatus, holderName) {
   const code = String(badgeNumber);
   if (code.length === 7 && code.startsWith('30')) {
     return { firstName: 'One-time', lastName: 'Ticket' };
   }
-  switch (gooutStatus) {
-    case 'checked_in': return { firstName: 'GoOut', lastName: 'Ticket' };
-    case 'pass': return { firstName: 'GoOut', lastName: 'Festival pass' };
-    case 'unverified': return { firstName: 'GoOut', lastName: 'Ticket (unverified)' };
-    default: return { firstName: 'External', lastName: 'Guest' };
+
+  const ticketType = GOOUT_TICKET_TYPES[gooutStatus];
+  if (!ticketType) {
+    return { firstName: 'External', lastName: 'Guest' };
   }
+  return holderName
+    ? { firstName: holderName, lastName: '', category: ticketType }
+    : { firstName: ticketType, lastName: '' };
 }
 
 // Get upcoming screenings for scanner
@@ -217,7 +226,7 @@ router.post('/scan', async (req, res) => {
     if (isInternalBadge || isGoOutTicket) {
       const existingQuery = isInternalBadge
         ? `SELECT id FROM badge_scans WHERE programming_id = $1 AND guest_id = $2`
-        : `SELECT id FROM badge_scans WHERE programming_id = $1 AND badge_number = $2`;
+        : `SELECT id, goout_status, holder_name FROM badge_scans WHERE programming_id = $1 AND badge_number = $2`;
 
       const existingResult = await pool.query(existingQuery,
         isInternalBadge ? [programming_id, guestId] : [programming_id, String(badgeIdentifier)]
@@ -231,8 +240,7 @@ router.post('/scan', async (req, res) => {
             lastName: guest.last_name,
             badgeNumber: guest.badge_number
           } : {
-            firstName: 'GoOut',
-            lastName: 'Ticket',
+            ...scanLabel(scannedStr, existingResult.rows[0].goout_status, existingResult.rows[0].holder_name),
             badgeNumber: badgeIdentifier
           }
         });
@@ -243,22 +251,24 @@ router.post('/scan', async (req, res) => {
     // time it is let in as unverified; the local check above still blocks
     // double entry to this screening.
     let gooutStatus = null;
+    let holderName = null;
     if (isGoOutTicket) {
       const verdict = await verifyGoOutTicket(scannedStr, programming_id);
       if (verdict.rejected) {
         return res.status(verdict.httpStatus).json({
           error: verdict.error,
-          guest: { firstName: 'GoOut', lastName: 'Ticket', badgeNumber: scannedStr },
+          guest: { firstName: 'GoOut ticket', lastName: '', badgeNumber: scannedStr },
           usedFor: verdict.usedFor
         });
       }
       gooutStatus = verdict.status;
+      holderName = verdict.holderName || null;
     }
 
     // Insert scan record
     const insertQuery = `
-      INSERT INTO badge_scans (programming_id, guest_id, badge_number, scanned_by, goout_status)
-      VALUES ($1, $2, $3, $4, $5)
+      INSERT INTO badge_scans (programming_id, guest_id, badge_number, scanned_by, goout_status, holder_name)
+      VALUES ($1, $2, $3, $4, $5, $6)
       RETURNING id, scanned_at
     `;
 
@@ -267,7 +277,8 @@ router.post('/scan', async (req, res) => {
       guestId,
       String(badgeIdentifier),
       req.user?.email || 'scanner-app',
-      gooutStatus
+      gooutStatus,
+      holderName
     ]);
 
     // Get updated scan count
@@ -285,9 +296,10 @@ router.post('/scan', async (req, res) => {
         lastName: guest.last_name,
         badgeNumber: guest.badge_number
       } : {
-        ...scanLabel(scannedStr, gooutStatus),
+        ...scanLabel(scannedStr, gooutStatus, holderName),
         badgeNumber: scannedStr
       },
+      scanId: insertResult.rows[0].id,
       scannedAt: insertResult.rows[0].scanned_at,
       totalScans: parseInt(countResult.rows[0].count)
     });
@@ -309,6 +321,7 @@ router.get('/scans/:programming_id', async (req, res) => {
         bs.scanned_at,
         bs.scanned_by,
         bs.goout_status,
+        bs.holder_name,
         g.first_name,
         g.last_name,
         bs.guest_id
@@ -321,15 +334,16 @@ router.get('/scans/:programming_id', async (req, res) => {
     const result = await pool.query(query, [programming_id]);
 
     const scans = result.rows.map(row => {
-      const { firstName, lastName } = row.guest_id
+      const { firstName, lastName, category } = row.guest_id
         ? { firstName: row.first_name, lastName: row.last_name }
-        : scanLabel(row.badge_number, row.goout_status);
+        : scanLabel(row.badge_number, row.goout_status, row.holder_name);
 
       return {
         id: row.id,
         badgeNumber: row.badge_number,
         firstName,
         lastName,
+        category,
         scannedAt: row.scanned_at,
         scannedBy: row.scanned_by
       };
@@ -439,6 +453,7 @@ router.get('/edition/:edition_id/scans', async (req, res) => {
         bs.scanned_at,
         bs.scanned_by,
         bs.goout_status,
+        bs.holder_name,
         bs.guest_id,
         g.first_name,
         g.last_name,
@@ -466,9 +481,9 @@ router.get('/edition/:edition_id/scans', async (req, res) => {
     const result = await pool.query(query, [edition_id]);
 
     const scans = result.rows.map(row => {
-      const { firstName, lastName } = row.guest_id
+      const { firstName, lastName, category } = row.guest_id
         ? { firstName: row.first_name, lastName: row.last_name }
-        : scanLabel(row.badge_number, row.goout_status);
+        : scanLabel(row.badge_number, row.goout_status, row.holder_name);
 
       return {
         id: row.id,
@@ -476,6 +491,7 @@ router.get('/edition/:edition_id/scans', async (req, res) => {
         badgeNumber: row.badge_number,
         firstName,
         lastName,
+        category,
         scannedAt: row.scanned_at,
         scannedBy: row.scanned_by,
         screening: {
