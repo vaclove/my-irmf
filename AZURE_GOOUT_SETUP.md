@@ -117,8 +117,66 @@ The script:
   The Programming UI has no fields for the GoOut IDs, so link those by hand
   (`PUT /api/programming/:id` with `goout_schedule_id` + `goout_checkin_id`, or SQL).
 
-To run it in production, use Kudu: unpack `node_modules.tar.gz` and run the script
-from `/home/site/wwwroot` with `NODE_ENV=production`. `DATABASE_URL` comes from the app settings.
+To run it in production, use Kudu (see "Running Scripts in Production" below).
+
+## Free Partner Tickets
+
+Free tickets for partners are issued straight into GoOut with the partner API
+(`POST /services/partners/v2/create-purchase`). GoOut e-mails the tickets to the customer
+and they scan like any other ticket. Each screening gets a hidden "Partner" category for it.
+
+GoOut limits that shape the procedure:
+- create-purchase only accepts a **0 Kč** category, unseated and outside a season sale;
+- the API refuses to create or edit a category with price 0 ("priceCents must be greater than 0"),
+  so categories are created at 1 Kč and switched to 0 Kč by hand in the GoOut admin;
+- the parent category (so the tickets count into the hall capacity of "Základní vstupné")
+  cannot be set through the API either, only in the admin;
+- the category data the API returns can lag behind admin edits (still showing 1 Kč),
+  create-purchase checks the real price itself;
+- purchases cannot be cancelled through the API, use the admin.
+
+Procedure:
+
+```bash
+# 1. List the edition's sales and their Partner categories; pick the sale IDs
+node server/scripts/goout-partner-tickets.js list --year 2026
+
+# 2. Create a hidden 1 Kč "Partner" category (2 places) on each sale that has none
+node server/scripts/goout-partner-tickets.js create-deals --sales 616987,616988
+node server/scripts/goout-partner-tickets.js create-deals --sales 616987,616988 --apply
+```
+
+3. In the GoOut admin (`https://admin.goout.net/cs/ticketing/sale/<sale>/overview/`), edit each
+   Partner category: price **0 Kč**, parent **Základní vstupné**, number of places as needed.
+
+```bash
+# 4. Issue the tickets: separate one-ticket purchases, topped up to --per-sale for that e-mail
+node server/scripts/goout-partner-tickets.js issue --sales 616987,616988 \
+  --first-name Jan --last-name Novak --email partner@example.com --per-sale 2
+node server/scripts/goout-partner-tickets.js issue --sales 616987,616988 \
+  --first-name Jan --last-name Novak --email partner@example.com --per-sale 2 --apply
+```
+
+Re-running `issue` is safe: it counts the customer's paid purchases in each sale and only issues
+what is missing. A sale whose category is not 0 Kč yet is reported (`!`) and skipped; fix it in the
+admin and run again. To check a purchase, search for the customer's e-mail in the GoOut admin.
+
+In 2026 a partner got 2 tickets to each screening except the festival accreditation, Yoga,
+the LissWood workshops, Felicie na cestách and Kongo.
+
+## Running Scripts in Production
+
+The production database is only reachable from Azure, so the scripts run in the Kudu console
+(`https://my-irmf.scm.azurewebsites.net`, or `POST /api/command` with an `az` access token).
+`node_modules` is not available there, so unpack the deployed archive first:
+
+```bash
+mkdir -p /tmp/irmf-nm && cd /tmp/irmf-nm && tar --zstd -xf /home/site/wwwroot/node_modules.tar.zst
+cd /home/site/wwwroot
+NODE_PATH=/tmp/irmf-nm NODE_ENV=production node server/scripts/goout-sync-edition.js --year 2026
+```
+
+`DATABASE_URL` comes from the app settings.
 
 ## Monitoring
 
