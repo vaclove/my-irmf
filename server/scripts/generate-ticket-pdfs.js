@@ -1,12 +1,18 @@
 /**
  * Generate PDF tickets with unique barcodes
  * Layout: 3 rows × 4 columns = 12 tickets per page
+ *
+ * Usage: node server/scripts/generate-ticket-pdfs.js [startSequence] [outputDir]
+ * Output defaults to tmp/ in the repo root (gitignored).
  */
 
 const fs = require('fs');
+const path = require('path');
 const { PDFDocument, rgb } = require('pdf-lib');
 const bwipjs = require('bwip-js');
 const { generateTicketCode } = require('../utils/luhn');
+
+const TEMPLATE_PATH = path.join(__dirname, '../data/ticket-template.pdf');
 
 async function generateBarcode(text) {
   try {
@@ -24,12 +30,11 @@ async function generateBarcode(text) {
   }
 }
 
-async function generateTicketPage(startSequence = 0, count = 12) {
+async function generateTicketPage(outputDir, startSequence = 0, count = 12) {
   console.log(`\nGenerating ticket page with ${count} tickets starting from sequence ${startSequence}...`);
 
   // Load the template PDF
-  const templatePath = '/Users/vaclav.martinovsky/GitHub/my-irmf/tmp/a4-vstupenka-2025-prazdna.pdf';
-  const templateBytes = fs.readFileSync(templatePath);
+  const templateBytes = fs.readFileSync(TEMPLATE_PATH);
   const pdfDoc = await PDFDocument.load(templateBytes);
 
   const pages = pdfDoc.getPages();
@@ -107,7 +112,7 @@ async function generateTicketPage(startSequence = 0, count = 12) {
 
   // Save the PDF
   const pdfBytes = await pdfDoc.save();
-  const outputPath = `/Users/vaclav.martinovsky/GitHub/my-irmf/tmp/tickets-page-${startSequence}-${startSequence + count - 1}.pdf`;
+  const outputPath = path.join(outputDir, `tickets-page-${startSequence}-${startSequence + count - 1}.pdf`);
   fs.writeFileSync(outputPath, pdfBytes);
 
   console.log(`\n✓ Successfully generated PDF with ${tickets.length} tickets`);
@@ -124,9 +129,11 @@ async function generateTicketPage(startSequence = 0, count = 12) {
 
 // Main execution
 (async () => {
+  const [start = '0', outputDir = path.join(__dirname, '../../tmp')] = process.argv.slice(2);
+
   try {
-    // Generate first page (tickets 0-11)
-    const outputPath = await generateTicketPage(0, 12);
+    fs.mkdirSync(outputDir, { recursive: true });
+    const outputPath = await generateTicketPage(outputDir, parseInt(start, 10), 12);
     console.log(`\nDone! Please check: ${outputPath}`);
   } catch (error) {
     console.error('Error generating tickets:', error);

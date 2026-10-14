@@ -111,7 +111,8 @@ router.post('/scan', async (req, res) => {
     let guestId = null;
 
     if (isInternalBadge) {
-      // Look up internal guest by badge number
+      // Look up internal guest by badge number within the screening's edition.
+      // Badge numbers restart every edition, so the YYYY prefix must match too.
       const guestQuery = `
         SELECT
           g.id as guest_id,
@@ -121,10 +122,17 @@ router.post('/scan', async (req, res) => {
           gbn.edition_id
         FROM guests g
         JOIN guest_badge_numbers gbn ON g.id = gbn.guest_id
+        JOIN editions e ON gbn.edition_id = e.id
         WHERE gbn.badge_number = $1
+          AND e.year = $2
+          AND gbn.edition_id = (SELECT edition_id FROM programming_schedule WHERE id = $3)
       `;
 
-      const guestResult = await pool.query(guestQuery, [badgeNumber]);
+      const guestResult = await pool.query(guestQuery, [
+        badgeNumber,
+        parseInt(scannedStr.slice(0, 4)),
+        programming_id
+      ]);
 
       if (guestResult.rows.length === 0) {
         return res.status(404).json({ error: 'Badge number not found' });
@@ -133,7 +141,8 @@ router.post('/scan', async (req, res) => {
       guest = guestResult.rows[0];
       guestId = guest.guest_id;
     } else if (isOneTimeTicket) {
-      // One-time ticket - check if already used anywhere
+      // One-time ticket - check if already used anywhere in this edition
+      // (codes are reprinted each year, so last year's scans don't count)
       const usedQuery = `
         SELECT
           bs.id,
@@ -155,9 +164,10 @@ router.post('/scan', async (req, res) => {
         LEFT JOIN movies m ON ps.movie_id = m.id
         LEFT JOIN movie_blocks mb ON ps.block_id = mb.id
         WHERE bs.badge_number = $1
+          AND ps.edition_id = (SELECT edition_id FROM programming_schedule WHERE id = $2)
       `;
 
-      const usedResult = await pool.query(usedQuery, [scannedStr]);
+      const usedResult = await pool.query(usedQuery, [scannedStr, programming_id]);
 
       if (usedResult.rows.length > 0) {
         const used = usedResult.rows[0];
