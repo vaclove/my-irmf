@@ -36,6 +36,17 @@ function parseLinks(body) {
   return Object.fromEntries(LINK_FIELDS.map(field => [field, normalizeLinkUrl(body[field], field)]));
 }
 
+// Public URL slugs (/katalog/<year>/<slug_cs>/, /catalogue/<year>/<slug_en>/).
+// The DB trigger normalises them and generates an empty one from the title
+// (migration 063); here we only turn its unique-index violation into a 409.
+const SLUG_FIELDS = ['slug_cs', 'slug_en'];
+
+function slugConflict(error) {
+  if (error.code !== '23505' || !/slug/.test(error.constraint || '')) return null;
+  const lang = error.constraint.endsWith('_en') ? 'English' : 'Czech';
+  return `The ${lang} URL slug is already used by another film in this edition`;
+}
+
 // Translate a synopsis between Czech and English with an LLM.
 // Deliberately id-less: it translates whatever the user currently has in the
 // form (including unsaved edits) and works in the "Add Movie" modal, where the
@@ -282,14 +293,15 @@ router.post('/', async (req, res) => {
         edition_id, catalogue_year, name_cs, name_en, synopsis_cs, synopsis_en,
         image, runtime, director, year, country, "cast",
         premiere, section, language, subtitles, is_35mm, has_delegation, is_public,
-        trailer_url, website_url, facebook_url, instagram_url
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
+        trailer_url, website_url, facebook_url, instagram_url, slug_cs, slug_en
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
       RETURNING *
     `, [
       edition_id, catalogue_year, name_cs, name_en, synopsis_cs, synopsis_en,
       image, runtime, director, year, country, cast,
       premiere, section, language, subtitles, is_35mm || false, has_delegation || false, is_public,
-      links.trailer_url, links.website_url, links.facebook_url, links.instagram_url
+      links.trailer_url, links.website_url, links.facebook_url, links.instagram_url,
+      req.body.slug_cs || null, req.body.slug_en || null
     ]);
     
     const movie = result.rows[0];
@@ -343,6 +355,9 @@ router.post('/', async (req, res) => {
     if (error.status === 400) {
       return res.status(400).json({ error: error.message });
     }
+    if (slugConflict(error)) {
+      return res.status(409).json({ error: slugConflict(error) });
+    }
     logError(error, req, { operation: 'create_movie', body: req.body });
     res.status(500).json({ error: error.message });
   }
@@ -383,7 +398,9 @@ router.put('/:id', async (req, res) => {
     // them can't wipe them
     const links = parseLinks(req.body);
     const linkFields = LINK_FIELDS.filter(field => Object.prototype.hasOwnProperty.call(req.body, field));
-    const linkAssignments = linkFields.map((field, i) => `${field} = $${21 + i},`).join(' ');
+    // Slugs likewise; an empty one is regenerated from the title by the trigger
+    const slugFields = SLUG_FIELDS.filter(field => Object.prototype.hasOwnProperty.call(req.body, field));
+    const optionalAssignments = [...linkFields, ...slugFields].map((field, i) => `${field} = $${21 + i},`).join(' ');
 
     // Verify edition exists if provided
     if (edition_id) {
@@ -415,7 +432,7 @@ router.put('/:id', async (req, res) => {
         is_35mm = $18,
         has_delegation = $19,
         is_public = $20,
-        ${linkAssignments}
+        ${optionalAssignments}
         updated_at = CURRENT_TIMESTAMP
       WHERE id = $1
       RETURNING *
@@ -423,7 +440,8 @@ router.put('/:id', async (req, res) => {
       id, edition_id, catalogue_year, name_cs, name_en, synopsis_cs, synopsis_en,
       image, runtime, director, year, country, cast,
       premiere, section, language, subtitles, is_35mm || false, has_delegation || false, is_public,
-      ...linkFields.map(field => links[field])
+      ...linkFields.map(field => links[field]),
+      ...slugFields.map(field => req.body[field] || null)
     ]);
     
     if (result.rows.length === 0) {
@@ -464,6 +482,9 @@ router.put('/:id', async (req, res) => {
   } catch (error) {
     if (error.status === 400) {
       return res.status(400).json({ error: error.message });
+    }
+    if (slugConflict(error)) {
+      return res.status(409).json({ error: slugConflict(error) });
     }
     logError(error, req, { operation: 'update_movie', movieId: req.params.id, body: req.body });
     res.status(500).json({ error: error.message });
