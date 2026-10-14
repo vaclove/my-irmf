@@ -1,6 +1,33 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Html5Qrcode } from 'html5-qrcode';
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
+
+// Badges and one-time tickets are Code128, GoOut tickets a QR code with a 13-digit id
+const SCAN_FORMATS = [
+  Html5QrcodeSupportedFormats.CODE_128,
+  Html5QrcodeSupportedFormats.QR_CODE
+];
+const CAMERA_STORAGE_KEY = 'scanner.cameraId';
+
+// Rear cameras ordered main lens first. Ultra-wide and telephoto lenses often
+// can't focus at 10-30 cm, which is where tickets are held, yet browsers
+// sometimes pick them for facingMode "environment".
+const orderBackCameras = (cameras) => {
+  const back = cameras.filter(c => /back|rear|environment|zadní/i.test(c.label));
+  // Also deprioritise virtual multi-lens cameras (iPhone Dual/Triple), which may
+  // jump to the telephoto lens when zoomed
+  const isSecondaryLens = (c) =>
+    /ultra|wide|širok|tele|dual|duáln|triple|trojit|depth|infrared|macro/i.test(c.label);
+  return [...back.filter(c => !isSecondaryLens(c)), ...back.filter(isSecondaryLens)];
+};
+
+// Wide scan area for 1D barcodes, still tall enough for a QR code.
+// Decoding works on this region scaled to its on-screen size, so keep it large.
+const scanBox = (viewfinderWidth, viewfinderHeight) => {
+  const width = Math.floor(viewfinderWidth * 0.9);
+  const height = Math.floor(Math.min(viewfinderHeight * 0.8, width * 0.55));
+  return { width, height };
+};
 
 const Scanner = () => {
   const navigate = useNavigate();
@@ -23,6 +50,8 @@ const Scanner = () => {
   const selectedScreeningRef = useRef(null);
   const lastScannedBadgeRef = useRef(null);
   const scanCooldownRef = useRef(false);
+  const [cameras, setCameras] = useState([]);
+  const [cameraId, setCameraId] = useState(null);
 
   // Fetch editions on mount
   useEffect(() => {
@@ -134,24 +163,97 @@ const Scanner = () => {
 
   const initializeScanner = async () => {
     try {
-      const html5Qrcode = new Html5Qrcode("scanner-container");
+      const html5Qrcode = new Html5Qrcode("scanner-container", {
+        formatsToSupport: SCAN_FORMATS,
+        // Native BarcodeDetector (Chrome on Android) is far better than the JS decoder
+        useBarCodeDetectorIfSupported: true,
+        verbose: false
+      });
       html5QrcodeRef.current = html5Qrcode;
 
-      const config = {
-        fps: 10,
-        qrbox: { width: 250, height: 250 },
-        aspectRatio: 1.0
-      };
+      // Listing cameras also triggers the permission prompt, so labels are available
+      let backCameras = [];
+      try {
+        backCameras = orderBackCameras(await Html5Qrcode.getCameras());
+      } catch (err) {
+        console.warn('Could not list cameras, falling back to facingMode:', err);
+      }
+      setCameras(backCameras);
 
-      await html5Qrcode.start(
-        { facingMode: "environment" },
-        config,
-        onScanSuccess,
-        onScanError
-      );
+      const savedId = localStorage.getItem(CAMERA_STORAGE_KEY);
+      const initial = backCameras.find(c => c.id === savedId) || backCameras[0];
+      await startCamera(html5Qrcode, initial?.id || null);
     } catch (err) {
       console.error("Error starting scanner:", err);
       setError("Failed to start camera. Please grant camera permissions.");
+    }
+  };
+
+  const startCamera = async (html5Qrcode, id) => {
+    setCameraId(id);
+
+    await html5Qrcode.start(
+      { facingMode: "environment" }, // ignored when videoConstraints are set
+      {
+        fps: 15,
+        qrbox: scanBox,
+        videoConstraints: {
+          ...(id ? { deviceId: { exact: id } } : { facingMode: "environment" }),
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
+        }
+      },
+      onScanSuccess,
+      onScanError
+    );
+
+    await tuneCamera(html5Qrcode);
+  };
+
+  // Continuous autofocus and a 2x zoom where the camera supports them. Zoom lets
+  // staff hold the phone further away, beyond the lens' minimum focus distance.
+  const tuneCamera = async (html5Qrcode) => {
+    let capabilities;
+    try {
+      capabilities = html5Qrcode.getRunningTrackCapabilities();
+    } catch (err) {
+      return;
+    }
+
+    if (capabilities.focusMode?.includes('continuous')) {
+      try {
+        await html5Qrcode.applyVideoConstraints({ advanced: [{ focusMode: 'continuous' }] });
+      } catch (err) {
+        console.warn('Could not enable continuous focus:', err);
+      }
+    }
+
+    if (capabilities.zoom) {
+      const zoom = Math.min(2, capabilities.zoom.max);
+      if (zoom > capabilities.zoom.min) {
+        try {
+          await html5Qrcode.applyVideoConstraints({ advanced: [{ zoom }] });
+        } catch (err) {
+          console.warn('Could not set zoom:', err);
+        }
+      }
+    }
+  };
+
+  const switchCamera = async () => {
+    const html5Qrcode = html5QrcodeRef.current;
+    if (!html5Qrcode || cameras.length < 2) return;
+
+    const index = cameras.findIndex(c => c.id === cameraId);
+    const next = cameras[(index + 1) % cameras.length];
+    localStorage.setItem(CAMERA_STORAGE_KEY, next.id);
+
+    try {
+      await html5Qrcode.stop();
+      await startCamera(html5Qrcode, next.id);
+    } catch (err) {
+      console.error('Error switching camera:', err);
+      setError('Failed to switch camera');
     }
   };
 
@@ -638,6 +740,20 @@ const Scanner = () => {
       {/* Scanner Container */}
       <div className="p-4">
         <div id="scanner-container" className="rounded-lg overflow-hidden mb-4"></div>
+
+        {cameras.length > 1 && (
+          <button
+            onClick={switchCamera}
+            className="w-full px-4 py-2 bg-gray-800 text-white rounded-md hover:bg-gray-700 mb-4 text-sm"
+          >
+            Switch camera ({cameras.findIndex(c => c.id === cameraId) + 1}/{cameras.length})
+            {cameraId && (
+              <span className="block text-xs text-gray-400 line-clamp-1">
+                {cameras.find(c => c.id === cameraId)?.label}
+              </span>
+            )}
+          </button>
+        )}
 
         {/* Scan Count */}
         <div className="bg-gray-800 rounded-lg p-4 mb-4 text-center">
