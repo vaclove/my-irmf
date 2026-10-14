@@ -54,8 +54,10 @@ async function checkIn(barcode, screening, status) {
   }
 
   try {
-    await goOutAPI.checkInTicket(barcode, screening.goout_checkin_id, { timeout: GOOUT_TIMEOUT_MS });
-    return { status };
+    // The check-in response carries the name on the ticket
+    const entry = await goOutAPI.checkInTicket(barcode, screening.goout_checkin_id, { timeout: GOOUT_TIMEOUT_MS });
+    const holderName = [entry?.firstName, entry?.lastName].filter(Boolean).join(' ').trim();
+    return { status, holderName: holderName || null };
   } catch (error) {
     if (error.response?.status === 422) {
       return { rejected: true, httpStatus: 409, error: 'Ticket already used' };
@@ -101,8 +103,9 @@ async function checkWithGoOut(barcode, screening) {
 
 /**
  * Verify a GoOut ticket for a screening.
- * @returns {Promise<{status: string}|{rejected: true, httpStatus: number, error: string, usedFor?: string}>}
- *   status is 'checked_in', 'pass' or 'unverified' (GoOut unavailable or screening not linked)
+ * @returns {Promise<{status: string, holderName?: string|null}|{rejected: true, httpStatus: number, error: string, usedFor?: string}>}
+ *   status is 'checked_in', 'pass' or 'unverified' (GoOut unavailable or screening not linked);
+ *   holderName is the name on the ticket when it was checked in at GoOut
  */
 async function verifyGoOutTicket(barcode, programmingId) {
   const result = await pool.query(

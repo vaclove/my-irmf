@@ -333,9 +333,11 @@ const Scanner = () => {
         setScanCount(data.totalScans);
         // Add to scanned guests list
         setScannedGuests(prev => [{
+          id: data.scanId,
           badgeNumber: data.guest.badgeNumber,
           firstName: data.guest.firstName,
           lastName: data.guest.lastName,
+          category: data.guest.category,
           scannedAt: data.scannedAt
         }, ...prev]);
         setError('');
@@ -690,6 +692,9 @@ const Scanner = () => {
           <div className="text-2xl">
             {lastScan.guest.firstName} {lastScan.guest.lastName}
           </div>
+          {lastScan.guest.category && (
+            <div className="text-xl text-green-100 mt-1">{lastScan.guest.category}</div>
+          )}
           <div className="text-xl text-green-100 mt-2">
             Badge #{lastScan.guest.badgeNumber}
           </div>
@@ -706,6 +711,9 @@ const Scanner = () => {
               <div className="text-2xl">
                 {lastScan.guest.firstName} {lastScan.guest.lastName}
               </div>
+              {lastScan.guest.category && (
+                <div className="text-xl text-red-100 mt-1">{lastScan.guest.category}</div>
+              )}
               <div className="text-xl text-red-100 mt-2">
                 Badge #{lastScan.guest.badgeNumber}
               </div>
