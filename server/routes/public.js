@@ -345,6 +345,14 @@ router.get('/status/:guest_id/:edition_id', async (req, res) => {
   }
 });
 
+// Film paths on the public sites (see migration 063)
+function publicMoviePaths(movie) {
+  return {
+    cs: `/katalog/${movie.edition_year}/${movie.slug_cs}/`,
+    en: `/catalogue/${movie.edition_year}/${movie.slug_en}/`
+  };
+}
+
 // Public movie catalog routes
 // GET /api/public/movies - List movies with optional filtering
 router.get('/public/movies', async (req, res) => {
@@ -378,6 +386,8 @@ router.get('/public/movies', async (req, res) => {
         m.is_35mm,
         m.has_delegation,
         m.image_url,
+        m.slug_cs,
+        m.slug_en,
         e.year as edition_year,
         e.name as edition_name
       FROM movies m
@@ -546,6 +556,7 @@ router.get('/public/movies', async (req, res) => {
 
       // Add screenings if available
       movie.screenings = screeningsMap[movie.id] || [];
+      movie.paths = publicMoviePaths(movie);
 
       return movie;
     });
@@ -566,134 +577,154 @@ router.get('/public/movies', async (req, res) => {
   }
 });
 
+// GET /api/public/movies/by-slug/:year/:slug?lang=cs|en - Film detail by its public URL
+router.get('/public/movies/by-slug/:year/:slug', async (req, res) => {
+  try {
+    const { year, slug } = req.params;
+    const slugColumn = req.query.lang === 'en' ? 'm.slug_en' : 'm.slug_cs';
+    if (!/^\d{4}$/.test(year)) {
+      return res.status(404).json({ error: 'Movie not found' });
+    }
+    await sendPublicMovie(res, `e.year = $1 AND ${slugColumn} = $2`, [parseInt(year, 10), slug.toLowerCase()]);
+  } catch (error) {
+    logError(error, req, { operation: 'get_public_movie_by_slug', year: req.params.year, slug: req.params.slug });
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // GET /api/public/movies/:id - Get specific movie details
 router.get('/public/movies/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     // Support both UUID and MySQL ID for backward compatibility
     const isUuid = id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
-    
-    const query = `
-      SELECT 
-        m.*,
-        e.year as edition_year,
-        e.name as edition_name
-      FROM movies m
-      JOIN editions e ON m.edition_id = e.id
-      WHERE ${isUuid ? 'm.id' : 'm.mysql_id'} = $1 AND m.is_public = true
-    `;
-    
-    const result = await pool.query(query, [id]);
-    
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Movie not found' });
-    }
-    
-    const movie = result.rows[0];
-    // Internal workflow fields (staff email) — not for the public API.
-    delete movie.files_ready_at;
-    delete movie.files_ready_by;
 
-    // Add image URLs if image_url exists
-    if (movie.image_url) {
-      movie.image_urls = {
-        original: imageStorage.getImageUrl(movie.image_url, 'original'),
-        large: imageStorage.getImageUrl(movie.image_url, 'large'),
-        medium: imageStorage.getImageUrl(movie.image_url, 'medium'),
-        thumbnail: imageStorage.getImageUrl(movie.image_url, 'thumbnail'),
-        small: imageStorage.getImageUrl(movie.image_url, 'small')
-      };
-    }
-
-    // Fetch screenings for this movie (both direct and in blocks)
-    const screenings = [];
-
-    // Get direct movie screenings
-    const directScreeningsQuery = `
-      SELECT
-        ps.id as screening_id,
-        ps.scheduled_date::text as scheduled_date,
-        ps.scheduled_time,
-        ps.end_date::text as end_date,
-        ps.ticket_link,
-        ps.free_entry,
-        v.name_cs as venue_name_cs,
-        v.name_en as venue_name_en,
-        null as block_name_cs,
-        null as block_name_en
-      FROM programming_schedule ps
-      JOIN venues v ON ps.venue_id = v.id
-      WHERE ps.movie_id = $1
-        AND ps.hidden_from_public = false
-      ORDER BY ps.scheduled_date, ps.scheduled_time
-    `;
-
-    const directScreenings = await pool.query(directScreeningsQuery, [movie.id]);
-
-    // Get block screenings where this movie appears
-    const blockScreeningsQuery = `
-      SELECT
-        ps.id as screening_id,
-        ps.scheduled_date::text as scheduled_date,
-        ps.scheduled_time,
-        ps.end_date::text as end_date,
-        ps.ticket_link,
-        ps.free_entry,
-        v.name_cs as venue_name_cs,
-        v.name_en as venue_name_en,
-        mb.name_cs as block_name_cs,
-        mb.name_en as block_name_en
-      FROM programming_schedule ps
-      JOIN movie_blocks mb ON ps.block_id = mb.id
-      JOIN block_movies bm ON mb.id = bm.block_id
-      JOIN venues v ON ps.venue_id = v.id
-      WHERE bm.movie_id = $1
-        AND ps.hidden_from_public = false
-      ORDER BY ps.scheduled_date, ps.scheduled_time
-    `;
-
-    const blockScreenings = await pool.query(blockScreeningsQuery, [movie.id]);
-
-    // Combine and format screenings
-    [...directScreenings.rows, ...blockScreenings.rows].forEach(screening => {
-      screenings.push({
-        screening_id: screening.screening_id,
-        date: screening.scheduled_date,
-        time: screening.scheduled_time,
-        all_day: !screening.scheduled_time,
-        end_date: screening.end_date,
-        venue_cs: screening.venue_name_cs,
-        venue_en: screening.venue_name_en,
-        ticket_link: screening.ticket_link,
-        free_entry: screening.free_entry,
-        block_name_cs: screening.block_name_cs,
-        block_name_en: screening.block_name_en,
-        is_block: !!screening.block_name_cs
-      });
-    });
-
-    // Sort screenings by date and time
-    screenings.sort((a, b) => {
-      const dateTimeA = a.date + ' ' + a.time;
-      const dateTimeB = b.date + ' ' + b.time;
-      return dateTimeA.localeCompare(dateTimeB);
-    });
-
-    // Add screenings to movie object
-    movie.screenings = screenings;
-
-    res.json({
-      movie,
-      // Include WordPress compatibility fields
-      wordpress_url: `/movie/${movie.mysql_id || movie.id}/`
-    });
-
+    await sendPublicMovie(res, `${isUuid ? 'm.id' : 'm.mysql_id'} = $1`, [id]);
   } catch (error) {
     logError(error, req, { operation: 'get_public_movie', movieId: req.params.id });
     res.status(500).json({ error: error.message });
   }
 });
+
+async function sendPublicMovie(res, condition, params) {
+  const query = `
+    SELECT 
+      m.*,
+      e.year as edition_year,
+      e.name as edition_name
+    FROM movies m
+    JOIN editions e ON m.edition_id = e.id
+    WHERE ${condition} AND m.is_public = true
+  `;
+  
+  const result = await pool.query(query, params);
+  
+  if (result.rows.length === 0) {
+    return res.status(404).json({ error: 'Movie not found' });
+  }
+  
+  const movie = result.rows[0];
+  // Internal workflow fields (staff email) — not for the public API.
+  delete movie.files_ready_at;
+  delete movie.files_ready_by;
+
+  // Add image URLs if image_url exists
+  if (movie.image_url) {
+    movie.image_urls = {
+      original: imageStorage.getImageUrl(movie.image_url, 'original'),
+      large: imageStorage.getImageUrl(movie.image_url, 'large'),
+      medium: imageStorage.getImageUrl(movie.image_url, 'medium'),
+      thumbnail: imageStorage.getImageUrl(movie.image_url, 'thumbnail'),
+      small: imageStorage.getImageUrl(movie.image_url, 'small')
+    };
+  }
+
+  // Fetch screenings for this movie (both direct and in blocks)
+  const screenings = [];
+
+  // Get direct movie screenings
+  const directScreeningsQuery = `
+    SELECT
+      ps.id as screening_id,
+      ps.scheduled_date::text as scheduled_date,
+      ps.scheduled_time,
+      ps.end_date::text as end_date,
+      ps.ticket_link,
+      ps.free_entry,
+      v.name_cs as venue_name_cs,
+      v.name_en as venue_name_en,
+      null as block_name_cs,
+      null as block_name_en
+    FROM programming_schedule ps
+    JOIN venues v ON ps.venue_id = v.id
+    WHERE ps.movie_id = $1
+      AND ps.hidden_from_public = false
+    ORDER BY ps.scheduled_date, ps.scheduled_time
+  `;
+
+  const directScreenings = await pool.query(directScreeningsQuery, [movie.id]);
+
+  // Get block screenings where this movie appears
+  const blockScreeningsQuery = `
+    SELECT
+      ps.id as screening_id,
+      ps.scheduled_date::text as scheduled_date,
+      ps.scheduled_time,
+      ps.end_date::text as end_date,
+      ps.ticket_link,
+      ps.free_entry,
+      v.name_cs as venue_name_cs,
+      v.name_en as venue_name_en,
+      mb.name_cs as block_name_cs,
+      mb.name_en as block_name_en
+    FROM programming_schedule ps
+    JOIN movie_blocks mb ON ps.block_id = mb.id
+    JOIN block_movies bm ON mb.id = bm.block_id
+    JOIN venues v ON ps.venue_id = v.id
+    WHERE bm.movie_id = $1
+      AND ps.hidden_from_public = false
+    ORDER BY ps.scheduled_date, ps.scheduled_time
+  `;
+
+  const blockScreenings = await pool.query(blockScreeningsQuery, [movie.id]);
+
+  // Combine and format screenings
+  [...directScreenings.rows, ...blockScreenings.rows].forEach(screening => {
+    screenings.push({
+      screening_id: screening.screening_id,
+      date: screening.scheduled_date,
+      time: screening.scheduled_time,
+      all_day: !screening.scheduled_time,
+      end_date: screening.end_date,
+      venue_cs: screening.venue_name_cs,
+      venue_en: screening.venue_name_en,
+      ticket_link: screening.ticket_link,
+      free_entry: screening.free_entry,
+      block_name_cs: screening.block_name_cs,
+      block_name_en: screening.block_name_en,
+      is_block: !!screening.block_name_cs
+    });
+  });
+
+  // Sort screenings by date and time
+  screenings.sort((a, b) => {
+    const dateTimeA = a.date + ' ' + a.time;
+    const dateTimeB = b.date + ' ' + b.time;
+    return dateTimeA.localeCompare(dateTimeB);
+  });
+
+  // Add screenings to movie object
+  movie.screenings = screenings;
+
+  const paths = publicMoviePaths(movie);
+  res.json({
+    movie,
+    // Canonical paths on irmf.cz (cs) and irmf.net (en)
+    paths,
+    wordpress_url: paths.cs
+  });
+}
 
 // GET /api/public/editions - List available editions
 router.get('/public/editions', async (req, res) => {
@@ -746,6 +777,7 @@ router.get('/public/programming', async (req, res) => {
       JOIN venues v ON ps.venue_id = v.id
       JOIN editions e ON ps.edition_id = e.id
       LEFT JOIN movies m ON ps.movie_id = m.id
+      LEFT JOIN editions me ON m.edition_id = me.id
       LEFT JOIN movie_blocks mb ON ps.block_id = mb.id
       WHERE ps.hidden_from_public = false
     `;
@@ -788,6 +820,7 @@ router.get('/public/programming', async (req, res) => {
         v.name_en as venue_name_en,
         v.capacity as venue_capacity,
         -- Movie details (if single movie)
+        ps.movie_id,
         m.name_cs as movie_name_cs,
         m.name_en as movie_name_en,
         m.director as movie_director,
@@ -797,6 +830,9 @@ router.get('/public/programming', async (req, res) => {
         m.synopsis_en as movie_synopsis_en,
         m.image_url as movie_image_url,
         m.has_delegation as movie_has_delegation,
+        m.slug_cs as movie_slug_cs,
+        m.slug_en as movie_slug_en,
+        me.year as movie_edition_year,
         -- Block details (if block)
         mb.name_cs as block_name_cs,
         mb.name_en as block_name_en,
@@ -834,6 +870,14 @@ router.get('/public/programming', async (req, res) => {
         };
       }
       
+      if (entry.movie_id) {
+        entry.movie_paths = publicMoviePaths({
+          edition_year: entry.movie_edition_year,
+          slug_cs: entry.movie_slug_cs,
+          slug_en: entry.movie_slug_en
+        });
+      }
+
       // If it's a block, get the movies in the block
       if (entry.block_name_cs || entry.block_name_en) {
         const moviesResult = await pool.query(`
@@ -851,9 +895,13 @@ router.get('/public/programming', async (req, res) => {
             m.cast,
             m.image_url,
             m.has_delegation,
+            m.slug_cs,
+            m.slug_en,
+            me.year as edition_year,
             bm.sort_order
           FROM block_movies bm
           JOIN movies m ON bm.movie_id = m.id
+          JOIN editions me ON m.edition_id = me.id
           JOIN programming_schedule ps ON ps.block_id = bm.block_id
           WHERE ps.id = $1
           ORDER BY bm.sort_order, m.name_cs
@@ -870,6 +918,7 @@ router.get('/public/programming', async (req, res) => {
               small: imageStorage.getImageUrl(movie.image_url, 'small')
             };
           }
+          movie.paths = publicMoviePaths(movie);
           return movie;
         });
       }
@@ -931,6 +980,9 @@ router.get('/public/programming/:id', async (req, res) => {
         m.cast as movie_cast,
         m.image_url as movie_image_url,
         m.has_delegation as movie_has_delegation,
+        m.slug_cs as movie_slug_cs,
+        m.slug_en as movie_slug_en,
+        me.year as movie_edition_year,
         -- Block details (if block)
         mb.id as block_id,
         mb.name_cs as block_name_cs,
@@ -943,6 +995,7 @@ router.get('/public/programming/:id', async (req, res) => {
       JOIN venues v ON ps.venue_id = v.id
       JOIN editions e ON ps.edition_id = e.id
       LEFT JOIN movies m ON ps.movie_id = m.id
+      LEFT JOIN editions me ON m.edition_id = me.id
       LEFT JOIN movie_blocks mb ON ps.block_id = mb.id
       WHERE ps.id = $1 AND ps.hidden_from_public = false
     `;
@@ -972,9 +1025,13 @@ router.get('/public/programming/:id', async (req, res) => {
           m.cast,
           m.image_url,
           m.has_delegation,
+          m.slug_cs,
+          m.slug_en,
+          me.year as edition_year,
           bm.sort_order
         FROM block_movies bm
         JOIN movies m ON bm.movie_id = m.id
+        JOIN editions me ON m.edition_id = me.id
         WHERE bm.block_id = $1
         ORDER BY bm.sort_order, m.name_cs
       `, [entry.block_id]);
@@ -990,10 +1047,19 @@ router.get('/public/programming/:id', async (req, res) => {
             small: imageStorage.getImageUrl(movie.image_url, 'small')
           };
         }
+        movie.paths = publicMoviePaths(movie);
         return movie;
       });
     }
     
+    if (entry.movie_id) {
+      entry.movie_paths = publicMoviePaths({
+        edition_year: entry.movie_edition_year,
+        slug_cs: entry.movie_slug_cs,
+        slug_en: entry.movie_slug_en
+      });
+    }
+
     // Add image URLs to single movie if present
     if (entry.movie_image_url) {
       entry.movie_image_urls = {
