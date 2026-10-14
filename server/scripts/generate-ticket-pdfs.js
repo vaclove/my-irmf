@@ -1,20 +1,37 @@
 /**
  * Generate PDF tickets with unique barcodes
  * Layout: 3 rows × 4 columns = 12 tickets per page
+ *
+ * Usage: node server/scripts/generate-ticket-pdfs.js [startSequence] [pageCount] [outputDir]
+ * Output defaults to tmp/ in the repo root (gitignored).
  */
 
 const fs = require('fs');
-const { PDFDocument, rgb } = require('pdf-lib');
+const path = require('path');
+const { PDFDocument } = require('pdf-lib');
 const bwipjs = require('bwip-js');
 const { generateTicketCode } = require('../utils/luhn');
+
+const TEMPLATE_PATH = path.join(__dirname, '../data/ticket-template.pdf');
+
+const TICKETS_PER_PAGE = 12;
+const MM = 72 / 25.4; // points per millimetre
+
+// Code128 with 0.45 mm bars keeps the 10-module quiet zone on each side of the
+// 52.5 mm wide ticket; 14 mm tall bars fill most of the gap between the texts.
+// Bigger bars can be read from further away, beyond the minimum focus
+// distance of phones without good autofocus.
+const BAR_SCALE = 4;          // PNG pixels per module
+const MODULE_MM = 0.45;
+const BARCODE_HEIGHT_MM = 14;
 
 async function generateBarcode(text) {
   try {
     const png = await bwipjs.toBuffer({
       bcid: 'code128',       // Barcode type
       text: text,            // Text to encode
-      scale: 2,              // 2x scaling factor (smaller)
-      height: 6,             // Bar height, in millimeters (shorter)
+      scale: BAR_SCALE,
+      height: 4,             // Only sets the PNG aspect; drawn size is set below
       includetext: false,    // Hide human-readable text
     });
     return png;
@@ -24,110 +41,83 @@ async function generateBarcode(text) {
   }
 }
 
-async function generateTicketPage(startSequence = 0, count = 12) {
-  console.log(`\nGenerating ticket page with ${count} tickets starting from sequence ${startSequence}...`);
+async function drawTicketPage(pdfDoc, page, startSequence) {
+  const { width, height } = page.getSize();
 
-  // Load the template PDF
-  const templatePath = '/Users/vaclav.martinovsky/GitHub/my-irmf/tmp/a4-vstupenka-2025-prazdna.pdf';
-  const templateBytes = fs.readFileSync(templatePath);
-  const pdfDoc = await PDFDocument.load(templateBytes);
-
-  const pages = pdfDoc.getPages();
-  const firstPage = pages[0];
-  const { width, height } = firstPage.getSize();
-
-  console.log(`PDF page size: ${width} x ${height} points`);
-
-  // A4 size: 595 x 842 points
-  // Layout: 4 columns × 3 rows
-  // NOTE: User provided exact measurements from template:
-  // - First row ends at 1966.8 px out of 7016 px total height
-  // - This gives us exact ticket height
+  // A4 template, 4 columns × 3 rows of tickets
   const cols = 4;
-  const rows = 3;
   const ticketWidth = width / cols;
 
-  // Calculate exact ticket height from pixel measurements
-  // First ticket: 1966.8 / 7016 = 0.28036 of page height
-  const firstTicketHeightRatio = 1966.8 / 7016;
-  const ticketHeight = firstTicketHeightRatio * height; // = 236.35 points
+  // Measured from the template text positions (points from the page top):
+  // "jízdenka" ends at 74.6 and "VSTUPENKA" starts at 135.6 in the first row,
+  // rows repeat every 235.9
+  const rowPitch = 235.9;
+  const gapCenterFromTop = (74.6 + 135.6) / 2;
 
-  console.log(`Calculated ticket height: ${ticketHeight.toFixed(2)} points`);
+  const barcodeHeight = BARCODE_HEIGHT_MM * MM;
 
-  // Barcode offset from top of each ticket (row 0 works at 721.9)
-  // Top of page (841.89) - barcode Y (721.9) = 119.99 from top
-  const barcodeOffsetFromTicketTop = 120;
-
-  // Calculate Y position for each row's barcode
-  const barcodeYPositions = [
-    height - barcodeOffsetFromTicketTop,                    // Row 0
-    height - ticketHeight - barcodeOffsetFromTicketTop,     // Row 1
-    height - (2 * ticketHeight) - barcodeOffsetFromTicketTop // Row 2
-  ];
-
-  console.log(`Barcode Y positions: ${barcodeYPositions.map(y => y.toFixed(1)).join(', ')}`);
-
-  // Generate barcodes for each ticket
-  const tickets = [];
-  for (let i = 0; i < count && i < 12; i++) {
-    const sequence = startSequence + i;
-    const code = generateTicketCode(sequence);
-    const barcodePng = await generateBarcode(code);
-    tickets.push({ sequence, code, barcodePng });
-    console.log(`  Generated barcode for ticket #${sequence}: ${code}`);
-  }
-
-  // Position barcodes on the page
-  // Place barcode between "Jednorázová jízdenka" and "VSTUPENKA NA JEDNU FILMOVOU PROJEKCI"
-  for (let i = 0; i < tickets.length; i++) {
+  const codes = [];
+  for (let i = 0; i < TICKETS_PER_PAGE; i++) {
     const row = Math.floor(i / cols);
     const col = i % cols;
+    const code = generateTicketCode(startSequence + i);
 
-    // Calculate position (origin is bottom-left)
-    // We want to place the barcode centered horizontally in each ticket cell
+    const barcodeImage = await pdfDoc.embedPng(await generateBarcode(code));
+    const modules = barcodeImage.width / BAR_SCALE;
+    const barcodeWidth = modules * MODULE_MM * MM;
 
-    const barcodeImage = await pdfDoc.embedPng(tickets[i].barcodePng);
-    const barcodeDims = barcodeImage.scale(0.6); // Scale to fit nicely
+    // Center in the ticket cell (origin is bottom-left)
+    const x = col * ticketWidth + (ticketWidth - barcodeWidth) / 2;
+    const y = height - (row * rowPitch + gapCenterFromTop + barcodeHeight / 2);
 
-    // Position: Between "Jednorázová jízdenka" (top) and "VSTUPENKA NA JEDNU FILMOVOU PROJEKCI" (bottom)
-    const x = col * ticketWidth + (ticketWidth / 2) - (barcodeDims.width / 2); // Center horizontally
-
-    // Use pre-calculated Y positions for each row
-    const y = barcodeYPositions[row];
-
-    firstPage.drawImage(barcodeImage, {
+    page.drawImage(barcodeImage, {
       x: x,
       y: y,
-      width: barcodeDims.width,
-      height: barcodeDims.height,
+      width: barcodeWidth,
+      height: barcodeHeight,
     });
 
-    console.log(`  Placed barcode at row ${row}, col ${col}: (${x.toFixed(1)}, ${y.toFixed(1)})`);
+    codes.push(code);
   }
 
-  // Save the PDF
-  const pdfBytes = await pdfDoc.save();
-  const outputPath = `/Users/vaclav.martinovsky/GitHub/my-irmf/tmp/tickets-page-${startSequence}-${startSequence + count - 1}.pdf`;
-  fs.writeFileSync(outputPath, pdfBytes);
+  return codes;
+}
 
-  console.log(`\n✓ Successfully generated PDF with ${tickets.length} tickets`);
-  console.log(`✓ Saved to: ${outputPath}`);
-  console.log(`\nTicket codes on this page:`);
-  for (let i = 0; i < tickets.length; i++) {
-    const row = Math.floor(i / cols);
-    const col = i % cols;
-    console.log(`  Row ${row + 1}, Col ${col + 1}: ${tickets[i].code} (sequence ${tickets[i].sequence})`);
+async function generateTicketPdf(outputDir, startSequence = 0, pageCount = 1) {
+  const endSequence = startSequence + pageCount * TICKETS_PER_PAGE - 1;
+  if (endSequence > 9999) {
+    throw new Error(`Sequence ${endSequence} is out of range (max 9999)`);
   }
 
+  console.log(`Generating ${pageCount} page(s), tickets ${startSequence}-${endSequence}...`);
+
+  const templateDoc = await PDFDocument.load(fs.readFileSync(TEMPLATE_PATH));
+  const pdfDoc = await PDFDocument.create();
+
+  for (let p = 0; p < pageCount; p++) {
+    const [page] = await pdfDoc.copyPages(templateDoc, [0]);
+    pdfDoc.addPage(page);
+
+    const pageStart = startSequence + p * TICKETS_PER_PAGE;
+    const codes = await drawTicketPage(pdfDoc, page, pageStart);
+    console.log(`  Page ${p + 1}/${pageCount}: ${codes[0]} - ${codes[codes.length - 1]}`);
+  }
+
+  const outputPath = path.join(outputDir, `tickets-${startSequence}-${endSequence}.pdf`);
+  fs.writeFileSync(outputPath, await pdfDoc.save());
+
+  console.log(`\n✓ Generated ${pageCount * TICKETS_PER_PAGE} tickets`);
   return outputPath;
 }
 
 // Main execution
 (async () => {
+  const [start = '0', pages = '1', outputDir = path.join(__dirname, '../../tmp')] = process.argv.slice(2);
+
   try {
-    // Generate first page (tickets 0-11)
-    const outputPath = await generateTicketPage(0, 12);
-    console.log(`\nDone! Please check: ${outputPath}`);
+    fs.mkdirSync(outputDir, { recursive: true });
+    const outputPath = await generateTicketPdf(outputDir, parseInt(start, 10), parseInt(pages, 10));
+    console.log(`Done! Please check: ${outputPath}`);
   } catch (error) {
     console.error('Error generating tickets:', error);
     process.exit(1);
