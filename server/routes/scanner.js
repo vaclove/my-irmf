@@ -2,6 +2,21 @@ const express = require('express');
 const router = express.Router();
 const { pool } = require('../models/database');
 const { isValidTicketCode } = require('../utils/luhn');
+const { isGoOutTicketCode, verifyGoOutTicket } = require('../services/goout-ticket-verifier');
+
+// Name shown for a scan without a guest record
+function scanLabel(badgeNumber, gooutStatus) {
+  const code = String(badgeNumber);
+  if (code.length === 7 && code.startsWith('30')) {
+    return { firstName: 'One-time', lastName: 'Ticket' };
+  }
+  switch (gooutStatus) {
+    case 'checked_in': return { firstName: 'GoOut', lastName: 'Ticket' };
+    case 'pass': return { firstName: 'GoOut', lastName: 'Festival pass' };
+    case 'unverified': return { firstName: 'GoOut', lastName: 'Ticket (unverified)' };
+    default: return { firstName: 'External', lastName: 'Guest' };
+  }
+}
 
 // Get upcoming screenings for scanner
 router.get('/screenings', async (req, res) => {
@@ -84,12 +99,14 @@ router.post('/scan', async (req, res) => {
     // Extract badge information based on scanned code format
     // Internal badge: YYYY### (length 7, not starting with 30) - e.g., 2025003
     // One-time ticket: 30XXXXC (length 7, starts with 30) - e.g., 3012347
-    // External GoOut: anything else - e.g., 1400528549781 (13 digits)
+    // GoOut ticket: 13 digits with an EAN-13 check digit - e.g., 1400528549781
+    // Anything else is rejected (usually a misread)
 
     const scannedStr = String(scanned_code);
     let badgeNumber = null;
     let isInternalBadge = false;
     let isOneTimeTicket = false;
+    let isGoOutTicket = false;
 
     if (scannedStr.length === 7) {
       if (scannedStr.startsWith('30')) {
@@ -103,6 +120,10 @@ router.post('/scan', async (req, res) => {
         badgeNumber = parseInt(scannedStr.slice(-3));
         isInternalBadge = !isNaN(badgeNumber);
       }
+    } else if (isGoOutTicketCode(scannedStr)) {
+      isGoOutTicket = true;
+    } else {
+      return res.status(400).json({ error: 'Unknown code' });
     }
 
     const badgeIdentifier = isInternalBadge ? badgeNumber : scannedStr;
@@ -190,13 +211,10 @@ router.post('/scan', async (req, res) => {
 
       // Ticket is valid and not used - no guest record
       guestId = null;
-    } else {
-      // External badge - no validation, allow scanning
-      guestId = null;
     }
 
-    // Check if already scanned for THIS screening (internal badges and external only)
-    if (isInternalBadge || (!isOneTimeTicket && !isInternalBadge)) {
+    // Check if already scanned for THIS screening (internal badges and GoOut tickets)
+    if (isInternalBadge || isGoOutTicket) {
       const existingQuery = isInternalBadge
         ? `SELECT id FROM badge_scans WHERE programming_id = $1 AND guest_id = $2`
         : `SELECT id FROM badge_scans WHERE programming_id = $1 AND badge_number = $2`;
@@ -213,18 +231,34 @@ router.post('/scan', async (req, res) => {
             lastName: guest.last_name,
             badgeNumber: guest.badge_number
           } : {
-            firstName: 'External',
-            lastName: 'Guest',
+            firstName: 'GoOut',
+            lastName: 'Ticket',
             badgeNumber: badgeIdentifier
           }
         });
       }
     }
 
+    // GoOut ticket: verify and check in at GoOut. If GoOut does not answer in
+    // time it is let in as unverified; the local check above still blocks
+    // double entry to this screening.
+    let gooutStatus = null;
+    if (isGoOutTicket) {
+      const verdict = await verifyGoOutTicket(scannedStr, programming_id);
+      if (verdict.rejected) {
+        return res.status(verdict.httpStatus).json({
+          error: verdict.error,
+          guest: { firstName: 'GoOut', lastName: 'Ticket', badgeNumber: scannedStr },
+          usedFor: verdict.usedFor
+        });
+      }
+      gooutStatus = verdict.status;
+    }
+
     // Insert scan record
     const insertQuery = `
-      INSERT INTO badge_scans (programming_id, guest_id, badge_number, scanned_by)
-      VALUES ($1, $2, $3, $4)
+      INSERT INTO badge_scans (programming_id, guest_id, badge_number, scanned_by, goout_status)
+      VALUES ($1, $2, $3, $4, $5)
       RETURNING id, scanned_at
     `;
 
@@ -232,7 +266,8 @@ router.post('/scan', async (req, res) => {
       programming_id,
       guestId,
       String(badgeIdentifier),
-      req.user?.email || 'scanner-app'
+      req.user?.email || 'scanner-app',
+      gooutStatus
     ]);
 
     // Get updated scan count
@@ -249,14 +284,9 @@ router.post('/scan', async (req, res) => {
         firstName: guest.first_name,
         lastName: guest.last_name,
         badgeNumber: guest.badge_number
-      } : isOneTimeTicket ? {
-        firstName: 'One-time',
-        lastName: 'Ticket',
-        badgeNumber: scannedStr
       } : {
-        firstName: 'External',
-        lastName: 'Guest',
-        badgeNumber: badgeIdentifier
+        ...scanLabel(scannedStr, gooutStatus),
+        badgeNumber: scannedStr
       },
       scannedAt: insertResult.rows[0].scanned_at,
       totalScans: parseInt(countResult.rows[0].count)
@@ -278,6 +308,7 @@ router.get('/scans/:programming_id', async (req, res) => {
         bs.badge_number,
         bs.scanned_at,
         bs.scanned_by,
+        bs.goout_status,
         g.first_name,
         g.last_name,
         bs.guest_id
@@ -290,20 +321,9 @@ router.get('/scans/:programming_id', async (req, res) => {
     const result = await pool.query(query, [programming_id]);
 
     const scans = result.rows.map(row => {
-      // Determine badge type
-      const badgeStr = String(row.badge_number);
-      let firstName = 'External';
-      let lastName = 'Guest';
-
-      if (row.guest_id) {
-        // Internal badge with guest
-        firstName = row.first_name;
-        lastName = row.last_name;
-      } else if (badgeStr.length === 7 && badgeStr.startsWith('30')) {
-        // One-time ticket
-        firstName = 'One-time';
-        lastName = 'Ticket';
-      }
+      const { firstName, lastName } = row.guest_id
+        ? { firstName: row.first_name, lastName: row.last_name }
+        : scanLabel(row.badge_number, row.goout_status);
 
       return {
         id: row.id,
@@ -418,6 +438,7 @@ router.get('/edition/:edition_id/scans', async (req, res) => {
         bs.badge_number,
         bs.scanned_at,
         bs.scanned_by,
+        bs.goout_status,
         bs.guest_id,
         g.first_name,
         g.last_name,
@@ -445,20 +466,9 @@ router.get('/edition/:edition_id/scans', async (req, res) => {
     const result = await pool.query(query, [edition_id]);
 
     const scans = result.rows.map(row => {
-      // Determine badge type
-      const badgeStr = String(row.badge_number);
-      let firstName = 'External';
-      let lastName = 'Guest';
-
-      if (row.guest_id) {
-        // Internal badge with guest
-        firstName = row.first_name;
-        lastName = row.last_name;
-      } else if (badgeStr.length === 7 && badgeStr.startsWith('30')) {
-        // One-time ticket
-        firstName = 'One-time';
-        lastName = 'Ticket';
-      }
+      const { firstName, lastName } = row.guest_id
+        ? { firstName: row.first_name, lastName: row.last_name }
+        : scanLabel(row.badge_number, row.goout_status);
 
       return {
         id: row.id,

@@ -50,10 +50,13 @@ const sales = await goOutAPI.getSales([117477]);
   - Request body:
     ```json
     {
-      "barCodeId": "1400528549781",
-      "checkInId": 123456
+      "checkInId": 123456,
+      "ticketId": "1400528549781",
+      "entryAt": "2026-10-22T18:25:00.000Z",
+      "scannerId": "my-irmf"
     }
     ```
+    The ticket id is the same as its barcode.
   - Responses:
     - 200 - Successfully checked in
     - 404 - Ticket or check-in not found
@@ -106,13 +109,13 @@ SET access_token = 'new_token',
 
 ## Integration with Scanner
 
-To integrate with the existing badge scanner:
+`services/goout-ticket-verifier.js` verifies GoOut tickets scanned in the scanner:
 
-1. When scanning an external badge (13 digits), check if it's a GoOut ticket
-2. Look up the ticket using `goOutAPI.getPurchaseByBarcode(barcode)`
-3. Verify ticket is valid and not already checked in
-4. Store the check-in in your local database
-5. Optionally, also check-in via GoOut API using `goOutAPI.checkInTicket()`
+1. The code must be 13 digits with an EAN-13 check digit (GoOut tickets carry it in a QR code)
+2. Double entry to the same screening is blocked locally first
+3. The ticket is looked up (`findTicket`: purchase search by barcode, then the purchase by hash for exact ticket match, state and schedule)
+4. Ticket for this screening: checked in at GoOut (422 = already used); festival pass of this edition: let in without a GoOut check-in; anything else is rejected
+5. If GoOut does not answer within 1 s, the ticket is let in and stored with `goout_status = 'unverified'`
 
 ## API Documentation
 

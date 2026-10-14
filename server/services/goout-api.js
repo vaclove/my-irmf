@@ -126,7 +126,7 @@ class GoOutAPI {
   /**
    * Make authenticated API request to GoOut
    */
-  async apiRequest(method, path, data = null, params = {}) {
+  async apiRequest(method, path, data = null, params = {}, { timeout = 0 } = {}) {
     await this.ensureValidToken();
 
     try {
@@ -137,7 +137,8 @@ class GoOutAPI {
           'Authorization': `Bearer ${this.accessToken}`,
           'Content-Type': 'application/json'
         },
-        params
+        params,
+        timeout
       };
 
       if (data) {
@@ -160,7 +161,8 @@ class GoOutAPI {
             'Authorization': `Bearer ${this.accessToken}`,
             'Content-Type': 'application/json'
           },
-          params
+          params,
+          timeout
         };
 
         if (data) {
@@ -200,18 +202,53 @@ class GoOutAPI {
   }
 
   /**
-   * Check-in a ticket
-   * @param {string} barcode - Ticket barcode
-   * @param {number} checkInId - Check-in setup ID
-   * @param {string} language - Language code
+   * Find a ticket by its barcode.
+   * The search query also matches partial codes and does not return tickets,
+   * so each candidate purchase is loaded by its hash and the ticket matched exactly.
+   * @param {string} barcode - Ticket barcode (equals the GoOut ticket id)
+   * @returns {Promise<{state: string, scheduleId: string, isFestivalPass: boolean}|null>}
    */
-  async checkInTicket(barcode, checkInId, language = 'cs') {
+  async findTicket(barcode, { timeout = 0 } = {}) {
+    const search = await this.apiRequest('GET', '/services/reporting/v1/purchases', null, {
+      query: barcode,
+      'languages[]': ['cs'],
+      include: ''
+    }, { timeout });
+
+    for (const purchase of search.purchases || []) {
+      const detail = await this.apiRequest('GET', '/services/reporting/v1/purchases', null, {
+        'hashes[]': [purchase.attributes.hashedId],
+        'languages[]': ['cs'],
+        include: 'tickets,schedules'
+      }, { timeout });
+
+      const ticket = (detail.included?.tickets || []).find(t => String(t.id) === barcode);
+      const schedule = detail.included?.schedules?.[0];
+      if (ticket && schedule) {
+        return {
+          state: ticket.attributes.state,
+          scheduleId: String(schedule.id),
+          // The festival pass is a schedule without a start time
+          isFestivalPass: schedule.attributes?.hasTime === false
+        };
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Check-in a ticket
+   * @param {string} barcode - Ticket barcode (equals the GoOut ticket id)
+   * @param {number|string} checkInId - Check-in setup ID
+   * @throws 422 when the ticket is cancelled or already scanned, 404 when not found
+   */
+  async checkInTicket(barcode, checkInId, { timeout = 0 } = {}) {
     return await this.apiRequest('POST', '/services/entitystore/v2/checkin-entries', {
-      barCodeId: barcode,
-      checkInId: checkInId
-    }, {
-      language
-    });
+      checkInId: Number(checkInId),
+      ticketId: String(barcode),
+      entryAt: new Date().toISOString(),
+      scannerId: 'my-irmf'
+    }, {}, { timeout });
   }
 
   /**

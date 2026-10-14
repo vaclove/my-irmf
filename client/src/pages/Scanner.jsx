@@ -363,13 +363,15 @@ const Scanner = () => {
         }
 
         scanCooldownRef.current = true;
+        // Already scanned, or a GoOut ticket rejected (used, other screening, ...)
+        const alreadyScanned = data.error === 'Badge already scanned for this screening';
         setLastScan({
           success: false,
-          error: 'Already scanned',
+          error: alreadyScanned ? 'Already scanned' : data.error,
           guest: data.guest,
           usedFor: data.usedFor
         });
-        setError(`Badge ${scannedCode} already scanned for this screening`);
+        setError(alreadyScanned ? `Badge ${scannedCode} already scanned for this screening` : `${data.error}: ${scannedCode}`);
 
         // Resume scanner after error overlay
         setTimeout(async () => {
@@ -393,9 +395,9 @@ const Scanner = () => {
         scanCooldownRef.current = true;
         setLastScan({
           success: false,
-          error: 'Badge not found'
+          error: data.error || 'Badge not found'
         });
-        setError(`Badge ${scannedCode} not found`);
+        setError(`${data.error || 'Badge not found'}: ${scannedCode}`);
 
         // Resume scanner after error overlay
         setTimeout(async () => {
