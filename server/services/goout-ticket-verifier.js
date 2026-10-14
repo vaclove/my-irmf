@@ -46,6 +46,24 @@ async function describeScreening(gooutScheduleId) {
   return row ? `${row.title} - ${row.venue} (${row.scheduled_date} ${row.scheduled_time})` : null;
 }
 
+// Check the ticket in to this screening at GoOut. A ticket can be checked in
+// to each check-in once, so a festival pass works for every screening.
+async function checkIn(barcode, screening, status) {
+  if (!screening.goout_checkin_id) {
+    return { status };
+  }
+
+  try {
+    await goOutAPI.checkInTicket(barcode, screening.goout_checkin_id, { timeout: GOOUT_TIMEOUT_MS });
+    return { status };
+  } catch (error) {
+    if (error.response?.status === 422) {
+      return { rejected: true, httpStatus: 409, error: 'Ticket already used' };
+    }
+    throw error;
+  }
+}
+
 async function checkWithGoOut(barcode, screening) {
   const ticket = await goOutAPI.findTicket(barcode, { timeout: GOOUT_TIMEOUT_MS });
 
@@ -58,19 +76,7 @@ async function checkWithGoOut(barcode, screening) {
   }
 
   if (ticket.scheduleId === String(screening.goout_schedule_id)) {
-    if (!screening.goout_checkin_id) {
-      return { status: 'checked_in' };
-    }
-
-    try {
-      await goOutAPI.checkInTicket(barcode, screening.goout_checkin_id, { timeout: GOOUT_TIMEOUT_MS });
-      return { status: 'checked_in' };
-    } catch (error) {
-      if (error.response?.status === 422) {
-        return { rejected: true, httpStatus: 409, error: 'Ticket already used' };
-      }
-      throw error;
-    }
+    return checkIn(barcode, screening, 'checked_in');
   }
 
   if (ticket.isFestivalPass) {
@@ -80,7 +86,7 @@ async function checkWithGoOut(barcode, screening) {
       [screening.edition_id, ticket.scheduleId]
     );
     if (pass.rows.length > 0) {
-      return { status: 'pass' };
+      return checkIn(barcode, screening, 'pass');
     }
     return { rejected: true, httpStatus: 409, error: 'Festival pass from another edition' };
   }

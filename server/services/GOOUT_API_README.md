@@ -114,7 +114,7 @@ SET access_token = 'new_token',
 1. The code must be 13 digits with an EAN-13 check digit (GoOut tickets carry it in a QR code)
 2. Double entry to the same screening is blocked locally first
 3. The ticket is looked up (`findTicket`: purchase search by barcode, then the purchase by hash for exact ticket match, state and schedule)
-4. Ticket for this screening: checked in at GoOut (422 = already used); festival pass of this edition: let in without a GoOut check-in; anything else is rejected
+4. Ticket for this screening or festival pass of this edition: checked in to the screening's check-in at GoOut (422 = already used; a ticket can be checked in to each check-in once, so a pass works for every screening); anything else is rejected
 5. If GoOut does not answer within 1 s, the ticket is let in and stored with `goout_status = 'unverified'`
 
 ## API Documentation
