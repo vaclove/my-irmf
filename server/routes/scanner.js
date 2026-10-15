@@ -475,7 +475,6 @@ router.get('/edition/:edition_id/scans', async (req, res) => {
       LEFT JOIN guests g ON bs.guest_id = g.id
       WHERE ps.edition_id = $1
       ORDER BY bs.scanned_at DESC
-      LIMIT 500
     `;
 
     const result = await pool.query(query, [edition_id]);

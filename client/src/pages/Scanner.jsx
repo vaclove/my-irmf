@@ -58,8 +58,10 @@ const Scanner = () => {
     fetchEditions();
   }, []);
 
-  // Fetch screenings when edition is selected
+  // Fetch screenings when edition is selected; history belongs to the old edition
   useEffect(() => {
+    setEditionHistory([]);
+    setShowHistory(false);
     if (selectedEdition) {
       fetchScreenings();
     }
@@ -540,6 +542,26 @@ const Scanner = () => {
   if (!scanning) {
     return (
       <div className="max-w-2xl mx-auto">
+          {/* Edition Selection */}
+          {editions.length > 1 && (
+            <div className="bg-white rounded-lg shadow-sm border p-4 mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Festival Edition
+              </label>
+              <select
+                value={selectedEdition || ''}
+                onChange={(e) => setSelectedEdition(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-base"
+              >
+                {editions.map(edition => (
+                  <option key={edition.id} value={edition.id}>
+                    {edition.year} - {edition.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           {/* Screenings List */}
           {loading && (
             <div className="text-center py-8">
