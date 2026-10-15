@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { badgeApi } from '../utils/api';
+import { badgeApi, editionApi } from '../utils/api';
 import { useToast } from '../contexts/ToastContext';
 import BadgeDesigner from '../components/BadgeDesigner';
 
@@ -15,6 +15,14 @@ const BadgeSettings = () => {
   const [activeTab, setActiveTab] = useState('layouts');
   const [showDesigner, setShowDesigner] = useState(false);
   const [editingLayout, setEditingLayout] = useState(null);
+  const [showCopyModal, setShowCopyModal] = useState(false);
+  const [otherEditions, setOtherEditions] = useState([]);
+  const [sourceEditionId, setSourceEditionId] = useState('');
+  const [sourceLayouts, setSourceLayouts] = useState([]);
+  const [selectedSourceLayoutIds, setSelectedSourceLayoutIds] = useState([]);
+  const [copyAssignments, setCopyAssignments] = useState(true);
+  const [loadingSourceLayouts, setLoadingSourceLayouts] = useState(false);
+  const [copying, setCopying] = useState(false);
 
   const categories = ['filmmaker', 'press', 'guest', 'staff', 'public'];
 
@@ -87,6 +95,69 @@ const BadgeSettings = () => {
       setError(errorMessage);
       showError(errorMessage);
       console.error('Error deleting layout:', err);
+    }
+  };
+
+  const handleOpenCopyModal = async () => {
+    try {
+      const response = await editionApi.getAll();
+      const current = response.data.find(e => e.id === editionId);
+      const others = response.data.filter(e => e.id !== editionId);
+      setOtherEditions(others);
+      // Preselect the closest earlier edition (editions come sorted by year DESC)
+      const previous = others.find(e => !current || e.year < current.year) || others[0];
+      setShowCopyModal(true);
+      handleSourceEditionChange(previous?.id || '');
+    } catch (err) {
+      showError('Failed to load editions: ' + (err.response?.data?.error || err.message));
+      console.error('Error loading editions:', err);
+    }
+  };
+
+  const handleSourceEditionChange = async (id) => {
+    setSourceEditionId(id);
+    setSourceLayouts([]);
+    setSelectedSourceLayoutIds([]);
+    if (!id) return;
+
+    try {
+      setLoadingSourceLayouts(true);
+      const response = await badgeApi.getLayouts(id);
+      setSourceLayouts(response.data);
+      setSelectedSourceLayoutIds(response.data.map(l => l.id));
+    } catch (err) {
+      showError('Failed to load layouts: ' + (err.response?.data?.error || err.message));
+      console.error('Error loading source layouts:', err);
+    } finally {
+      setLoadingSourceLayouts(false);
+    }
+  };
+
+  const toggleSourceLayout = (id) => {
+    setSelectedSourceLayoutIds(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+  };
+
+  const handleCopyLayouts = async () => {
+    try {
+      setCopying(true);
+      const response = await badgeApi.copyLayouts(
+        editionId, sourceEditionId, selectedSourceLayoutIds, copyAssignments
+      );
+      const { layouts_copied, assignments_copied } = response.data;
+      success(
+        `Copied ${layouts_copied} layout${layouts_copied === 1 ? '' : 's'}` +
+        (copyAssignments ? ` and ${assignments_copied} category assignment${assignments_copied === 1 ? '' : 's'}` : '')
+      );
+      setShowCopyModal(false);
+      fetchData();
+      setError('');
+    } catch (err) {
+      showError('Failed to copy layouts: ' + (err.response?.data?.error || err.message));
+      console.error('Error copying layouts:', err);
+    } finally {
+      setCopying(false);
     }
   };
 
@@ -193,12 +264,20 @@ const BadgeSettings = () => {
           <div>
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-semibold">Badge Layouts</h2>
-              <button
-                onClick={handleCreateLayout}
-                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-              >
-                Create New Layout
-              </button>
+              <div className="flex space-x-2">
+                <button
+                  onClick={handleOpenCopyModal}
+                  className="px-4 py-2 text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50"
+                >
+                  Copy from Previous Edition
+                </button>
+                <button
+                  onClick={handleCreateLayout}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                >
+                  Create New Layout
+                </button>
+              </div>
             </div>
 
             {layouts.length === 0 ? (
@@ -310,6 +389,96 @@ const BadgeSettings = () => {
           </div>
         )}
       </div>
+      {/* Copy Layouts Modal */}
+      {showCopyModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-lg shadow-xl max-w-md w-full mx-4">
+            <h2 className="text-xl font-semibold mb-4">Copy Layouts from Previous Edition</h2>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Source Edition
+                </label>
+                <select
+                  value={sourceEditionId}
+                  onChange={(e) => handleSourceEditionChange(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">Select edition...</option>
+                  {otherEditions.map((edition) => (
+                    <option key={edition.id} value={edition.id}>
+                      {edition.year} – {edition.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {sourceEditionId && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Layouts
+                  </label>
+                  {loadingSourceLayouts ? (
+                    <p className="text-sm text-gray-500">Loading layouts...</p>
+                  ) : sourceLayouts.length === 0 ? (
+                    <p className="text-sm text-gray-500">This edition has no badge layouts.</p>
+                  ) : (
+                    <div className="border border-gray-200 rounded-md divide-y divide-gray-200 max-h-60 overflow-y-auto">
+                      {sourceLayouts.map((layout) => (
+                        <label key={layout.id} className="flex items-center px-3 py-2 hover:bg-gray-50 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={selectedSourceLayoutIds.includes(layout.id)}
+                            onChange={() => toggleSourceLayout(layout.id)}
+                            className="mr-3"
+                          />
+                          <span className="text-sm text-gray-900 flex-1">{layout.name}</span>
+                          <span className="text-xs text-gray-500">
+                            {layout.canvas_width_mm}mm × {layout.canvas_height_mm}mm
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <label className="flex items-start text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={copyAssignments}
+                  onChange={(e) => setCopyAssignments(e.target.checked)}
+                  className="mr-2 mt-0.5"
+                />
+                <span>
+                  Also copy category assignments
+                  <span className="block text-xs text-gray-500">
+                    Overwrites current assignments for categories that used a copied layout.
+                  </span>
+                </span>
+              </label>
+            </div>
+
+            <div className="flex justify-end space-x-2 mt-6">
+              <button
+                onClick={() => setShowCopyModal(false)}
+                disabled={copying}
+                className="px-4 py-2 text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCopyLayouts}
+                disabled={copying || selectedSourceLayoutIds.length === 0}
+                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {copying ? 'Copying...' : `Copy ${selectedSourceLayoutIds.length} Layout${selectedSourceLayoutIds.length === 1 ? '' : 's'}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
