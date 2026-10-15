@@ -4,6 +4,10 @@ const { pool } = require('../models/database');
 const { isValidTicketCode } = require('../utils/luhn');
 const { isGoOutTicketCode, verifyGoOutTicket } = require('../services/goout-ticket-verifier');
 
+// badge_scans.scanned_at is a timestamp without time zone holding Prague time (the DB
+// session runs in Europe/Prague), while Node runs in UTC. Queries read it with
+// AT TIME ZONE 'Europe/Prague' so clients get the right instant.
+
 const GOOUT_TICKET_TYPES = {
   checked_in: 'GoOut ticket',
   pass: 'Festival pass',
@@ -36,11 +40,9 @@ router.get('/screenings', async (req, res) => {
       return res.status(400).json({ error: 'edition_id is required' });
     }
 
-    const now = new Date();
-    const currentDate = now.toISOString().split('T')[0];
-    const currentTime = now.toTimeString().split(' ')[0].substring(0, 5);
-
-    // Get screenings that haven't finished yet (includes currently running)
+    // Get screenings that haven't finished yet (includes currently running).
+    // Programme times are Prague time; comparing the end as a timestamp handles
+    // screenings that end after midnight and doesn't depend on the server's time zone.
     const query = `
       SELECT
         ps.id,
@@ -64,15 +66,13 @@ router.get('/screenings', async (req, res) => {
         AND ps.scheduled_time IS NOT NULL -- all-day events have no door to scan at
         AND ps.free_entry = false -- free events have no tickets to check
         AND ps.hidden_from_public IS NOT TRUE -- admin-only entries aren't public screenings
-        AND (
-          ps.scheduled_date > $2
-          OR (ps.scheduled_date = $2 AND (ps.scheduled_time + (ps.total_runtime || ' minutes')::interval)::time >= $3)
-        )
+        AND ((ps.scheduled_date + ps.scheduled_time) AT TIME ZONE 'Europe/Prague')
+              + (COALESCE(ps.total_runtime, 0) || ' minutes')::interval >= now()
       ORDER BY ps.scheduled_date ASC, ps.scheduled_time ASC
       LIMIT 50
     `;
 
-    const result = await pool.query(query, [edition_id, currentDate, currentTime]);
+    const result = await pool.query(query, [edition_id]);
 
     // Format the response
     const screenings = result.rows.map(row => ({
@@ -178,7 +178,7 @@ router.post('/scan', async (req, res) => {
       const usedQuery = `
         SELECT
           bs.id,
-          bs.scanned_at,
+          bs.scanned_at AT TIME ZONE 'Europe/Prague' AS scanned_at,
           bs.programming_id,
           ps.scheduled_date,
           ps.scheduled_time,
@@ -271,7 +271,7 @@ router.post('/scan', async (req, res) => {
     const insertQuery = `
       INSERT INTO badge_scans (programming_id, guest_id, badge_number, scanned_by, goout_status, holder_name)
       VALUES ($1, $2, $3, $4, $5, $6)
-      RETURNING id, scanned_at
+      RETURNING id, scanned_at AT TIME ZONE 'Europe/Prague' AS scanned_at
     `;
 
     const insertResult = await pool.query(insertQuery, [
@@ -320,7 +320,7 @@ router.get('/scans/:programming_id', async (req, res) => {
       SELECT
         bs.id,
         bs.badge_number,
-        bs.scanned_at,
+        bs.scanned_at AT TIME ZONE 'Europe/Prague' AS scanned_at,
         bs.scanned_by,
         bs.goout_status,
         bs.holder_name,
@@ -392,7 +392,7 @@ router.get('/badge/:guest_id/scans', async (req, res) => {
         bs.id,
         bs.programming_id,
         bs.badge_number,
-        bs.scanned_at,
+        bs.scanned_at AT TIME ZONE 'Europe/Prague' AS scanned_at,
         bs.scanned_by,
         ps.scheduled_date,
         ps.scheduled_time,
@@ -452,7 +452,7 @@ router.get('/edition/:edition_id/scans', async (req, res) => {
         bs.id,
         bs.programming_id,
         bs.badge_number,
-        bs.scanned_at,
+        bs.scanned_at AT TIME ZONE 'Europe/Prague' AS scanned_at,
         bs.scanned_by,
         bs.goout_status,
         bs.holder_name,

@@ -50,6 +50,10 @@ const Scanner = ({ onScanningChange }) => {
   const selectedScreeningRef = useRef(null);
   const lastScannedBadgeRef = useRef(null);
   const scanCooldownRef = useRef(false);
+  // Scan request in flight, so Stop can wait for it before refreshing the list
+  const pendingScanRef = useRef(Promise.resolve());
+  // Bumped on every recorded or removed scan; a scan list loaded before that is outdated
+  const scanVersionRef = useRef(0);
   const [cameras, setCameras] = useState([]);
   const [cameraId, setCameraId] = useState(null);
   const [manualCode, setManualCode] = useState('');
@@ -316,7 +320,13 @@ const Scanner = ({ onScanningChange }) => {
     // Ignore scan errors (they happen continuously while scanning)
   };
 
-  const submitScan = async (scannedCode) => {
+  const submitScan = (scannedCode) => {
+    const pending = postScan(scannedCode);
+    pendingScanRef.current = pending;
+    return pending;
+  };
+
+  const postScan = async (scannedCode) => {
     const screening = selectedScreeningRef.current;
     if (!screening) {
       setError('No screening selected');
@@ -356,6 +366,7 @@ const Scanner = ({ onScanningChange }) => {
           guest: data.guest,
           timestamp: new Date()
         });
+        scanVersionRef.current++;
         setScanCount(data.totalScans);
         // Add to scanned guests list
         setScannedGuests(prev => [{
@@ -511,16 +522,29 @@ const Scanner = ({ onScanningChange }) => {
     }
     setScanning(false);
     setSelectedScreening(null);
+    // Refresh the "Scanned: N" counts in the list once a scan being sent is saved
+    await pendingScanRef.current;
+    fetchScreenings();
   };
 
   const fetchScannedGuests = async (programmingId) => {
+    const version = scanVersionRef.current;
     try {
       const response = await fetch(`/api/scanner/scans/${programmingId}`, {
         credentials: 'include'
       });
       if (response.ok) {
         const data = await response.json();
+        // Another screening was opened meanwhile
+        if (selectedScreeningRef.current?.id !== programmingId) return;
+        // A scan was recorded or removed while loading: this list may miss it, load again
+        if (version !== scanVersionRef.current) {
+          fetchScannedGuests(programmingId);
+          return;
+        }
         setScannedGuests(data.scans);
+        // The count from the screenings list may be stale (it isn't reloaded after scanning)
+        setScanCount(data.scans.length);
       }
     } catch (error) {
       console.error('Error fetching scanned guests:', error);
@@ -541,7 +565,8 @@ const Scanner = ({ onScanningChange }) => {
       if (response.ok) {
         // Remove from local state
         setScannedGuests(prev => prev.filter(guest => guest.id !== scanId));
-        setScanCount(prev => prev - 1);
+        scanVersionRef.current++;
+        setScanCount(prev => Math.max(prev - 1, 0));
       } else {
         setError('Failed to remove scan');
       }
