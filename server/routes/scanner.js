@@ -4,6 +4,10 @@ const { pool } = require('../models/database');
 const { isValidTicketCode } = require('../utils/luhn');
 const { isGoOutTicketCode, verifyGoOutTicket } = require('../services/goout-ticket-verifier');
 
+// badge_scans.scanned_at is a timestamp without time zone holding Prague time (the DB
+// session runs in Europe/Prague), while Node runs in UTC. Queries read it with
+// AT TIME ZONE 'Europe/Prague' so clients get the right instant.
+
 const GOOUT_TICKET_TYPES = {
   checked_in: 'GoOut ticket',
   pass: 'Festival pass',
@@ -178,7 +182,7 @@ router.post('/scan', async (req, res) => {
       const usedQuery = `
         SELECT
           bs.id,
-          bs.scanned_at,
+          bs.scanned_at AT TIME ZONE 'Europe/Prague' AS scanned_at,
           bs.programming_id,
           ps.scheduled_date,
           ps.scheduled_time,
@@ -271,7 +275,7 @@ router.post('/scan', async (req, res) => {
     const insertQuery = `
       INSERT INTO badge_scans (programming_id, guest_id, badge_number, scanned_by, goout_status, holder_name)
       VALUES ($1, $2, $3, $4, $5, $6)
-      RETURNING id, scanned_at
+      RETURNING id, scanned_at AT TIME ZONE 'Europe/Prague' AS scanned_at
     `;
 
     const insertResult = await pool.query(insertQuery, [
@@ -320,7 +324,7 @@ router.get('/scans/:programming_id', async (req, res) => {
       SELECT
         bs.id,
         bs.badge_number,
-        bs.scanned_at,
+        bs.scanned_at AT TIME ZONE 'Europe/Prague' AS scanned_at,
         bs.scanned_by,
         bs.goout_status,
         bs.holder_name,
@@ -392,7 +396,7 @@ router.get('/badge/:guest_id/scans', async (req, res) => {
         bs.id,
         bs.programming_id,
         bs.badge_number,
-        bs.scanned_at,
+        bs.scanned_at AT TIME ZONE 'Europe/Prague' AS scanned_at,
         bs.scanned_by,
         ps.scheduled_date,
         ps.scheduled_time,
@@ -452,7 +456,7 @@ router.get('/edition/:edition_id/scans', async (req, res) => {
         bs.id,
         bs.programming_id,
         bs.badge_number,
-        bs.scanned_at,
+        bs.scanned_at AT TIME ZONE 'Europe/Prague' AS scanned_at,
         bs.scanned_by,
         bs.goout_status,
         bs.holder_name,

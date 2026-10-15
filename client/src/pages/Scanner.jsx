@@ -511,6 +511,8 @@ const Scanner = ({ onScanningChange }) => {
     }
     setScanning(false);
     setSelectedScreening(null);
+    // Refresh the "Scanned: N" counts in the list
+    fetchScreenings();
   };
 
   const fetchScannedGuests = async (programmingId) => {
@@ -521,6 +523,8 @@ const Scanner = ({ onScanningChange }) => {
       if (response.ok) {
         const data = await response.json();
         setScannedGuests(data.scans);
+        // The count from the screenings list may be stale (it isn't reloaded after scanning)
+        setScanCount(data.scans.length);
       }
     } catch (error) {
       console.error('Error fetching scanned guests:', error);
@@ -541,7 +545,7 @@ const Scanner = ({ onScanningChange }) => {
       if (response.ok) {
         // Remove from local state
         setScannedGuests(prev => prev.filter(guest => guest.id !== scanId));
-        setScanCount(prev => prev - 1);
+        setScanCount(prev => Math.max(prev - 1, 0));
       } else {
         setError('Failed to remove scan');
       }
