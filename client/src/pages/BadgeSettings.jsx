@@ -3,11 +3,13 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { badgeApi, editionApi } from '../utils/api';
 import { useToast } from '../contexts/ToastContext';
 import BadgeDesigner from '../components/BadgeDesigner';
+import EditionPlaceholderUpload from '../components/EditionPlaceholderUpload';
 
 const BadgeSettings = () => {
   const { editionId } = useParams();
   const navigate = useNavigate();
   const { success, error: showError } = useToast();
+  const [edition, setEdition] = useState(null);
   const [layouts, setLayouts] = useState([]);
   const [assignments, setAssignments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -33,11 +35,13 @@ const BadgeSettings = () => {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [layoutsResponse, assignmentsResponse] = await Promise.all([
+      const [editionResponse, layoutsResponse, assignmentsResponse] = await Promise.all([
+        editionApi.getById(editionId),
         badgeApi.getLayouts(editionId),
         badgeApi.getAssignments(editionId)
       ]);
       
+      setEdition(editionResponse.data);
       setLayouts(layoutsResponse.data);
       setAssignments(assignmentsResponse.data);
     } catch (err) {
@@ -228,6 +232,18 @@ const BadgeSettings = () => {
         {error && (
           <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-md">
             <p className="text-red-700">{error}</p>
+          </div>
+        )}
+
+        {/* Placeholder photo for guests without their own photo */}
+        {edition && (
+          <div className="bg-white rounded-lg shadow-sm border p-4 mb-6">
+            <div className="max-w-xs">
+              <EditionPlaceholderUpload
+                edition={edition}
+                onPhotoUpdate={(photo) => setEdition(prev => ({ ...prev, placeholder_photo: photo }))}
+              />
+            </div>
           </div>
         )}
 
