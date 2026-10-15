@@ -62,6 +62,8 @@ router.get('/screenings', async (req, res) => {
       LEFT JOIN movie_blocks mb ON ps.block_id = mb.id
       WHERE ps.edition_id = $1
         AND ps.scheduled_time IS NOT NULL -- all-day events have no door to scan at
+        AND ps.free_entry = false -- free events have no tickets to check
+        AND ps.hidden_from_public IS NOT TRUE -- admin-only entries aren't public screenings
         AND (
           ps.scheduled_date > $2
           OR (ps.scheduled_date = $2 AND (ps.scheduled_time + (ps.total_runtime || ' minutes')::interval)::time >= $3)

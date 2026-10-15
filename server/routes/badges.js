@@ -59,6 +59,82 @@ router.post('/layouts', async (req, res) => {
   }
 });
 
+// Copy badge layouts (and optionally category assignments) from another edition
+router.post('/layouts/edition/:editionId/copy-from/:sourceEditionId', async (req, res) => {
+  const { editionId, sourceEditionId } = req.params;
+  const { layout_ids, copy_assignments } = req.body;
+
+  if (editionId === sourceEditionId) {
+    return res.status(400).json({ error: 'Source and target edition must differ' });
+  }
+  if (!Array.isArray(layout_ids) || layout_ids.length === 0) {
+    return res.status(400).json({ error: 'Select at least one layout to copy' });
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const sourceLayouts = await client.query(`
+      SELECT id, name, canvas_width_mm, canvas_height_mm,
+             background_color, background_image, layout_data
+      FROM badge_layouts
+      WHERE edition_id = $1 AND id = ANY($2::uuid[])
+    `, [sourceEditionId, layout_ids]);
+
+    if (sourceLayouts.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'No matching layouts found in source edition' });
+    }
+
+    // Map source layout id -> new layout id, used to carry over assignments
+    const idMap = new Map();
+    for (const layout of sourceLayouts.rows) {
+      const inserted = await client.query(`
+        INSERT INTO badge_layouts (
+          edition_id, name, canvas_width_mm, canvas_height_mm,
+          background_color, background_image, layout_data
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        RETURNING id
+      `, [editionId, layout.name, layout.canvas_width_mm, layout.canvas_height_mm,
+          layout.background_color, layout.background_image, layout.layout_data]);
+      idMap.set(layout.id, inserted.rows[0].id);
+    }
+
+    let assignmentsCopied = 0;
+    if (copy_assignments) {
+      const sourceAssignments = await client.query(`
+        SELECT category, layout_id
+        FROM category_badge_assignments
+        WHERE edition_id = $1 AND layout_id = ANY($2::uuid[])
+      `, [sourceEditionId, [...idMap.keys()]]);
+
+      for (const assignment of sourceAssignments.rows) {
+        await client.query(`
+          INSERT INTO category_badge_assignments (edition_id, category, layout_id)
+          VALUES ($1, $2, $3)
+          ON CONFLICT (edition_id, category) DO UPDATE SET layout_id = EXCLUDED.layout_id
+        `, [editionId, assignment.category, idMap.get(assignment.layout_id)]);
+        assignmentsCopied++;
+      }
+    }
+
+    await client.query('COMMIT');
+    res.status(201).json({
+      layouts_copied: idMap.size,
+      assignments_copied: assignmentsCopied
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error copying badge layouts:', error);
+    res.status(500).json({ error: 'Failed to copy badge layouts' });
+  } finally {
+    client.release();
+  }
+});
+
 // Update badge layout
 router.put('/layouts/:id', async (req, res) => {
   try {

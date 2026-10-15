@@ -109,6 +109,11 @@ export const badgeApi = {
   createLayout: (layout) => api.post('/badges/layouts', layout),
   updateLayout: (id, layout) => api.put(`/badges/layouts/${id}`, layout),
   deleteLayout: (id) => api.delete(`/badges/layouts/${id}`),
+  copyLayouts: (editionId, sourceEditionId, layoutIds, copyAssignments) =>
+    api.post(`/badges/layouts/edition/${editionId}/copy-from/${sourceEditionId}`, {
+      layout_ids: layoutIds,
+      copy_assignments: copyAssignments
+    }),
   
   // Assignments
   getAssignments: (editionId) => api.get(`/badges/assignments/edition/${editionId}`),
