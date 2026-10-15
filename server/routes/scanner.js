@@ -40,11 +40,9 @@ router.get('/screenings', async (req, res) => {
       return res.status(400).json({ error: 'edition_id is required' });
     }
 
-    const now = new Date();
-    const currentDate = now.toISOString().split('T')[0];
-    const currentTime = now.toTimeString().split(' ')[0].substring(0, 5);
-
-    // Get screenings that haven't finished yet (includes currently running)
+    // Get screenings that haven't finished yet (includes currently running).
+    // Programme times are Prague time; comparing the end as a timestamp handles
+    // screenings that end after midnight and doesn't depend on the server's time zone.
     const query = `
       SELECT
         ps.id,
@@ -68,15 +66,13 @@ router.get('/screenings', async (req, res) => {
         AND ps.scheduled_time IS NOT NULL -- all-day events have no door to scan at
         AND ps.free_entry = false -- free events have no tickets to check
         AND ps.hidden_from_public IS NOT TRUE -- admin-only entries aren't public screenings
-        AND (
-          ps.scheduled_date > $2
-          OR (ps.scheduled_date = $2 AND (ps.scheduled_time + (ps.total_runtime || ' minutes')::interval)::time >= $3)
-        )
+        AND ((ps.scheduled_date + ps.scheduled_time) AT TIME ZONE 'Europe/Prague')
+              + (COALESCE(ps.total_runtime, 0) || ' minutes')::interval >= now()
       ORDER BY ps.scheduled_date ASC, ps.scheduled_time ASC
       LIMIT 50
     `;
 
-    const result = await pool.query(query, [edition_id, currentDate, currentTime]);
+    const result = await pool.query(query, [edition_id]);
 
     // Format the response
     const screenings = result.rows.map(row => ({
