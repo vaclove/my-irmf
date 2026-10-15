@@ -52,6 +52,7 @@ const Scanner = ({ onScanningChange }) => {
   const scanCooldownRef = useRef(false);
   const [cameras, setCameras] = useState([]);
   const [cameraId, setCameraId] = useState(null);
+  const [manualCode, setManualCode] = useState('');
 
   // Fetch editions on mount
   useEffect(() => {
@@ -291,6 +292,24 @@ const Scanner = ({ onScanningChange }) => {
 
     // Submit scan to backend (send raw scanned text)
     await submitScan(decodedText);
+  };
+
+  // Fallback for codes the camera can't read: type the number printed on the badge or ticket
+  const submitManualCode = async (e) => {
+    e.preventDefault();
+    const code = manualCode.replace(/\s/g, '');
+    if (!code || scanCooldownRef.current) return;
+
+    if (html5QrcodeRef.current) {
+      try {
+        await html5QrcodeRef.current.pause();
+      } catch (err) {
+        console.error('Error pausing scanner:', err);
+      }
+    }
+
+    setManualCode('');
+    await submitScan(code);
   };
 
   const onScanError = (errorMessage) => {
@@ -791,6 +810,26 @@ const Scanner = ({ onScanningChange }) => {
             )}
           </button>
         )}
+
+        {/* Manual entry */}
+        <form onSubmit={submitManualCode} className="flex gap-2 mb-4">
+          <input
+            type="text"
+            inputMode="numeric"
+            autoComplete="off"
+            value={manualCode}
+            onChange={(e) => setManualCode(e.target.value)}
+            placeholder="Type code from badge or ticket"
+            className="flex-1 min-w-0 px-3 py-2 bg-gray-800 text-white border border-gray-700 rounded-md placeholder-gray-500"
+          />
+          <button
+            type="submit"
+            disabled={!manualCode.trim() || loading}
+            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+          >
+            Check in
+          </button>
+        </form>
 
         {/* Scan Count */}
         <div className="bg-gray-800 rounded-lg p-4 mb-4 text-center">
