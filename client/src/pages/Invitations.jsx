@@ -858,15 +858,22 @@ function Invitations() {
 
 
 
-  const handlePrintBadge = async (guestId) => {
+  const handlePrintBadge = async (guestId, printedAt = null) => {
+    if (printedAt && !confirm(`This badge was already printed on ${formatDate(printedAt)}. Print it again?`)) return
+
     try {
-      // Get badge print data from API
+      // Get badge print data from API (also records the print time)
       const response = await badgeApi.getPrintData(guestId, selectedEdition.id);
       const { layout, guest } = response.data;
 
       // Generate and download PDF
       await printBadge(layout, guest, selectedEdition.year);
       success('Badge PDF generated successfully!');
+
+      // Show Reprint right away, without reloading the list
+      const now = new Date().toISOString()
+      setInvitations(prev => prev.map(inv => inv.guest_id === guestId ? { ...inv, badge_printed_at: now } : inv))
+      setSelectedInvitation(prev => prev?.guest_id === guestId ? { ...prev, badge_printed_at: now } : prev)
       
     } catch (error) {
       console.error('Error printing badge:', error);
@@ -1801,14 +1808,13 @@ function Invitations() {
                         >
                           Details
                         </button>
-                        {!invitation.badge_printed_at && (
-                          <button
-                            onClick={() => handlePrintBadge(invitation.guest_id)}
-                            className="text-purple-600 hover:text-purple-900"
-                          >
-                            Print Badge
-                          </button>
-                        )}
+                        <button
+                          onClick={() => handlePrintBadge(invitation.guest_id, invitation.badge_printed_at)}
+                          className="text-purple-600 hover:text-purple-900"
+                          title={invitation.badge_printed_at ? `Printed ${formatDate(invitation.badge_printed_at)}` : undefined}
+                        >
+                          {invitation.badge_printed_at ? 'Reprint Badge' : 'Print Badge'}
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -2812,10 +2818,10 @@ function Invitations() {
                 </button>
                 <div className="space-x-2">
                   <button
-                    onClick={() => handlePrintBadge(selectedInvitation.guest_id)}
+                    onClick={() => handlePrintBadge(selectedInvitation.guest_id, selectedInvitation.badge_printed_at)}
                     className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700"
                   >
-                    Print Badge
+                    {selectedInvitation.badge_printed_at ? 'Reprint Badge' : 'Print Badge'}
                   </button>
                   <button
                     onClick={() => handleResendInvitation(selectedInvitation.id)}
