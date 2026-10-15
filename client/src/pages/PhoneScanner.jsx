@@ -44,7 +44,9 @@ function PhoneScanner() {
     fetch(`/api/scanner-session/join/${token}`)
       .then(async response => {
         const data = await response.json().catch(() => ({}))
-        if (!response.ok) {
+        if (response.status === 429) {
+          setProblem({ title: 'Too many people joining', text: 'Wait a minute and open the code again.' })
+        } else if (!response.ok) {
           setProblem({ title: 'Invalid code', text: data.error || 'This scanner code is not valid.' })
         } else if (!data.joinOpen) {
           setProblem({ title: 'Code expired', text: 'This scanner code has expired. Ask the festival staff for a new one.' })

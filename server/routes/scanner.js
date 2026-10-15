@@ -264,8 +264,8 @@ router.post('/links', async (req, res) => {
       return res.status(400).json({ error: 'programming_id is required' });
     }
     const link = await scannerDevices.createLink(programming_id, req.user?.email || null);
-    if (!link) {
-      return res.status(404).json({ error: 'Screening not found' });
+    if (link.error) {
+      return res.status(link.status).json({ error: link.error });
     }
     const appUrl = process.env.APP_URL || `${req.protocol}://${req.get('host')}`;
     const url = `${appUrl}/scan/${link.token}`;

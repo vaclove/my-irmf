@@ -79,11 +79,17 @@ const isOpen = (screening) => new Date(screening.scanUntil) > new Date();
 
 /**
  * Create a link for a screening.
- * @returns {Promise<{token, joinUntil, screenings}|null>} null when the screening doesn't exist
+ * @returns {Promise<{token, joinUntil, screenings}|{error: string, status: number}>}
  */
 async function createLink(programmingId, createdBy) {
   const exists = await pool.query('SELECT 1 FROM programming_schedule WHERE id = $1', [programmingId]);
-  if (exists.rowCount === 0) return null;
+  if (exists.rowCount === 0) return { status: 404, error: 'Screening not found' };
+
+  // Only what a phone could still scan; a code for nothing would look valid but be refused
+  const screenings = (await linkScreenings(programmingId)).filter(isOpen);
+  if (screenings.length === 0) {
+    return { status: 409, error: 'Nothing left to scan here today, the scanning window has closed' };
+  }
 
   const token = newToken(24);
   const { rows } = await pool.query(`
@@ -92,7 +98,7 @@ async function createLink(programmingId, createdBy) {
     RETURNING join_until
   `, [programmingId, hash(token), createdBy]);
 
-  return { token, joinUntil: rows[0].join_until, screenings: await linkScreenings(programmingId) };
+  return { token, joinUntil: rows[0].join_until, screenings };
 }
 
 async function findLink(token) {

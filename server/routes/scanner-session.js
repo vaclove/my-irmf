@@ -12,9 +12,14 @@ const { rateLimit } = require('../utils/rateLimit');
 
 const sessionKey = (req) => (req.get('authorization') || '').replace(/^Bearer\s+/i, '');
 
-// Joining is per IP; scanning per phone (phones at one door may share an IP)
-const joinLimit = rateLimit({ windowMs: 60 * 1000, max: 20, key: req => req.ip });
-const deviceLimit = rateLimit({ windowMs: 60 * 1000, max: 120, key: req => sessionKey(req) || req.ip });
+// Joining is per IP and generous: volunteers on the venue Wi-Fi share one IP and
+// each join takes two requests. Link tokens are too long to guess, so this only
+// stops floods. Scanning is limited per phone.
+const joinLimit = rateLimit({ windowMs: 60 * 1000, max: 120, key: req => req.ip });
+// Session requests: per IP before the key is checked (made-up keys must not get
+// past it to the database), then per phone once it is known
+const sessionIpLimit = rateLimit({ windowMs: 60 * 1000, max: 600, key: req => req.ip });
+const deviceLimit = rateLimit({ windowMs: 60 * 1000, max: 120, key: req => req.device.id });
 
 // What a link is for, before joining
 router.get('/join/:token', joinLimit, async (req, res) => {
@@ -45,7 +50,7 @@ router.post('/join/:token', joinLimit, async (req, res) => {
 });
 
 // Everything below needs a running phone session
-router.use(deviceLimit, async (req, res, next) => {
+router.use(sessionIpLimit, async (req, res, next) => {
   try {
     const device = await scannerDevices.authenticate(sessionKey(req));
     if (!device) {
@@ -57,7 +62,7 @@ router.use(deviceLimit, async (req, res, next) => {
     console.error('Error checking scanner session:', error);
     res.status(500).json({ error: 'Failed to check scanner session' });
   }
-});
+}, deviceLimit);
 
 router.get('/me', (req, res) => {
   res.json({ name: req.device.name, expiresAt: req.device.expiresAt });
