@@ -4,6 +4,23 @@ import { useAuth } from '../contexts/AuthContext'
 import { useEdition } from '../contexts/EditionContext'
 import Footer from './Footer'
 
+// paths: route prefixes that keep the item highlighted
+const NAV_ITEMS = [
+  { to: '/invitations', label: 'Invitations', paths: ['/invitations'] },
+  { to: '/guests', label: 'Guests', paths: ['/guests'] },
+  { to: '/catalogue', label: 'Catalogue', paths: ['/catalogue'] },
+  { to: '/programme', label: 'Programme', paths: ['/programme'] },
+  { to: '/tickets', label: 'Tickets', paths: ['/tickets'] },
+  { to: '/settings', label: 'Settings', paths: ['/settings', '/badges', '/templates', '/audit'] }
+]
+
+// Force navigation to a clean guests page when already on it
+const resetGuests = (item) => {
+  if (item.to === '/guests' && window.location.pathname === '/guests') {
+    window.location.href = '/guests'
+  }
+}
+
 function Layout({ children }) {
   const location = useLocation()
   const { user, logout } = useAuth()
@@ -19,24 +36,8 @@ function Layout({ children }) {
       .catch(() => setVersion('unknown'))
   }, [])
 
-  const isActive = (path) => {
-    if (path === '/' && location.pathname === '/') return true
-    if (path === '/settings') {
-      // Keep settings active for all settings-related pages
-      return location.pathname === '/settings' || 
-             location.pathname.startsWith('/badges/') || 
-             location.pathname === '/templates' || 
-             location.pathname === '/audit'
-    }
-    if (path === '/programming') {
-      // Keep programming active for programming-related pages
-      return location.pathname === '/programming' || 
-             location.pathname === '/blocks' ||
-             location.pathname === '/venues'
-    }
-    if (path !== '/' && location.pathname.startsWith(path)) return true
-    return false
-  }
+  const isActive = (item) =>
+    item.paths.some(path => location.pathname === path || location.pathname.startsWith(`${path}/`))
 
   const toggleMobileMenu = () => {
     setIsMobileMenuOpen(!isMobileMenuOpen)
@@ -72,72 +73,20 @@ function Layout({ children }) {
 
             {/* Desktop Navigation */}
             <div className="hidden md:flex md:items-center md:space-x-8">
-              <Link
-                to="/invitations"
-                className={`inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium ${
-                  isActive('/invitations')
-                    ? 'border-blue-500 text-gray-900'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                Invitations
-              </Link>
-              <Link
-                to="/guests"
-                onClick={() => {
-                  // Force navigation to clean guests page
-                  if (window.location.pathname === '/guests') {
-                    window.location.href = '/guests'
-                  }
-                }}
-                className={`inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium ${
-                  isActive('/guests')
-                    ? 'border-blue-500 text-gray-900'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                Guests
-              </Link>
-              <Link
-                to="/movies"
-                className={`inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium ${
-                  isActive('/movies')
-                    ? 'border-blue-500 text-gray-900'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                Movies
-              </Link>
-              <Link
-                to="/programming"
-                className={`inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium ${
-                  isActive('/programming')
-                    ? 'border-blue-500 text-gray-900'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                Programming
-              </Link>
-              <Link
-                to="/scanner"
-                className={`inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium ${
-                  isActive('/scanner')
-                    ? 'border-blue-500 text-gray-900'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                Scanner
-              </Link>
-              <Link
-                to="/settings"
-                className={`inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium ${
-                  isActive('/settings')
-                    ? 'border-blue-500 text-gray-900'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                Settings
-              </Link>
+              {NAV_ITEMS.map(item => (
+                <Link
+                  key={item.to}
+                  to={item.to}
+                  onClick={() => resetGuests(item)}
+                  className={`inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium ${
+                    isActive(item)
+                      ? 'border-blue-500 text-gray-900'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  {item.label}
+                </Link>
+              ))}
             </div>
 
             {/* Desktop User Menu */}
@@ -204,78 +153,23 @@ function Layout({ children }) {
           {/* Mobile menu */}
           <div className={`${isMobileMenuOpen ? 'block' : 'hidden'} md:hidden`}>
             <div className="px-2 pt-2 pb-3 space-y-1 sm:px-3 border-t border-gray-200">
-              <Link
-                to="/invitations"
-                onClick={closeMobileMenu}
-                className={`block px-3 py-2 rounded-md text-base font-medium ${
-                  isActive('/invitations')
-                    ? 'text-blue-700 bg-blue-50'
-                    : 'text-gray-700 hover:text-gray-900 hover:bg-gray-50'
-                }`}
-              >
-                Invitations
-              </Link>
-              <Link
-                to="/guests"
-                onClick={() => {
-                  closeMobileMenu()
-                  // Force navigation to clean guests page
-                  if (window.location.pathname === '/guests') {
-                    window.location.href = '/guests'
-                  }
-                }}
-                className={`block px-3 py-2 rounded-md text-base font-medium ${
-                  isActive('/guests')
-                    ? 'text-blue-700 bg-blue-50'
-                    : 'text-gray-700 hover:text-gray-900 hover:bg-gray-50'
-                }`}
-              >
-                Guests
-              </Link>
-              <Link
-                to="/movies"
-                onClick={closeMobileMenu}
-                className={`block px-3 py-2 rounded-md text-base font-medium ${
-                  isActive('/movies')
-                    ? 'text-blue-700 bg-blue-50'
-                    : 'text-gray-700 hover:text-gray-900 hover:bg-gray-50'
-                }`}
-              >
-                Movies
-              </Link>
-              <Link
-                to="/programming"
-                onClick={closeMobileMenu}
-                className={`block px-3 py-2 rounded-md text-base font-medium ${
-                  isActive('/programming')
-                    ? 'text-blue-700 bg-blue-50'
-                    : 'text-gray-700 hover:text-gray-900 hover:bg-gray-50'
-                }`}
-              >
-                Programming
-              </Link>
-              <Link
-                to="/scanner"
-                onClick={closeMobileMenu}
-                className={`block px-3 py-2 rounded-md text-base font-medium ${
-                  isActive('/scanner')
-                    ? 'text-blue-700 bg-blue-50'
-                    : 'text-gray-700 hover:text-gray-900 hover:bg-gray-50'
-                }`}
-              >
-                Scanner
-              </Link>
-              <Link
-                to="/settings"
-                onClick={closeMobileMenu}
-                className={`block px-3 py-2 rounded-md text-base font-medium ${
-                  isActive('/settings')
-                    ? 'text-blue-700 bg-blue-50'
-                    : 'text-gray-700 hover:text-gray-900 hover:bg-gray-50'
-                }`}
-              >
-                Settings
-              </Link>
+              {NAV_ITEMS.map(item => (
+                <Link
+                  key={item.to}
+                  to={item.to}
+                  onClick={() => {
+                    closeMobileMenu()
+                    resetGuests(item)
+                  }}
+                  className={`block px-3 py-2 rounded-md text-base font-medium ${
+                    isActive(item)
+                      ? 'text-blue-700 bg-blue-50'
+                      : 'text-gray-700 hover:text-gray-900 hover:bg-gray-50'
+                  }`}
+                >
+                  {item.label}
+                </Link>
+              ))}
               
               {/* Mobile User Section */}
               {user && (

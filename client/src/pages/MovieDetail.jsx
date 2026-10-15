@@ -86,7 +86,7 @@ function MovieDetail() {
   if (!movie) {
     return (
       <div className="text-center py-8 text-gray-500">
-        Movie not found. <Link to="/movies" className="text-blue-600">Back to movies</Link>
+        Movie not found. <Link to="/catalogue" className="text-blue-600">Back to catalogue</Link>
       </div>
     )
   }
@@ -97,8 +97,8 @@ function MovieDetail() {
   return (
     <div className="space-y-6">
       <div>
-        <Link to="/movies" onClick={confirmLeave} className="text-sm text-blue-600 hover:text-blue-800">
-          ← Back to movies
+        <Link to="/catalogue" onClick={confirmLeave} className="text-sm text-blue-600 hover:text-blue-800">
+          ← Back to catalogue
         </Link>
       </div>
 
@@ -164,7 +164,7 @@ function MovieDetail() {
             sections={sections}
             variant="page"
             onSaved={fetchMovie}
-            onDeleted={() => navigate('/movies')}
+            onDeleted={() => navigate('/catalogue')}
             onDirtyChange={setDetailsDirty}
           />
         </div>

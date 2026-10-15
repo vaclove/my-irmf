@@ -185,7 +185,7 @@ function Movies() {
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Movies</h1>
+        <h1 className="text-2xl font-bold text-gray-900">Catalogue</h1>
         <div className="flex space-x-3">
           <div className="relative column-settings-container">
             <button
@@ -319,7 +319,7 @@ function Movies() {
         editions={editions}
         sections={sections}
         defaultEditionId={selectedEdition?.id}
-        onSaved={(saved) => (saved?.id ? navigate(`/movies/${saved.id}`) : fetchMovies())}
+        onSaved={(saved) => (saved?.id ? navigate(`/catalogue/${saved.id}`) : fetchMovies())}
       />
 
       <div className="bg-white shadow rounded-lg">
@@ -393,7 +393,7 @@ function Movies() {
               {getFilteredMovies().map((movie) => (
                 <tr
                   key={movie.id}
-                  onClick={() => navigate(`/movies/${movie.id}`)}
+                  onClick={() => navigate(`/catalogue/${movie.id}`)}
                   className={`hover:bg-gray-50 cursor-pointer ${!movie.is_public ? 'bg-red-50' : ''}`}
                   title="Open movie detail"
                 >
@@ -497,7 +497,7 @@ function Movies() {
                       className={`${condensedView ? 'px-3 py-2' : 'px-6 py-4'} text-sm cursor-pointer`}
                       onClick={(e) => {
                         e.stopPropagation()
-                        navigate(`/movies/${movie.id}?tab=files`)
+                        navigate(`/catalogue/${movie.id}?tab=files`)
                       }}
                       title="Open files & subtitles"
                     >

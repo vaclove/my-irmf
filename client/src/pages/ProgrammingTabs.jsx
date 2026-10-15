@@ -12,8 +12,8 @@ const ProgrammingTabs = () => {
   
   // Determine active tab based on current route
   const getActiveTab = () => {
-    if (location.pathname === '/blocks') return 'blocks'
-    if (location.pathname === '/venues') return 'venues'
+    if (location.pathname === '/programme/blocks') return 'blocks'
+    if (location.pathname === '/programme/venues') return 'venues'
     return 'programming'
   }
   
@@ -22,18 +22,18 @@ const ProgrammingTabs = () => {
   const handleTabChange = (tab) => {
     setActiveTab(tab)
     if (tab === 'blocks') {
-      navigate('/blocks')
+      navigate('/programme/blocks')
     } else if (tab === 'venues') {
-      navigate('/venues')
+      navigate('/programme/venues')
     } else {
-      navigate('/programming')
+      navigate('/programme')
     }
   }
 
   if (!selectedEdition) {
     return (
       <div className="text-center py-12">
-        <p className="text-gray-500">Please select an edition to access programming features.</p>
+        <p className="text-gray-500">Please select an edition to access the programme.</p>
       </div>
     )
   }

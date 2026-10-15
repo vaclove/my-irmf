@@ -231,7 +231,7 @@ function SubtitleExportModal({ onClose, movieId, kind, sources, lastAdded, onCre
             <div>
               With both languages on screen, long subtitles cover more of the picture. Consider fixing these
               in the{' '}
-              <Link to={`/movies/${movieId}/subtitles`} className="underline">
+              <Link to={`/catalogue/${movieId}/subtitles`} className="underline">
                 subtitle editor
               </Link>{' '}
               first:

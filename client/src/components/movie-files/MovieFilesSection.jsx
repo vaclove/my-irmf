@@ -1225,7 +1225,7 @@ function MovieFilesSection({ movieId }) {
                     )}
                     {row && (qualitySummary.counts?.[qualityLangForKind(asset.key)]?.open || 0) > 0 && (
                       <Link
-                        to={`/movies/${movieId}/subtitles`}
+                        to={`/catalogue/${movieId}/subtitles`}
                         state={{ from: 'files', reviewLang: qualityLangForKind(asset.key) }}
                         title="Review flagged cues in the subtitle editor"
                         className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${
@@ -1250,7 +1250,7 @@ function MovieFilesSection({ movieId }) {
                     )}
                     {row && (
                       <Link
-                        to={`/movies/${movieId}/subtitles`}
+                        to={`/catalogue/${movieId}/subtitles`}
                         state={{ from: 'files' }}
                         title="Edit subtitle text in the visual editor"
                         className="text-sm text-blue-600 hover:text-blue-800"
