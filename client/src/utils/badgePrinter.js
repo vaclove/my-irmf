@@ -2,7 +2,7 @@ import '../assets/fonts/roboto-normal.js';
 import '../assets/fonts/roboto-bold.js';
 
 import jsPDF from 'jspdf';
-import JsBarcode from 'jsbarcode';
+import { encodeBarcode, fitBarcode, barRuns } from './badgeBarcode';
 
 const ELEMENT_TYPES = {
   GUEST_PHOTO: 'guest_photo',
@@ -19,25 +19,6 @@ const mmToPt = (mm) => mm * 2.834645669;
 
 // Convert pixels to mm (BadgeDesigner uses 2 pixels per mm)
 const pxToMm = (px) => px / 2;
-
-// Generate barcode as data URL
-const generateBarcode = (text, width = 100, height = 40) => {
-  const canvas = document.createElement('canvas');
-  try {
-    JsBarcode(canvas, text, {
-      format: 'CODE128',
-      width: 2,
-      height: height,
-      displayValue: false,
-      margin: 0,
-      background: 'transparent'  // Make barcode background transparent
-    });
-    return canvas.toDataURL('image/png');
-  } catch (error) {
-    console.error('Error generating barcode:', error);
-    return null;
-  }
-};
 
 // Get guest photo as data URL (placeholder for now)
 const getGuestPhoto = async (photoUrl) => {
@@ -163,22 +144,20 @@ const renderTextElement = (pdf, element, guestData, editionYear) => {
   pdf.addImage(textImage, 'PNG', x, y, width, height);
 };
 
-// Render barcode element on PDF
+// Render barcode element on PDF as vector bars, so they print sharp at the
+// printer's resolution instead of as a stretched low-resolution image
 const renderBarcodeElement = (pdf, element, guestData) => {
-  const x = mmToPt(pxToMm(element.x));
+  const boxX = pxToMm(element.x);
   const y = mmToPt(pxToMm(element.y));
-  const width = mmToPt(pxToMm(element.width));
   const height = mmToPt(pxToMm(element.height));
-  
-  const barcodeText = guestData.formatted_badge_number || '2024001';
-  const barcodeDataUrl = generateBarcode(barcodeText, pxToMm(element.width), pxToMm(element.height));
-  
-  if (barcodeDataUrl) {
-    pdf.addImage(barcodeDataUrl, 'PNG', x, y, width, height);
-  } else {
-    // Fallback: render as text
-    pdf.setFontSize(10);
-    pdf.text(barcodeText, x, y + height / 2);
+
+  const bits = encodeBarcode(guestData.formatted_badge_number);
+  const { moduleMm, offsetMm } = fitBarcode(bits, pxToMm(element.width));
+
+  pdf.setFillColor(0, 0, 0);
+  for (const run of barRuns(bits)) {
+    const x = mmToPt(boxX + offsetMm + run.start * moduleMm);
+    pdf.rect(x, y, mmToPt(run.length * moduleMm), height, 'F');
   }
 };
 
@@ -208,6 +187,11 @@ const renderPhotoElement = async (pdf, element, guestData) => {
 
 // Generate PDF badge
 export const generateBadgePDF = async (layout, guestData, editionYear) => {
+  const elements = layout.layout_data?.elements || [];
+  if (elements.some(el => el.type === ELEMENT_TYPES.BARCODE) && !guestData.formatted_badge_number) {
+    throw new Error('Guest has no badge number for this edition');
+  }
+
   const pdf = new jsPDF({
     orientation: layout.canvas_width_mm > layout.canvas_height_mm ? 'landscape' : 'portrait',
     unit: 'pt',
@@ -222,7 +206,7 @@ export const generateBadgePDF = async (layout, guestData, editionYear) => {
   }
   
   // Sort elements by z-index to render in correct order
-  const sortedElements = [...(layout.layout_data?.elements || [])].sort((a, b) => (a.zIndex || 1) - (b.zIndex || 1));
+  const sortedElements = [...elements].sort((a, b) => (a.zIndex || 1) - (b.zIndex || 1));
   
   // Render each element
   for (const element of sortedElements) {

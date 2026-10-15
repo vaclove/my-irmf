@@ -448,6 +448,18 @@ router.get('/print-data/:guestId/:editionId', async (req, res) => {
       return res.status(400).json({ error: 'Guest has no category assigned - cannot determine badge layout' });
     }
     
+    // Numbers are assigned on invitation; guests added to the edition some
+    // other way get one now, so their badge never prints without a code
+    if (guest.badge_number == null) {
+      const numberResult = await pool.query(`
+        INSERT INTO guest_badge_numbers (guest_id, edition_id, badge_number)
+        VALUES ($1, $2, get_next_badge_number($2))
+        ON CONFLICT (guest_id, edition_id) DO UPDATE SET badge_number = guest_badge_numbers.badge_number
+        RETURNING badge_number
+      `, [guestId, editionId]);
+      guest.badge_number = numberResult.rows[0].badge_number;
+    }
+
     const guestCategory = guest.category;
     console.log('Using category:', guestCategory);
     

@@ -1,6 +1,54 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { DndProvider, useDrag, useDrop } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
+import {
+  encodeBarcode, fitBarcode, barRuns, recommendedBoxWidthMm,
+  MIN_MODULE_DOTS, MIN_HEIGHT_MM, SAMPLE_BADGE_CODE
+} from '../utils/badgeBarcode';
+
+const SAMPLE_BARCODE_BITS = encodeBarcode(SAMPLE_BADGE_CODE);
+
+// The same bars the printer draws, in mm inside the element box
+const BarcodePreview = ({ widthMm, heightMm }) => {
+  const { moduleMm, offsetMm } = fitBarcode(SAMPLE_BARCODE_BITS, widthMm);
+  return (
+    <svg
+      viewBox={`0 0 ${widthMm} ${heightMm}`}
+      preserveAspectRatio="none"
+      className="w-full h-full"
+    >
+      {barRuns(SAMPLE_BARCODE_BITS).map(run => (
+        <rect
+          key={run.start}
+          x={offsetMm + run.start * moduleMm}
+          y={0}
+          width={run.length * moduleMm}
+          height={heightMm}
+          fill="#000000"
+        />
+      ))}
+    </svg>
+  );
+};
+
+const barcodeWarnings = (element) => {
+  const widthMm = element.width / 2;
+  const heightMm = element.height / 2;
+  const { dots, moduleMm } = fitBarcode(SAMPLE_BARCODE_BITS, widthMm);
+  const warnings = [];
+  if (dots < MIN_MODULE_DOTS) {
+    const neededUnits = Math.ceil(recommendedBoxWidthMm(SAMPLE_BARCODE_BITS) * 2);
+    warnings.push(
+      `Bars are only ${moduleMm.toFixed(2)} mm thin. Make the box at least ${neededUnits} wide (${neededUnits / 2} mm) so phones can read it.`
+    );
+  }
+  if (heightMm < MIN_HEIGHT_MM) {
+    warnings.push(
+      `Barcode is only ${heightMm} mm tall. Make it at least ${MIN_HEIGHT_MM * 2} high (${MIN_HEIGHT_MM} mm) so a tilted phone still catches it.`
+    );
+  }
+  return warnings;
+};
 
 const ELEMENT_TYPES = {
   GUEST_PHOTO: 'guest_photo',
@@ -214,8 +262,9 @@ const CanvasElement = ({ element, isSelected, onSelect, onMove, onResize, zoom }
         );
       case ELEMENT_TYPES.BARCODE:
         return (
-          <div className="w-full h-full bg-white flex items-center justify-center border border-gray-300">
-            <div style={{ fontSize: `${12 * zoom}px` }} className="text-gray-600">|||||||||||</div>
+          // The box includes the blank margins Code128 needs on both sides
+          <div className="w-full h-full bg-white border border-dashed border-gray-300">
+            <BarcodePreview widthMm={element.width / 2} heightMm={element.height / 2} />
           </div>
         );
       case ELEMENT_TYPES.STATIC_TEXT:
@@ -412,6 +461,17 @@ const PropertyPanel = ({ selectedElement, elements, onElementUpdate }) => {
             className="w-full px-3 py-2 border border-gray-300 rounded-md"
           />
         </div>
+
+        {element.type === ELEMENT_TYPES.BARCODE && (
+          <div className="text-xs text-gray-600 space-y-2">
+            <p>The box includes the blank margin the scanner needs on both sides. Keep other elements out of it.</p>
+            {barcodeWarnings(element).map(warning => (
+              <p key={warning} className="p-2 bg-yellow-50 border border-yellow-200 rounded text-yellow-800">
+                {warning}
+              </p>
+            ))}
+          </div>
+        )}
 
         {/* Text-based elements */}
         {[ELEMENT_TYPES.GUEST_NAME, ELEMENT_TYPES.GUEST_CATEGORY, ELEMENT_TYPES.BADGE_NUMBER, ELEMENT_TYPES.STATIC_TEXT].includes(element.type) && (
