@@ -136,8 +136,9 @@ function SalesChart({ presale, metric }) {
   }
 
   const handleMove = (event) => {
+    // The hover area covers just the plot, so its left edge is the first day
     const rect = event.currentTarget.getBoundingClientRect()
-    const day = Math.round(minDay + ((event.clientX - rect.left - margin.left) / plotWidth) * (maxDay - minDay))
+    const day = Math.round(minDay + ((event.clientX - rect.left) / plotWidth) * (maxDay - minDay))
     setHoverDay(Math.min(Math.max(day, minDay), maxDay))
   }
 

@@ -171,33 +171,6 @@ async function loadScheduleTickets(sales) {
   };
 }
 
-/**
- * Valid ticket counts of programming entries (used by the Programme schedule).
- * @returns {Promise<{counts: Object<string, number|null>, errors: Array}>}
- */
-async function getTicketCounts(programmingIds) {
-  const { rows } = await pool.query(`
-    SELECT id, goout_schedule_id FROM programming_schedule
-    WHERE id = ANY($1) AND goout_schedule_id IS NOT NULL
-  `, [programmingIds]);
-  const salesBySchedule = await loadSalesBySchedule();
-
-  const counts = {};
-  const errors = [];
-  await mapLimit(rows, 4, async (row) => {
-    const sales = salesBySchedule[row.goout_schedule_id];
-    if (!sales) { counts[row.id] = 0; return; }
-    try {
-      const { tickets } = await loadScheduleTickets(sales);
-      counts[row.id] = tickets.filter(t => t.valid).length;
-    } catch (error) {
-      counts[row.id] = null;
-      errors.push({ programming_id: row.id, error: error.message });
-    }
-  });
-  return { counts, errors };
-}
-
 // 'YYYY-MM-DD' of an instant in Prague
 function pragueDate(iso) {
   return new Intl.DateTimeFormat('en-CA', {
@@ -488,4 +461,4 @@ async function getEditionPresale(editionId, { refresh = false } = {}) {
   return { ...presale, comparison, updatedAt: new Date().toISOString() };
 }
 
-module.exports = { getEditionPresale, getTicketCounts };
+module.exports = { getEditionPresale };

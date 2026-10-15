@@ -109,8 +109,8 @@ SET access_token = 'new_token',
 
 ## Presale Overview
 
-`services/goout-presale.js` builds the Tickets → Presale page (`GET /api/goout/presale/:edition_id`)
-and the ticket counts in Programme (`POST /api/goout/ticket-counts`):
+`services/goout-presale.js` builds the Tickets → Presale page (`GET /api/goout/presale/:edition_id`),
+the only place that shows GoOut ticket sales:
 
 1. The edition's sales are found through the programming entries' `goout_schedule_id`; the
    festival pass is the sale whose schedule has no start time
