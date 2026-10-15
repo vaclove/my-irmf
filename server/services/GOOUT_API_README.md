@@ -107,6 +107,23 @@ SET access_token = 'new_token',
     updated_at = NOW();
 ```
 
+## Presale Overview
+
+`services/goout-presale.js` builds the Tickets → Presale page (`GET /api/goout/presale/:edition_id`)
+and the ticket counts in Programme (`POST /api/goout/ticket-counts`):
+
+1. The edition's sales are found through the programming entries' `goout_schedule_id`; the
+   festival pass is the sale whose schedule has no start time
+2. Tickets come from all pages of `GET /services/reporting/v1/purchases?saleIds[]=…&include=tickets,discounts`;
+   only `paid`/`prepaid` tickets count
+3. Revenue is the ticket `priceCents` (after discounts, without the GoOut service fee; the purchase
+   total includes the fee); a ticket's time is its purchase's `paidAt`
+4. Sales over time are cumulative by day relative to the festival start, compared with the edition
+   a year earlier
+5. Occupancy is against the venue capacity in our database (GoOut deal counts are unreliable)
+6. Results are cached in memory: running sales for 5 minutes, ended ones for 12 hours;
+   `?refresh=1` drops the running ones. The first load takes ~15 s
+
 ## Integration with Scanner
 
 `services/goout-ticket-verifier.js` verifies GoOut tickets scanned in the scanner:

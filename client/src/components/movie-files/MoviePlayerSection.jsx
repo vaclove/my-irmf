@@ -258,7 +258,7 @@ function MoviePlayerSection({ movieId }) {
             <div className="flex-1" />
             {(hasCs || hasEn) && (
               <Link
-                to={`/movies/${movieId}/subtitles`}
+                to={`/catalogue/${movieId}/subtitles`}
                 state={{ from: 'preview' }}
                 className="text-blue-600 hover:text-blue-800"
               >
@@ -298,7 +298,7 @@ function MoviePlayerSection({ movieId }) {
               </button>
               {(hasCs || hasEn) && (
                 <Link
-                  to={`/movies/${movieId}/subtitles`}
+                  to={`/catalogue/${movieId}/subtitles`}
                   state={{ from: 'preview' }}
                   className="text-blue-600 hover:text-blue-800"
                 >
@@ -313,7 +313,7 @@ function MoviePlayerSection({ movieId }) {
             {(hasCs || hasEn) && (
               <div className="mt-2">
                 <Link
-                  to={`/movies/${movieId}/subtitles`}
+                  to={`/catalogue/${movieId}/subtitles`}
                   state={{ from: 'preview' }}
                   className="text-blue-600 hover:text-blue-800"
                 >

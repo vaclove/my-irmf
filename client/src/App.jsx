@@ -1,4 +1,4 @@
-import { Routes, Route } from 'react-router-dom'
+import { Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom'
 import { AuthProvider } from './contexts/AuthContext'
 import { ToastProvider } from './contexts/ToastContext'
 import { EditionProvider } from './contexts/EditionContext'
@@ -21,7 +21,15 @@ import Settings from './pages/Settings'
 import Sections from './pages/Sections'
 import AccommodationSettings from './pages/AccommodationSettings'
 import Confirmation from './pages/Confirmation'
-import Scanner from './pages/Scanner'
+import TicketsTabs from './pages/TicketsTabs'
+
+// Old URLs (bookmarks, links in emails) keep working
+function RedirectTo({ to }) {
+  const params = useParams()
+  const location = useLocation()
+  const path = to.replace(/:(\w+)/g, (_, name) => params[name])
+  return <Navigate to={`${path}${location.search}${location.hash}`} replace />
+}
 
 function App() {
   return (
@@ -33,7 +41,7 @@ function App() {
           <Route path="/confirm/:token" element={<Confirmation />} />
 
           {/* Fullscreen editor — auth-protected but rendered without app chrome */}
-          <Route path="/movies/:id/subtitles" element={
+          <Route path="/catalogue/:id/subtitles" element={
             <ProtectedRoute>
               <SubtitleEditor />
             </ProtectedRoute>
@@ -50,17 +58,25 @@ function App() {
                   <Route path="/editions/:id" element={<EditionDetail />} />
                   <Route path="/invitations" element={<Invitations />} />
                   <Route path="/templates" element={<EmailTemplates />} />
-                  <Route path="/movies" element={<Movies />} />
-                  <Route path="/movies/:id" element={<MovieDetail />} />
-                  <Route path="/programming" element={<ProgrammingTabs />} />
-                  <Route path="/blocks" element={<ProgrammingTabs />} />
-                  <Route path="/venues" element={<ProgrammingTabs />} />
+                  <Route path="/catalogue" element={<Movies />} />
+                  <Route path="/catalogue/:id" element={<MovieDetail />} />
+                  <Route path="/programme" element={<ProgrammingTabs />} />
+                  <Route path="/programme/blocks" element={<ProgrammingTabs />} />
+                  <Route path="/programme/venues" element={<ProgrammingTabs />} />
+                  <Route path="/tickets" element={<TicketsTabs />} />
+                  <Route path="/tickets/scan" element={<TicketsTabs />} />
                   <Route path="/badges/:editionId" element={<BadgeSettings />} />
                   <Route path="/settings" element={<Settings />} />
                   <Route path="/settings/sections" element={<Sections />} />
                   <Route path="/settings/accommodation" element={<AccommodationSettings />} />
                   <Route path="/audit" element={<AuditLogs />} />
-                  <Route path="/scanner" element={<Scanner />} />
+                  <Route path="/movies" element={<RedirectTo to="/catalogue" />} />
+                  <Route path="/movies/:id" element={<RedirectTo to="/catalogue/:id" />} />
+                  <Route path="/movies/:id/subtitles" element={<RedirectTo to="/catalogue/:id/subtitles" />} />
+                  <Route path="/programming" element={<RedirectTo to="/programme" />} />
+                  <Route path="/blocks" element={<RedirectTo to="/programme/blocks" />} />
+                  <Route path="/venues" element={<RedirectTo to="/programme/venues" />} />
+                  <Route path="/scanner" element={<RedirectTo to="/tickets/scan" />} />
                 </Routes>
               </Layout>
             </ProtectedRoute>

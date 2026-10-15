@@ -93,8 +93,9 @@ with each scheduled refresh. Manual renewal is only needed if the app stops refr
 
 ## Linking an Edition's Screenings
 
-The ticket counts in Programming (and the check-in IDs for the scanner) need each
-programming entry to carry `goout_schedule_id` and `goout_checkin_id`. Once the screenings
+The ticket counts in Programme, the presale overview in Tickets (and the check-in IDs for
+the scanner) need each programming entry to carry `goout_schedule_id` and `goout_checkin_id`.
+A GoOut sale that is not linked to a programming entry is missing from the presale overview. Once the screenings
 are on sale in GoOut, sync them with:
 
 ```bash
@@ -114,7 +115,7 @@ The script:
 - takes the check-in ID from the GoOut sale;
 - never changes existing IDs unless run with `--overwrite`;
 - lists GoOut schedules it could not match (`?`) and programme entries not on GoOut (`-`).
-  The Programming UI has no fields for the GoOut IDs, so link those by hand
+  The Programme UI has no fields for the GoOut IDs, so link those by hand
   (`PUT /api/programming/:id` with `goout_schedule_id` + `goout_checkin_id`, or SQL).
 
 To run it in production, use Kudu: unpack `node_modules.tar.gz` and run the script

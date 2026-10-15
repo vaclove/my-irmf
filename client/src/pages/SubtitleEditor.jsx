@@ -269,7 +269,7 @@ function SubtitleEditor() {
 
   const goBack = useCallback(() => {
     if (anyDirty && !window.confirm('You have unsaved subtitle changes. Leave anyway?')) return
-    navigate(`/movies/${id}?tab=${backTab}`)
+    navigate(`/catalogue/${id}?tab=${backTab}`)
   }, [anyDirty, id, navigate, backTab])
 
   // Esc leaves the fullscreen editor — the quick way back to the movie. Ignore
@@ -339,7 +339,7 @@ function SubtitleEditor() {
   if (!movie) {
     return (
       <div className="text-sm text-gray-500">
-        Movie not found. <Link to="/movies" className="text-blue-600 hover:text-blue-800">Back to movies</Link>
+        Movie not found. <Link to="/catalogue" className="text-blue-600 hover:text-blue-800">Back to catalogue</Link>
       </div>
     )
   }
@@ -497,7 +497,7 @@ function SubtitleEditor() {
         <div className="flex-1 flex items-center justify-center">
           <div className="rounded-md border border-gray-200 p-6 text-sm text-gray-500 text-center">
             This movie has no subtitles yet. Upload or translate them on the{' '}
-            <Link to={`/movies/${id}?tab=files`} className="text-blue-600 hover:text-blue-800">movie page</Link>.
+            <Link to={`/catalogue/${id}?tab=files`} className="text-blue-600 hover:text-blue-800">movie page</Link>.
           </div>
         </div>
       ) : (

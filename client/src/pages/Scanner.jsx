@@ -29,7 +29,7 @@ const scanBox = (viewfinderWidth, viewfinderHeight) => {
   return { width, height };
 };
 
-const Scanner = () => {
+const Scanner = ({ onScanningChange }) => {
   const navigate = useNavigate();
   const [editions, setEditions] = useState([]);
   const [selectedEdition, setSelectedEdition] = useState(null);
@@ -66,6 +66,11 @@ const Scanner = () => {
       fetchScreenings();
     }
   }, [selectedEdition]);
+
+  // Lets the Tickets page hide its tabs while the camera runs
+  useEffect(() => {
+    onScanningChange?.(scanning);
+  }, [scanning, onScanningChange]);
 
   // Cleanup scanner on unmount
   useEffect(() => {
