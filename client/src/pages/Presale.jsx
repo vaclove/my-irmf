@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, Fragment } from 'react'
+import React, { useState, useEffect, useRef, useCallback, Fragment } from 'react'
 import axios from 'axios'
 import { useEdition } from '../contexts/EditionContext'
 
@@ -391,10 +391,12 @@ function ScreeningDetail({ row }) {
       )}
       <div className="space-y-1">
         <div className="text-xs font-medium text-gray-500 uppercase tracking-wider">GoOut</div>
-        <div>
-          <a href={`https://admin.goout.net/en/ticketing/sale/${row.saleId}/`} target="_blank" rel="noopener noreferrer"
-            className="text-blue-600 hover:text-blue-800">Sale {row.saleId} in admin ↗</a>
-        </div>
+        {row.saleIds.map(saleId => (
+          <div key={saleId}>
+            <a href={`https://admin.goout.net/en/ticketing/sale/${saleId}/`} target="_blank" rel="noopener noreferrer"
+              className="text-blue-600 hover:text-blue-800">Sale {saleId} in admin ↗</a>
+          </div>
+        ))}
         {row.gooutUrl && (
           <div>
             <a href={row.gooutUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800">
@@ -415,19 +417,22 @@ const Presale = () => {
   const [metric, setMetric] = useState('tickets')
   const [now, setNow] = useState(Date.now())
 
+  // Only the latest request may update the page (an older edition's load can finish later)
+  const requestRef = useRef(0)
   const load = useCallback(async (refresh = false) => {
     if (!selectedEdition) return
+    const requestId = ++requestRef.current
     setLoading(true)
     setError('')
     try {
       const response = await axios.get(`/api/goout/presale/${selectedEdition.id}`, {
         params: refresh ? { refresh: 1 } : {}
       })
-      setPresale(response.data)
+      if (requestId === requestRef.current) setPresale(response.data)
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to load presale data')
+      if (requestId === requestRef.current) setError(err.response?.data?.error || 'Failed to load presale data')
     } finally {
-      setLoading(false)
+      if (requestId === requestRef.current) setLoading(false)
     }
   }, [selectedEdition])
 

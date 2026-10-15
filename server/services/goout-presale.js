@@ -54,7 +54,7 @@ async function mapLimit(items, limit, fn) {
   return results;
 }
 
-// All IRMF sales with their deals, keyed by schedule id
+// All IRMF sales with their deals, as a list per schedule id (a schedule may have several sales)
 function loadSalesBySchedule() {
   return cached('sales', LIVE_TTL, async () => {
     const sales = [];
@@ -73,7 +73,8 @@ function loadSalesBySchedule() {
       const scheduleId = relId(sale.relationships?.schedule);
       if (relId(sale.relationships?.organizer) !== GOOUT_ORGANIZER_ID || !scheduleId) continue;
       if (sale.attributes?.state === 'cancelled') continue;
-      bySchedule[scheduleId] = {
+      bySchedule[scheduleId] = bySchedule[scheduleId] || [];
+      bySchedule[scheduleId].push({
         saleId: String(sale.id),
         state: sale.attributes?.state,
         deals: (sale.relationships?.deals?.data || []).map(d => {
@@ -85,7 +86,7 @@ function loadSalesBySchedule() {
             isHidden: !!deal?.attributes?.isHidden
           };
         })
-      };
+      });
     }
     return bySchedule;
   });
@@ -161,6 +162,15 @@ function loadSaleTickets(saleId, saleState) {
   });
 }
 
+// Tickets of all sales of a schedule, with their deals and discount codes merged
+async function loadScheduleTickets(sales) {
+  const results = await Promise.all(sales.map(sale => loadSaleTickets(sale.saleId, sale.state)));
+  return {
+    tickets: results.flatMap(r => r.tickets),
+    discounts: Object.assign({}, ...results.map(r => r.discounts))
+  };
+}
+
 /**
  * Valid ticket counts of programming entries (used by the Programme schedule).
  * @returns {Promise<{counts: Object<string, number|null>, errors: Array}>}
@@ -175,10 +185,10 @@ async function getTicketCounts(programmingIds) {
   const counts = {};
   const errors = [];
   await mapLimit(rows, 4, async (row) => {
-    const sale = salesBySchedule[row.goout_schedule_id];
-    if (!sale) { counts[row.id] = 0; return; }
+    const sales = salesBySchedule[row.goout_schedule_id];
+    if (!sales) { counts[row.id] = 0; return; }
     try {
-      const { tickets } = await loadSaleTickets(sale.saleId, sale.state);
+      const { tickets } = await loadScheduleTickets(sales);
       counts[row.id] = tickets.filter(t => t.valid).length;
     } catch (error) {
       counts[row.id] = null;
@@ -250,14 +260,14 @@ async function loadEditionSales(editionId) {
 
   const errors = [];
   const entries = await mapLimit(programme, 4, async (entry) => {
-    const sale = salesBySchedule[entry.goout_schedule_id];
-    if (!sale) {
+    const sales = salesBySchedule[entry.goout_schedule_id];
+    if (!sales) {
       errors.push({ programmingId: entry.id, error: `No GoOut sale for schedule ${entry.goout_schedule_id}` });
       return null;
     }
     try {
-      const { tickets, discounts } = await loadSaleTickets(sale.saleId, sale.state);
-      return { entry, sale, schedule: schedules[entry.goout_schedule_id], tickets, discounts };
+      const { tickets, discounts } = await loadScheduleTickets(sales);
+      return { entry, sales, schedule: schedules[entry.goout_schedule_id], tickets, discounts };
     } catch (error) {
       errors.push({ programmingId: entry.id, error: error.message });
       return null;
@@ -333,11 +343,12 @@ async function buildPresale(editionId) {
   let pass = null;
 
   for (const s of entries) {
-    const deals = Object.fromEntries(s.sale.deals.map(d => [d.id, d]));
+    const deals = Object.fromEntries(s.sales.flatMap(sale => sale.deals).map(d => [d.id, d]));
     const row = {
       programmingId: s.entry.id,
-      saleId: s.sale.saleId,
-      saleState: s.sale.state,
+      saleIds: s.sales.map(sale => sale.saleId),
+      // Sold out only when no sale of the screening has tickets left
+      saleState: s.sales.find(sale => sale.state !== 'sold_out')?.state || 'sold_out',
       title: s.entry.title,
       date: s.entry.date,
       time: s.entry.time,
