@@ -1,35 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { getEditionPresale, getTicketCounts } = require('../services/goout-presale');
-
-/**
- * Get ticket counts for screenings from GoOut
- * POST /api/goout/ticket-counts
- * Body: { programming_ids: [array of programming schedule IDs] }
- * Returns: { counts: { programming_id: ticket_count }, errors: [] }
- * A count is the number of valid (paid) tickets, including free ones; null means GoOut failed.
- */
-router.post('/ticket-counts', async (req, res) => {
-  try {
-    const { programming_ids } = req.body;
-
-    if (!programming_ids || !Array.isArray(programming_ids)) {
-      return res.status(400).json({ error: 'programming_ids array is required' });
-    }
-
-    const { counts, errors } = await getTicketCounts(programming_ids);
-    res.json({ counts, errors, success: true });
-
-  } catch (error) {
-    console.error('Error fetching GoOut ticket counts:', error);
-    // Don't fail the request - return partial data if possible
-    res.status(200).json({
-      counts: {},
-      errors: [{ error: error.message }],
-      success: false
-    });
-  }
-});
+const { getEditionPresale } = require('../services/goout-presale');
 
 /**
  * Presale overview of an edition
