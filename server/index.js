@@ -36,6 +36,7 @@ const sectionRoutes = require('./routes/sections');
 const accommodationRoutes = require('./routes/accommodation');
 const associationRoutes = require('./routes/associations');
 const scannerRoutes = require('./routes/scanner');
+const scannerSessionRoutes = require('./routes/scanner-session');
 const gooutRoutes = require('./routes/goout');
 const dbBackupRoutes = require('./routes/dbBackup');
 const gooutTokenScheduler = require('./services/goout-token-scheduler');
@@ -164,6 +165,9 @@ app.use('/auth', authRoutes);
 
 // Public routes (no auth required) - must come before protected routes to avoid conflicts
 app.use('/api', publicRoutes);
+
+// Phone scanners joined through a scanner link (own session keys, no login)
+app.use('/api/scanner-session', scannerSessionRoutes);
 
 // Protected API routes (require @irmf.cz domain)
 app.use('/api/guests', requireIrmfDomain, guestRoutes);
