@@ -76,8 +76,9 @@ app.use(helmet({
       ...helmet.contentSecurityPolicy.getDefaultDirectives(),
       "img-src": ["'self'", "data:", "https://irmf.cz", "https://lh3.googleusercontent.com", "https://s3.irmf.cz"],
       // Browser uploads movie files straight to Google Drive resumable-session
-      // URLs (legacy editions) or Azure Blob SAS URLs.
-      "connect-src": ["'self'", "https://www.googleapis.com", ...(movieBlobOrigin ? [movieBlobOrigin] : [])],
+      // URLs (legacy editions) or Azure Blob SAS URLs. The TV player (/tv/)
+      // fetches movie images from s3.irmf.cz into its offline cache.
+      "connect-src": ["'self'", "https://www.googleapis.com", "https://s3.irmf.cz", ...(movieBlobOrigin ? [movieBlobOrigin] : [])],
       // The player's /stream URL redirects to a blob SAS URL.
       "media-src": ["'self'", ...(movieBlobOrigin ? [movieBlobOrigin] : [])],
     },
