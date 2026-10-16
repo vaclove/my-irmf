@@ -1,0 +1,199 @@
+/* IRMF TV player. Everything is laid out on a fixed 1920×1080 stage that app.js
+   scales to the screen, so px below are FHD pixels. Colours: 2026 palette from
+   docs/public-web/IRMF-WEB-RUNBOOK.md §5. Keep effects cheap (opacity/transform
+   only) — the player runs on low-end TV boxes. */
+:root {
+  --bg: #151313;
+  --text: #ffffff;
+  --text-soft: #d9d6d0;
+  --muted: #a19c8c;
+  --lime: #bfde54;
+  --light-blue: #63a3d2;
+  --slate: #3b5e7a;
+}
+
+html, body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+  cursor: none;
+}
+
+#stage {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1920px;
+  height: 1080px;
+  overflow: hidden;
+  transform-origin: 0 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+/* ---------- top bar ---------- */
+#topbar {
+  position: absolute;
+  z-index: 10;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 110px;
+  padding: 0 72px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: linear-gradient(rgba(21, 19, 19, 0.85), rgba(21, 19, 19, 0));
+}
+.brand { height: 72px; }
+#clock { font-size: 48px; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* ---------- slides ---------- */
+#scene { position: absolute; inset: 0; }
+.slide {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 0.5s ease;
+  will-change: opacity;
+}
+.slide.visible { opacity: 1; }
+.progress {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 4px;
+  background: rgba(191, 222, 84, 0.35);
+  transform-origin: 0 0;
+  transform: scaleX(0);
+}
+.slide.visible .progress { animation: progress linear forwards; } /* duration set per slide */
+@keyframes progress { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
+.eyebrow {
+  color: var(--lime);
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+}
+.badge {
+  display: inline-block;
+  padding: 6px 18px;
+  border-radius: 6px;
+  background: var(--lime);
+  color: #151313;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
+/* ---------- programme overview ---------- */
+.overview { padding: 150px 120px 80px; box-sizing: border-box; }
+.overview h1 { margin: 16px 0 44px; font-size: 76px; line-height: 1.05; }
+.rows { display: flex; flex-direction: column; }
+.row {
+  display: grid;
+  grid-template-columns: 190px 1fr 380px;
+  align-items: center;
+  column-gap: 32px;
+  min-height: 74px;
+  padding: 6px 0 6px 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  border-left: 8px solid transparent;
+  font-size: 38px;
+}
+.row.running { border-left-color: var(--lime); background: rgba(191, 222, 84, 0.08); }
+.row .time { color: var(--lime); font-weight: 700; font-variant-numeric: tabular-nums; }
+.row .title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .title .badge { margin-left: 16px; font-size: 20px; padding: 4px 12px; vertical-align: middle; }
+.row .venue { color: var(--light-blue); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.allday { margin-top: 36px; font-size: 32px; color: var(--text-soft); }
+.allday strong { color: var(--lime); text-transform: uppercase; letter-spacing: 2px; font-size: 26px; margin-right: 16px; }
+.more { margin-top: 28px; font-size: 28px; color: var(--muted); }
+
+/* ---------- featured screening ---------- */
+.feature .photo {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1080px;
+  height: 1080px;
+  object-fit: cover;
+  background: var(--slate);
+}
+.feature .photo-fade {
+  position: absolute;
+  left: 780px;
+  top: 0;
+  width: 300px;
+  height: 1080px;
+  background: linear-gradient(90deg, rgba(21, 19, 19, 0), var(--bg));
+}
+.feature .info {
+  position: absolute;
+  left: 1080px;
+  top: 0;
+  width: 840px;
+  height: 1080px;
+  padding: 150px 72px 80px 40px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+}
+.feature .when { display: flex; align-items: baseline; gap: 28px; margin: 18px 0 8px; }
+.feature .time { font-size: 120px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+.feature .venue { font-size: 42px; color: var(--light-blue); }
+.feature .badge { align-self: flex-start; margin: 8px 0 4px; }
+.feature h2 {
+  margin: 20px 0 12px;
+  font-size: 62px;
+  line-height: 1.1;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+.feature .meta { font-size: 30px; color: var(--muted); margin-bottom: 24px; }
+.feature .synopsis {
+  margin: 0;
+  font-size: 31px;
+  line-height: 1.45;
+  color: var(--text-soft);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 9;
+  overflow: hidden;
+}
+.feature .block-films { margin-top: 20px; font-size: 28px; color: var(--muted); }
+.feature .block-films strong { color: var(--text-soft); }
+
+/* ---------- message slide (no data, errors) ---------- */
+.message {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-size: 56px;
+}
+.message .logo { height: 360px; margin-bottom: 72px; }
+.message .eyebrow { margin-bottom: 24px; }
+
+/* ---------- debug status (?debug=1) ---------- */
+#status {
+  position: absolute;
+  z-index: 20;
+  left: 72px;
+  bottom: 40px;
+  max-width: 1200px;
+  padding: 16px 24px;
+  background: rgba(0, 0, 0, 0.8);
+  font: 24px/1.4 monospace;
+  white-space: pre-wrap;
+}
