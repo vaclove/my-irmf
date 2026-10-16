@@ -93,10 +93,10 @@ with each scheduled refresh. Manual renewal is only needed if the app stops refr
 
 ## Linking an Edition's Screenings
 
-The ticket counts in Programme, the presale overview in Tickets (and the check-in IDs for
-the scanner) need each programming entry to carry `goout_schedule_id` and `goout_checkin_id`.
-A GoOut sale that is not linked to a programming entry is missing from the presale overview. Once the screenings
-are on sale in GoOut, sync them with:
+The presale overview in Tickets (and the check-in IDs for the scanner) need each programming
+entry to carry `goout_schedule_id` and `goout_checkin_id`. A GoOut sale that is not linked to a
+programming entry is missing from the presale overview. Once the screenings are on sale in GoOut,
+sync them with:
 
 ```bash
 # Dry run: shows what would be linked or created, writes nothing

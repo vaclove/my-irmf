@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
+import { staffScannerClient } from '../utils/scannerClient';
+import ShareScannerModal from '../components/ShareScannerModal';
 
 // Badges and one-time tickets are Code128, GoOut tickets a QR code with a 13-digit id
 const SCAN_FORMATS = [
@@ -29,7 +31,8 @@ const scanBox = (viewfinderWidth, viewfinderHeight) => {
   return { width, height };
 };
 
-const Scanner = ({ onScanningChange }) => {
+// client: staff (default) or a phone that joined through a scanner link
+const Scanner = ({ onScanningChange, client = staffScannerClient }) => {
   const navigate = useNavigate();
   const [editions, setEditions] = useState([]);
   const [selectedEdition, setSelectedEdition] = useState(null);
@@ -50,13 +53,22 @@ const Scanner = ({ onScanningChange }) => {
   const selectedScreeningRef = useRef(null);
   const lastScannedBadgeRef = useRef(null);
   const scanCooldownRef = useRef(false);
+  // Scan request in flight, so Stop can wait for it before refreshing the list
+  const pendingScanRef = useRef(Promise.resolve());
+  // Bumped on every recorded or removed scan; a scan list loaded before that is outdated
+  const scanVersionRef = useRef(0);
   const [cameras, setCameras] = useState([]);
   const [cameraId, setCameraId] = useState(null);
+  const [shareScreening, setShareScreening] = useState(null);
   const [manualCode, setManualCode] = useState('');
 
-  // Fetch editions on mount
+  // Fetch editions on mount; a phone only sees the screenings of its link
   useEffect(() => {
-    fetchEditions();
+    if (client.isPhone) {
+      fetchScreenings();
+    } else {
+      fetchEditions();
+    }
   }, []);
 
   // Fetch screenings when edition is selected; history belongs to the old edition
@@ -73,11 +85,16 @@ const Scanner = ({ onScanningChange }) => {
     onScanningChange?.(scanning);
   }, [scanning, onScanningChange]);
 
-  // Cleanup scanner on unmount
+  // Cleanup scanner on unmount. stop() throws synchronously when the camera never
+  // started (e.g. permission denied), which would crash the page.
   useEffect(() => {
     return () => {
       if (html5QrcodeRef.current && scanning) {
-        html5QrcodeRef.current.stop();
+        try {
+          html5QrcodeRef.current.stop().catch(() => {});
+        } catch {
+          // Not running
+        }
       }
     };
   }, [scanning]);
@@ -107,11 +124,8 @@ const Scanner = ({ onScanningChange }) => {
   const fetchScreenings = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`/api/scanner/screenings?edition_id=${selectedEdition}`, {
-        credentials: 'include'
-      });
-      if (response.ok) {
-        const data = await response.json();
+      const { ok, data } = await client.screenings(selectedEdition);
+      if (ok) {
         setScreenings(data.screenings);
       } else {
         setError('Failed to load screenings');
@@ -129,11 +143,8 @@ const Scanner = ({ onScanningChange }) => {
 
     setHistoryLoading(true);
     try {
-      const response = await fetch(`/api/scanner/edition/${selectedEdition}/scans`, {
-        credentials: 'include'
-      });
-      if (response.ok) {
-        const data = await response.json();
+      const { ok, data } = await client.editionScans(selectedEdition);
+      if (ok) {
         setEditionHistory(data.scans);
       } else {
         console.error('Failed to load edition history');
@@ -316,7 +327,13 @@ const Scanner = ({ onScanningChange }) => {
     // Ignore scan errors (they happen continuously while scanning)
   };
 
-  const submitScan = async (scannedCode) => {
+  const submitScan = (scannedCode) => {
+    const pending = postScan(scannedCode);
+    pendingScanRef.current = pending;
+    return pending;
+  };
+
+  const postScan = async (scannedCode) => {
     const screening = selectedScreeningRef.current;
     if (!screening) {
       setError('No screening selected');
@@ -325,21 +342,9 @@ const Scanner = ({ onScanningChange }) => {
 
     try {
       setLoading(true);
-      const response = await fetch('/api/scanner/scan', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        credentials: 'include',
-        body: JSON.stringify({
-          programming_id: screening.id,
-          scanned_code: scannedCode
-        })
-      });
+      const { ok, status, data } = await client.scan(screening.id, scannedCode);
 
-      const data = await response.json();
-
-      if (response.ok) {
+      if (ok) {
         // Vibrate on success
         if (navigator.vibrate) {
           navigator.vibrate(200);
@@ -356,6 +361,7 @@ const Scanner = ({ onScanningChange }) => {
           guest: data.guest,
           timestamp: new Date()
         });
+        scanVersionRef.current++;
         setScanCount(data.totalScans);
         // Add to scanned guests list
         setScannedGuests(prev => [{
@@ -383,7 +389,7 @@ const Scanner = ({ onScanningChange }) => {
             }
           }
         }, 2500);
-      } else if (response.status === 409) {
+      } else if (status === 409) {
         // Already scanned
         // Vibrate on error (different pattern than success)
         if (navigator.vibrate) {
@@ -414,7 +420,7 @@ const Scanner = ({ onScanningChange }) => {
             }
           }
         }, 2500);
-      } else if (response.status === 404) {
+      } else if (status === 404) {
         // Vibrate on error (different pattern than success)
         if (navigator.vibrate) {
           navigator.vibrate([100, 50, 100]);
@@ -511,16 +517,26 @@ const Scanner = ({ onScanningChange }) => {
     }
     setScanning(false);
     setSelectedScreening(null);
+    // Refresh the "Scanned: N" counts in the list once a scan being sent is saved
+    await pendingScanRef.current;
+    fetchScreenings();
   };
 
   const fetchScannedGuests = async (programmingId) => {
+    const version = scanVersionRef.current;
     try {
-      const response = await fetch(`/api/scanner/scans/${programmingId}`, {
-        credentials: 'include'
-      });
-      if (response.ok) {
-        const data = await response.json();
+      const { ok, data } = await client.scans(programmingId);
+      if (ok) {
+        // Another screening was opened meanwhile
+        if (selectedScreeningRef.current?.id !== programmingId) return;
+        // A scan was recorded or removed while loading: this list may miss it, load again
+        if (version !== scanVersionRef.current) {
+          fetchScannedGuests(programmingId);
+          return;
+        }
         setScannedGuests(data.scans);
+        // The count from the screenings list may be stale (it isn't reloaded after scanning)
+        setScanCount(data.scans.length);
       }
     } catch (error) {
       console.error('Error fetching scanned guests:', error);
@@ -533,15 +549,13 @@ const Scanner = ({ onScanningChange }) => {
     }
 
     try {
-      const response = await fetch(`/api/scanner/scans/${scanId}`, {
-        method: 'DELETE',
-        credentials: 'include'
-      });
+      const { ok } = await client.removeScan(scanId);
 
-      if (response.ok) {
+      if (ok) {
         // Remove from local state
         setScannedGuests(prev => prev.filter(guest => guest.id !== scanId));
-        setScanCount(prev => prev - 1);
+        scanVersionRef.current++;
+        setScanCount(prev => Math.max(prev - 1, 0));
       } else {
         setError('Failed to remove scan');
       }
@@ -567,7 +581,7 @@ const Scanner = ({ onScanningChange }) => {
     return (
       <div className="max-w-2xl mx-auto">
           {/* Edition Selection */}
-          {editions.length > 1 && (
+          {!client.isPhone && editions.length > 1 && (
             <div className="bg-white rounded-lg shadow-sm border p-4 mb-4">
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Festival Edition
@@ -593,7 +607,7 @@ const Scanner = ({ onScanningChange }) => {
             </div>
           )}
 
-          {!loading && screenings.length === 0 && selectedEdition && (
+          {!loading && screenings.length === 0 && (selectedEdition || client.isPhone) && (
             <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-center">
               <p className="text-yellow-800">No upcoming screenings found</p>
             </div>
@@ -627,12 +641,23 @@ const Scanner = ({ onScanningChange }) => {
                         Scanned: {screening.scanCount || 0}
                       </p>
                     </div>
-                    <button
-                      onClick={() => startScanning(screening)}
-                      className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium"
-                    >
-                      Start Scanning
-                    </button>
+                    <div className="flex gap-2">
+                      {!client.isPhone && (
+                        <button
+                          onClick={() => setShareScreening(screening)}
+                          className="px-3 py-2 bg-white border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 text-sm font-medium"
+                          title="Let other phones scan this screening"
+                        >
+                          📱 Share scanner
+                        </button>
+                      )}
+                      <button
+                        onClick={() => startScanning(screening)}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium"
+                      >
+                        Start Scanning
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -640,7 +665,7 @@ const Scanner = ({ onScanningChange }) => {
           )}
 
           {/* Edition History */}
-          {selectedEdition && (
+          {!client.isPhone && selectedEdition && (
             <div className="mt-6">
               <button
                 onClick={toggleHistory}
@@ -722,6 +747,10 @@ const Scanner = ({ onScanningChange }) => {
                 </div>
               )}
             </div>
+          )}
+
+          {shareScreening && (
+            <ShareScannerModal screening={shareScreening} onClose={() => setShareScreening(null)} />
           )}
       </div>
     );
@@ -865,12 +894,14 @@ const Scanner = ({ onScanningChange }) => {
                           {guest.category && ` • ${guest.category}`} • {new Date(guest.scannedAt).toLocaleTimeString('cs-CZ')}
                         </div>
                       </div>
-                      <button
-                        onClick={() => removeScan(guest.id)}
-                        className="ml-2 px-2 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700"
-                      >
-                        Remove
-                      </button>
+                      {client.removeScan && (
+                        <button
+                          onClick={() => removeScan(guest.id)}
+                          className="ml-2 px-2 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700"
+                        >
+                          Remove
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))

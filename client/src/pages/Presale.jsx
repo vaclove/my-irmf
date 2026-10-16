@@ -136,8 +136,9 @@ function SalesChart({ presale, metric }) {
   }
 
   const handleMove = (event) => {
+    // The hover area covers just the plot, so its left edge is the first day
     const rect = event.currentTarget.getBoundingClientRect()
-    const day = Math.round(minDay + ((event.clientX - rect.left - margin.left) / plotWidth) * (maxDay - minDay))
+    const day = Math.round(minDay + ((event.clientX - rect.left) / plotWidth) * (maxDay - minDay))
     setHoverDay(Math.min(Math.max(day, minDay), maxDay))
   }
 
@@ -428,9 +429,15 @@ const Presale = () => {
       const response = await axios.get(`/api/goout/presale/${selectedEdition.id}`, {
         params: refresh ? { refresh: 1 } : {}
       })
+      // An unknown /api path is answered with index.html (e.g. an older server during a deploy)
+      if (!response.data?.edition) {
+        throw new Error('Unexpected response from the server, try reloading the page in a minute')
+      }
       if (requestId === requestRef.current) setPresale(response.data)
     } catch (err) {
-      if (requestId === requestRef.current) setError(err.response?.data?.error || 'Failed to load presale data')
+      if (requestId === requestRef.current) {
+        setError(err.response?.data?.error || err.message || 'Failed to load presale data')
+      }
     } finally {
       if (requestId === requestRef.current) setLoading(false)
     }

@@ -22,6 +22,7 @@ import Sections from './pages/Sections'
 import AccommodationSettings from './pages/AccommodationSettings'
 import Confirmation from './pages/Confirmation'
 import TicketsTabs from './pages/TicketsTabs'
+import PhoneScanner from './pages/PhoneScanner'
 
 // Old URLs (bookmarks, links in emails) keep working
 function RedirectTo({ to }) {
@@ -39,6 +40,9 @@ function App() {
           <Routes>
           {/* Public route for confirmation */}
           <Route path="/confirm/:token" element={<Confirmation />} />
+
+          {/* Public phone scanner, joined through a scanner QR code */}
+          <Route path="/scan/:token" element={<PhoneScanner />} />
 
           {/* Fullscreen editor — auth-protected but rendered without app chrome */}
           <Route path="/catalogue/:id/subtitles" element={
