@@ -502,14 +502,29 @@ async function listTickets(programmingId) {
 
 /** Print a ticket again; counts the reprints. */
 async function reprintTicket(ticketId) {
+  // The screening without the sale filters: it may have become free or hidden since
+  const { rows: [screening] } = await pool.query(`
+    SELECT ps.scheduled_date::text AS date,
+           to_char(ps.scheduled_time, 'HH24:MI') AS time,
+           COALESCE(NULLIF(ps.title_override_cs, ''), m.name_cs, mb.name_cs) AS title,
+           COALESCE(NULLIF(ps.title_override_en, ''), m.name_en, mb.name_en) AS title_en,
+           v.name_cs AS venue
+    FROM box_office_tickets t
+    JOIN programming_schedule ps ON ps.id = t.programming_id
+    JOIN venues v ON v.id = ps.venue_id
+    LEFT JOIN movies m ON m.id = ps.movie_id
+    LEFT JOIN movie_blocks mb ON mb.id = ps.block_id
+    WHERE t.id = $1
+  `, [ticketId]);
+  if (!screening) throw new BoxOfficeError(404, 'Ticket not found');
+
   const { rows } = await pool.query(`
     UPDATE box_office_tickets SET printed_count = printed_count + 1
     WHERE id = $1 AND cancelled_at IS NULL
     RETURNING id, code, programming_id, category_name, price_cents, payment_method, sold_at, holder_name
   `, [ticketId]);
   if (!rows[0]) throw new BoxOfficeError(404, 'Ticket not found or cancelled');
-  const screening = await pool.query(`${SCREENING_SELECT} AND ps.id = $1`, [rows[0].programming_id]);
-  return printable(rows[0], screening.rows[0]);
+  return printable(rows[0], screening);
 }
 
 /** Cancel a ticket that hasn't been scanned; it no longer counts into capacity or revenue. */
@@ -520,12 +535,15 @@ async function cancelTicket(ticketId, cancelledBy) {
   if (ticket.cancelled_at) throw new BoxOfficeError(409, 'Ticket is already cancelled');
   if (ticket.scanned) throw new BoxOfficeError(409, 'Ticket has already been scanned at the door');
 
+  // Re-checked in the update: a scan may land between the checks above and here
   const result = await pool.query(`
-    UPDATE box_office_tickets SET cancelled_at = now(), cancelled_by = $2
-    WHERE id = $1 AND cancelled_at IS NULL
-    RETURNING id, code, cancelled_at
+    UPDATE box_office_tickets t SET cancelled_at = now(), cancelled_by = $2
+    WHERE t.id = $1 AND t.cancelled_at IS NULL
+      AND NOT EXISTS (SELECT 1 FROM badge_scans bs
+                      WHERE bs.programming_id = t.programming_id AND bs.badge_number = t.code)
+    RETURNING t.id, t.code, t.cancelled_at
   `, [ticketId, cancelledBy]);
-  if (!result.rows[0]) throw new BoxOfficeError(409, 'Ticket is already cancelled');
+  if (!result.rows[0]) throw new BoxOfficeError(409, 'Ticket is already cancelled or has been scanned');
   return result.rows[0];
 }
 

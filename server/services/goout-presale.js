@@ -23,13 +23,13 @@ const ENDED_TTL = 12 * 60 * 60 * 1000;
 const VALID_TICKET_STATES = new Set(['paid', 'prepaid']);
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-const cache = new Map(); // key -> { expiresAt, live, promise }
+const cache = new Map(); // key -> { loadedAt, expiresAt, live, promise }
 
 function cached(key, ttl, load) {
   const hit = cache.get(key);
   if (hit && hit.expiresAt > Date.now()) return hit.promise;
   const promise = load();
-  cache.set(key, { expiresAt: Date.now() + ttl, live: ttl === LIVE_TTL, promise });
+  cache.set(key, { loadedAt: Date.now(), expiresAt: Date.now() + ttl, live: ttl === LIVE_TTL, promise });
   // A failed load must not stay cached
   promise.catch(() => cache.delete(key));
   return promise;
@@ -461,8 +461,11 @@ async function getEditionPresale(editionId, { refresh = false } = {}) {
   return { ...presale, comparison, updatedAt: new Date().toISOString() };
 }
 
-// Tickets of a sale, loaded again from GoOut. If GoOut fails, the last loaded
-// tickets are used and marked stale.
+// Oldest GoOut tickets a box-office sale may rely on when GoOut doesn't answer
+const STALE_LIMIT = 15 * 60 * 1000;
+
+// Tickets of a sale, loaded again from GoOut. If GoOut fails, tickets loaded in
+// the last STALE_LIMIT are used and marked stale; older ones are not trusted.
 async function loadSaleTicketsFresh(sale) {
   const key = `sale:${sale.saleId}`;
   const previous = cache.get(key);
@@ -470,7 +473,7 @@ async function loadSaleTicketsFresh(sale) {
   try {
     return await loadSaleTickets(sale.saleId, sale.state);
   } catch (error) {
-    if (!previous) throw error;
+    if (!previous || Date.now() - previous.loadedAt > STALE_LIMIT) throw error;
     cache.set(key, previous);
     return { ...(await previous.promise), stale: true };
   }

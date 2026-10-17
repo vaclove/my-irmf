@@ -254,7 +254,7 @@ function SellPanel({ detail, editionId, festival, onChanged }) {
           <p className="mt-2 text-xs text-amber-700">Not linked to GoOut: only box-office tickets count into the capacity.</p>
         )}
         {screening.gooutStale && (
-          <p className="mt-2 text-xs text-amber-700">GoOut didn't answer; the GoOut count is from the last successful load.</p>
+          <p className="mt-2 text-xs text-amber-700">GoOut didn't answer; the GoOut count is from the last load (at most 15 minutes old).</p>
         )}
         {screening.gooutError && (
           <p className="mt-2 text-xs text-red-700">GoOut: {screening.gooutError}</p>
@@ -524,15 +524,17 @@ function CategoriesModal({ editionId, screening = null, onClose, onChanged }) {
   const setDraft = (c, field, value) => setDrafts(d => ({ ...d, [c.id]: { ...draft(c), [field]: value } }))
   const toCents = (price) => Math.round(Number(String(price).replace(',', '.')) * 100)
 
+  // The screening object is replaced on every panel refresh; only its id matters here
+  const screeningId = screening?.id
   const load = useCallback(async () => {
     try {
-      const params = screening ? { programming_id: screening.id } : { edition_id: editionId }
+      const params = screeningId ? { programming_id: screeningId } : { edition_id: editionId }
       const response = await axios.get('/api/box-office/categories', { params })
       setCategories(response.data.categories)
     } catch (err) {
       showError(errorMessage(err, 'Failed to load prices'))
     }
-  }, [editionId, screening, showError])
+  }, [editionId, screeningId, showError])
 
   useEffect(() => { load() }, [load])
 

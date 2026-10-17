@@ -10,12 +10,13 @@ set -e
 PRINTER="${1:-Xprinter_XP58}"
 DIR=/Library/Printers/Xprinter/Filter
 install -o root -g wheel -m 755 "$(dirname "$0")/rastertozj-pad" "$DIR/rastertozj-pad"
+PPD="$(mktemp -t xprinter-ppd)"
+trap 'rm -f "$PPD"' EXIT
 sed -e "s#$DIR/rastertozj\"#$DIR/rastertozj-pad\"#" \
     -e 's#^\*DefaultPageSize: .*#*DefaultPageSize: X48MMY210MM#' \
     -e 's#^\*DefaultPageRegion: .*#*DefaultPageRegion: X48MMY210MM#' \
     -e 's#^\*DefaultImageableArea: .*#*DefaultImageableArea: X48MMY210MM#' \
     -e 's#^\*DefaultPaperDimension: .*#*DefaultPaperDimension: X48MMY210MM#' \
-    "/etc/cups/ppd/$PRINTER.ppd" > "/tmp/$PRINTER-pad.ppd"
-lpadmin -p "$PRINTER" -P "/tmp/$PRINTER-pad.ppd" -o PageSize-default=X48MMY210MM -o PageRegion-default=X48MMY210MM
-rm "/tmp/$PRINTER-pad.ppd"
+    "/etc/cups/ppd/$PRINTER.ppd" > "$PPD"
+lpadmin -p "$PRINTER" -P "$PPD" -o PageSize-default=X48MMY210MM -o PageRegion-default=X48MMY210MM
 grep -E "cupsFilter|^\*Default(PageSize|PageRegion|ImageableArea|PaperDimension)" "/etc/cups/ppd/$PRINTER.ppd"
