@@ -3,9 +3,13 @@
  * offline:
  *   - player files (/tv/*): network first, cached copy when offline
  *   - programme data (/api/public/*): network first, last good response when offline
- *   - images and later media: served from the asset cache that app.js fills
+ *   - photos and videos (/api/public/tv/media/*) and programme images: from the
+ *     asset cache that app.js fills, with Range support for <video>; straight
+ *     from the network until they are cached
  */
-var SHELL_CACHE = 'irmf-tv-shell-v1';
+// Bump the version when the worker must be reinstalled: browsers keep the CSP
+// a worker was installed with until its script changes (v2: s3.irmf.cz allowed).
+var SHELL_CACHE = 'irmf-tv-shell-v2';
 var DATA_CACHE = 'irmf-tv-data-v1';
 var ASSET_CACHE = 'irmf-tv-assets';
 var SHELL_FILES = ['index.html', 'tv.css', 'app.js', 'logo-horizontal.png', 'logo-vertical.png'];
@@ -38,7 +42,8 @@ self.addEventListener('activate', function (event) {
 
 /**
  * Network first; the cached copy (stored under cacheKey) when the network
- * fails, or when it is slower than NETWORK_TIMEOUT_MS and a copy exists.
+ * fails or answers with an error, or when it is slower than
+ * NETWORK_TIMEOUT_MS and a copy exists.
  */
 function networkFirst(request, cacheName, cacheKey) {
   return new Promise(function (resolve) {
@@ -56,8 +61,14 @@ function networkFirst(request, cacheName, cacheKey) {
       if (response.ok) {
         var copy = response.clone();
         caches.open(cacheName).then(function (cache) { return cache.put(cacheKey, copy); });
+        if (!settled) { settled = true; clearTimeout(timer); resolve(response); }
+        return;
       }
-      if (!settled) { settled = true; clearTimeout(timer); resolve(response); }
+      // A server error (e.g. the app restarting after a deploy): the cached copy is better
+      clearTimeout(timer);
+      fromCache().then(function (cached) {
+        if (!settled) { settled = true; resolve(cached || response); }
+      });
     }).catch(function () {
       clearTimeout(timer);
       fromCache().then(function (cached) {
@@ -81,14 +92,46 @@ self.addEventListener('fetch', function (event) {
     return;
   }
 
+  if (url.origin === scope.origin && url.pathname.indexOf('/api/public/tv/media/') === 0) {
+    event.respondWith(fromAssetCache(request));
+    return;
+  }
+
   if (url.origin === scope.origin && url.pathname.indexOf('/api/public/') === 0) {
     event.respondWith(networkFirst(request, DATA_CACHE, request.url));
     return;
   }
 
-  event.respondWith(
-    caches.open(ASSET_CACHE)
-      .then(function (cache) { return cache.match(request.url); })
-      .then(function (cached) { return cached || fetch(request); })
-  );
+  event.respondWith(fromAssetCache(request));
 });
+
+/**
+ * The cached copy (app.js stores whole files), or the network. <video> asks
+ * for byte ranges: answer them from the cached file — Blob.slice keeps the
+ * data on disk instead of loading a whole video into memory.
+ */
+function fromAssetCache(request) {
+  return caches.open(ASSET_CACHE)
+    .then(function (cache) { return cache.match(request.url); })
+    .then(function (cached) {
+      if (!cached) return fetch(request);
+      var range = /^bytes=(\d*)-(\d*)$/.exec(request.headers.get('Range') || '');
+      if (!range || cached.type === 'opaque') return cached;
+      return cached.blob().then(function (blob) {
+        var start = range[1] ? Number(range[1]) : Math.max(0, blob.size - Number(range[2]));
+        var end = range[1] && range[2] ? Math.min(Number(range[2]), blob.size - 1) : blob.size - 1;
+        if (start > end || start >= blob.size) {
+          return new Response(null, { status: 416, headers: { 'Content-Range': 'bytes */' + blob.size } });
+        }
+        return new Response(blob.slice(start, end + 1), {
+          status: 206,
+          headers: {
+            'Content-Type': cached.headers.get('Content-Type') || 'application/octet-stream',
+            'Content-Length': String(end - start + 1),
+            'Content-Range': 'bytes ' + start + '-' + end + '/' + blob.size,
+            'Accept-Ranges': 'bytes',
+          },
+        });
+      });
+    });
+}

@@ -197,6 +197,12 @@ async function openBlobStream(blobName) {
   return res.readableStreamBody;
 }
 
+/** Stream bytes [offset, offset + count) of a blob; count omitted = to the end. */
+async function openBlobRange(blobName, offset, count) {
+  const res = await blockBlob(blobName).download(offset, count);
+  return res.readableStreamBody;
+}
+
 /** Delete a blob (account soft delete keeps it recoverable for 14 days). */
 async function deleteBlob(blobName) {
   if (!blobName) return;
@@ -471,6 +477,7 @@ module.exports = {
   uploadBuffer,
   uploadStream,
   openBlobStream,
+  openBlobRange,
   deleteBlob,
   readBuffer,
   readSubtitleRef,

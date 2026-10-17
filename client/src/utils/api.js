@@ -170,6 +170,21 @@ export const movieFileApi = {
   downloadUrl: (movieId, fileKind) => `${API_BASE_URL}/movies/${movieId}/files/download/${fileKind}`,
 }
 
+// TV player on the venue screen (/tv/): settings and slides
+export const tvApi = {
+  getSettings: () => api.get('/tv/settings'),
+  updateSettings: (data) => api.put('/tv/settings', data),
+  reloadScreens: () => api.post('/tv/reload'),
+  getSlides: () => api.get('/tv/slides'),
+  uploadPhoto: (data) => api.post('/tv/slides/photos', data),
+  createVideo: (data) => api.post('/tv/slides/videos', data),
+  completeVideo: (id) => api.post(`/tv/slides/${id}/upload-complete`),
+  retryVideo: (id) => api.post(`/tv/slides/${id}/retry`),
+  updateSlide: (id, data) => api.patch(`/tv/slides/${id}`, data),
+  reorderSlides: (ids) => api.put('/tv/slides/order', { ids }),
+  deleteSlide: (id) => api.delete(`/tv/slides/${id}`),
+}
+
 // Movie download jobs API (server-side downloader: public Drive link / FTP)
 export const movieDownloadApi = {
   create: (data) => api.post('/movie-downloads', data),
