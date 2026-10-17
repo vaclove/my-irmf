@@ -39,6 +39,7 @@ const scannerRoutes = require('./routes/scanner');
 const scannerSessionRoutes = require('./routes/scanner-session');
 const tvRoutes = require('./routes/tv');
 const gooutRoutes = require('./routes/goout');
+const boxOfficeRoutes = require('./routes/boxOffice');
 const dbBackupRoutes = require('./routes/dbBackup');
 const gooutTokenScheduler = require('./services/goout-token-scheduler');
 const movieFileScanScheduler = require('./services/movie-file-scan-scheduler');
@@ -198,6 +199,7 @@ app.use('/api/accommodation', requireIrmfDomain, accommodationRoutes);
 app.use('/api/associations', requireIrmfDomain, associationRoutes);
 app.use('/api/scanner', requireIrmfDomain, scannerRoutes);
 app.use('/api/goout', requireIrmfDomain, gooutRoutes);
+app.use('/api/box-office', requireIrmfDomain, boxOfficeRoutes);
 app.use('/api/db-backup', requireIrmfDomain, dbBackupRoutes);
 app.use('/api/tv', requireIrmfDomain, tvRoutes.adminRouter);
 

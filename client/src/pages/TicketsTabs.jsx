@@ -2,9 +2,11 @@ import React, { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import Presale from './Presale'
 import Scanner from './Scanner'
+import BoxOffice from './BoxOffice'
 
 const TABS = [
   { key: 'presale', path: '/tickets', label: '📊 Presale' },
+  { key: 'box-office', path: '/tickets/box-office', label: '🎟️ Box office' },
   { key: 'scan', path: '/tickets/scan', label: '📷 Scan' }
 ]
 
@@ -12,7 +14,7 @@ const TicketsTabs = () => {
   const location = useLocation()
   const navigate = useNavigate()
   const [scanning, setScanning] = useState(false)
-  const activeTab = location.pathname === '/tickets/scan' ? 'scan' : 'presale'
+  const activeTab = TABS.find(tab => tab.path === location.pathname)?.key || 'presale'
   // Both routes share this instance, so scanning may be left over from the Scan tab
   const hideTabs = scanning && activeTab === 'scan'
 
@@ -42,6 +44,7 @@ const TicketsTabs = () => {
       {/* Tab Content */}
       <div>
         {activeTab === 'presale' && <Presale />}
+        {activeTab === 'box-office' && <BoxOffice />}
         {activeTab === 'scan' && <Scanner onScanningChange={setScanning} />}
       </div>
     </div>

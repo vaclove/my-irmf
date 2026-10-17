@@ -1,6 +1,7 @@
 const { pool } = require('../models/database');
 const { isValidTicketCode } = require('../utils/luhn');
 const { isGoOutTicketCode, verifyGoOutTicket } = require('./goout-ticket-verifier');
+const { isBoxOfficeCode } = require('../utils/boxOfficeCode');
 
 /**
  * Scanning shared by the staff scanner (routes/scanner.js) and phones that joined
@@ -19,10 +20,16 @@ const GOOUT_TICKET_TYPES = {
 
 // Name shown for a scan without a guest record. GoOut tickets show the name
 // on the ticket when GoOut returned it, with the ticket type as category.
+// Box-office tickets keep their category (with the guest's name for a free
+// ticket issued to a guest) in holder_name, so the door can check e.g. a
+// student card for a reduced ticket.
 function scanLabel(badgeNumber, gooutStatus, holderName) {
   const code = String(badgeNumber);
   if (code.length === 7 && code.startsWith('30')) {
     return { firstName: 'One-time', lastName: 'Ticket' };
+  }
+  if (gooutStatus === 'box_office') {
+    return { firstName: 'Box office', lastName: 'ticket', category: holderName || undefined };
   }
 
   const ticketType = GOOUT_TICKET_TYPES[gooutStatus];
@@ -52,6 +59,7 @@ async function processScan({ programming_id, scanned_code, scannedBy, scannerDev
   // Internal badge: YYYY### (length 7, not starting with 30) - e.g., 2025003
   // One-time ticket: 30XXXXC (length 7, starts with 30) - e.g., 3012347
   // GoOut ticket: 13 digits with an EAN-13 check digit - e.g., 1400528549781
+  // Box-office ticket: 4NNNNNNNNC (length 10, Luhn check digit) - e.g., 4123456782
   // Anything else is rejected (usually a misread)
 
   const scannedStr = String(scanned_code);
@@ -59,6 +67,7 @@ async function processScan({ programming_id, scanned_code, scannedBy, scannerDev
   let isInternalBadge = false;
   let isOneTimeTicket = false;
   let isGoOutTicket = false;
+  let isBoxOfficeTicket = false;
 
   if (scannedStr.length === 7) {
     if (scannedStr.startsWith('30')) {
@@ -74,6 +83,8 @@ async function processScan({ programming_id, scanned_code, scannedBy, scannerDev
     }
   } else if (isGoOutTicketCode(scannedStr)) {
     isGoOutTicket = true;
+  } else if (isBoxOfficeCode(scannedStr)) {
+    isBoxOfficeTicket = true;
   } else {
     return { status: 400, body: { error: 'Unknown code' } };
   }
@@ -165,8 +176,51 @@ async function processScan({ programming_id, scanned_code, scannedBy, scannerDev
     guestId = null;
   }
 
-  // Check if already scanned for THIS screening (internal badges and GoOut tickets)
-  if (isInternalBadge || isGoOutTicket) {
+  // Box-office ticket: valid for the screening it was sold for, unless cancelled.
+  // A free ticket issued to a guest records the scan for that guest.
+  let boxOfficeLabel = null;
+  if (isBoxOfficeTicket) {
+    const ticketResult = await pool.query(`
+      SELECT
+        t.programming_id,
+        t.category_name,
+        t.cancelled_at,
+        t.guest_id,
+        t.holder_name,
+        ps.scheduled_date::text AS scheduled_date,
+        to_char(ps.scheduled_time, 'HH24:MI') AS scheduled_time,
+        COALESCE(NULLIF(ps.title_override_cs, ''), m.name_cs, mb.name_cs) AS title,
+        v.name_cs AS venue
+      FROM box_office_tickets t
+      JOIN programming_schedule ps ON ps.id = t.programming_id
+      JOIN venues v ON v.id = ps.venue_id
+      LEFT JOIN movies m ON m.id = ps.movie_id
+      LEFT JOIN movie_blocks mb ON mb.id = ps.block_id
+      WHERE t.code = $1
+    `, [scannedStr]);
+    const ticket = ticketResult.rows[0];
+    const label = ticket && [ticket.holder_name, ticket.category_name].filter(Boolean).join(' · ');
+    const ticketGuest = { firstName: 'Box office', lastName: 'ticket', category: label || undefined, badgeNumber: scannedStr };
+
+    if (!ticket) {
+      return { status: 404, body: { error: 'Ticket not found', guest: ticketGuest } };
+    }
+    if (ticket.cancelled_at) {
+      return { status: 409, body: { error: 'Ticket was cancelled', guest: ticketGuest } };
+    }
+    if (ticket.programming_id !== programming_id) {
+      return { status: 409, body: {
+        error: 'Ticket is for another screening',
+        guest: ticketGuest,
+        usedFor: `${ticket.title} - ${ticket.venue} (${ticket.scheduled_date} ${ticket.scheduled_time})`
+      } };
+    }
+    boxOfficeLabel = label;
+    guestId = ticket.guest_id;
+  }
+
+  // Check if already scanned for THIS screening (internal badges, GoOut and box-office tickets)
+  if (isInternalBadge || isGoOutTicket || isBoxOfficeTicket) {
     const existingQuery = isInternalBadge
       ? `SELECT id FROM badge_scans WHERE programming_id = $1 AND guest_id = $2`
       : `SELECT id, goout_status, holder_name FROM badge_scans WHERE programming_id = $1 AND badge_number = $2`;
@@ -193,8 +247,8 @@ async function processScan({ programming_id, scanned_code, scannedBy, scannerDev
   // GoOut ticket: verify and check in at GoOut. If GoOut does not answer in
   // time it is let in as unverified; the local check above still blocks
   // double entry to this screening.
-  let gooutStatus = null;
-  let holderName = null;
+  let gooutStatus = isBoxOfficeTicket ? 'box_office' : null;
+  let holderName = boxOfficeLabel;
   if (isGoOutTicket) {
     const verdict = await verifyGoOutTicket(scannedStr, programming_id);
     if (verdict.rejected) {
