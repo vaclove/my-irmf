@@ -384,6 +384,12 @@ router.put('/:id', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
+    const pass = await pool.query('SELECT goout_ticket_id FROM goout_accreditations WHERE guest_id = $1 LIMIT 1', [id]);
+    if (pass.rows.length > 0) {
+      return res.status(409).json({
+        error: `Guest holds converted GoOut pass ${pass.rows[0].goout_ticket_id} and can't be deleted; edit the guest instead`
+      });
+    }
     const result = await pool.query('DELETE FROM guests WHERE id = $1 RETURNING *', [id]);
     
     if (result.rows.length === 0) {

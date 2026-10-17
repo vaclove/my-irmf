@@ -190,22 +190,26 @@ const Accreditations = () => {
 
   const editionId = selectedEdition?.id
 
+  // Only the latest request may update the list (the edition may change while GoOut loads)
+  const requestRef = useRef(0)
   const load = useCallback(async () => {
     if (!editionId) return null
+    const requestId = ++requestRef.current
     setLoading(true)
     try {
       const response = await axios.get(`/api/goout/accreditations/${editionId}`)
       if (!Array.isArray(response.data?.tickets)) {
         throw new Error('Unexpected response from the server, try reloading the page in a minute')
       }
+      if (requestId !== requestRef.current) return null
       setData(response.data)
       setError('')
       return response.data
     } catch (err) {
-      setError(errorMessage(err, 'Failed to load GoOut passes'))
+      if (requestId === requestRef.current) setError(errorMessage(err, 'Failed to load GoOut passes'))
       return null
     } finally {
-      setLoading(false)
+      if (requestId === requestRef.current) setLoading(false)
     }
   }, [editionId])
 
