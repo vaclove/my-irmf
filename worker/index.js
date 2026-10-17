@@ -65,6 +65,9 @@ const QUEUE_NAME = process.env.TRANSCODE_QUEUE_NAME || 'movie-transcodes';
 const VISIBILITY_TIMEOUT_S = 8 * 60 * 60; // 8h — matches the job replica timeout
 const MAX_DEQUEUE = 3; // poison-message guard
 const CANCEL_POLL_MS = 5000;
+// Take no new message after this long (see main()); leaves the 8 h replica
+// timeout room for one more job.
+const DRAIN_LIMIT_MS = Number(process.env.WORKER_DRAIN_LIMIT_HOURS || 4) * 60 * 60 * 1000;
 
 const FFMPEG = process.env.FFMPEG_PATH || 'ffmpeg';
 const FFPROBE = process.env.FFPROBE_PATH || 'ffprobe';
@@ -1182,7 +1185,7 @@ async function processBurnJob(jobId, dequeueCount) {
       offsetMs: startMs,
       lengthMs,
       title: movie.name_cs || movie.name_en || '',
-      addedPosition: overBurnedIn ? Number(job.added_position) : null,
+      added: overBurnedIn ? { align: job.added_align || 'bottom', edge: Number(job.added_position) } : null,
     });
     fs.writeFileSync(assPath, ass.script, 'utf8');
 
@@ -1820,7 +1823,16 @@ async function main() {
   await queue.createIfNotExists();
 
   // Drain: process messages until the queue is empty, then exit (scale to zero).
+  // Stop taking new ones after DRAIN_LIMIT_MS: the replica is killed at 8 h,
+  // and a long queue (e.g. a batch of full exports) would otherwise lose the
+  // job in progress at that moment. The scale rule starts a fresh execution
+  // for what is left.
+  const drainStarted = Date.now();
   for (;;) {
+    if (Date.now() - drainStarted > DRAIN_LIMIT_MS) {
+      log('drain time limit reached — exiting, a new execution takes the rest');
+      break;
+    }
     const received = await queue.receiveMessages({
       numberOfMessages: 1,
       visibilityTimeout: VISIBILITY_TIMEOUT_S,

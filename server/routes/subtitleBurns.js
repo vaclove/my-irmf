@@ -68,7 +68,11 @@ function pickSubtitles(sources, { cs, en }) {
 }
 
 /** Shared validation + insert + enqueue used by create and retry. */
-async function createJob(req, res, { movieId, kind, cs, en, previewStart, existingLang, addedPosition, operation }) {
+async function createJob(
+  req,
+  res,
+  { movieId, kind, cs, en, previewStart, existingLang, addedPosition, addedAlign, operation }
+) {
   const movieRes = await pool.query('SELECT id FROM movies WHERE id = $1', [movieId]);
   if (movieRes.rows.length === 0) return res.status(404).json({ error: 'Movie not found' });
   if (!KINDS.includes(kind)) return res.status(400).json({ error: "kind must be 'preview' or 'full'" });
@@ -93,6 +97,9 @@ async function createJob(req, res, { movieId, kind, cs, en, previewStart, existi
     if (addedPosition == null || !(pos > 0 && pos <= 1)) {
       return res.status(400).json({ error: 'added_position must be a number in (0, 1]' });
     }
+    if (!['top', 'bottom'].includes(addedAlign)) {
+      return res.status(400).json({ error: "added_align must be 'top' or 'bottom'" });
+    }
   }
 
   const active = await pool.query(
@@ -106,8 +113,9 @@ async function createJob(req, res, { movieId, kind, cs, en, previewStart, existi
   const insert = await pool.query(
     `INSERT INTO subtitle_burn_jobs
        (movie_id, kind, source_ref, subtitle_cs_kind, subtitle_cs_ref, subtitle_en_kind, subtitle_en_ref,
-        preview_start_seconds, preview_length_seconds, existing_subtitles_lang, added_position, status, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', $12) RETURNING ${JOB_COLUMNS}`,
+        preview_start_seconds, preview_length_seconds, existing_subtitles_lang, added_position, added_align,
+        status, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'pending', $13) RETURNING ${JOB_COLUMNS}`,
     [
       movieId,
       kind,
@@ -120,6 +128,7 @@ async function createJob(req, res, { movieId, kind, cs, en, previewStart, existi
       kind === 'preview' ? PREVIEW_LENGTH_SECONDS : null,
       existingLang ?? null,
       existingLang != null ? Number(addedPosition) : null,
+      existingLang != null ? addedAlign : 'bottom',
       req.user?.email || null,
     ]
   );
@@ -147,6 +156,7 @@ async function createJob(req, res, { movieId, kind, cs, en, previewStart, existi
       en: picked.en?.file_kind || null,
       existing_subtitles_lang: existingLang ?? null,
       added_position: existingLang != null ? Number(addedPosition) : null,
+      added_align: existingLang != null ? addedAlign : null,
       operation,
     },
   });
@@ -214,7 +224,8 @@ router.post('/check', async (req, res) => {
 router.post('/', async (req, res) => {
   if (!subtitleBurnQueue.isConfigured()) return notConfigured(res);
   try {
-    const { movie_id, kind, cs, en, preview_start_seconds, existing_subtitles_lang, added_position } = req.body;
+    const { movie_id, kind, cs, en, preview_start_seconds, existing_subtitles_lang, added_position, added_align } =
+      req.body;
     if (!movie_id) return res.status(400).json({ error: 'movie_id is required' });
     await createJob(req, res, {
       movieId: movie_id,
@@ -224,6 +235,7 @@ router.post('/', async (req, res) => {
       previewStart: preview_start_seconds ?? null,
       existingLang: existing_subtitles_lang || null,
       addedPosition: added_position ?? null,
+      addedAlign: added_align || 'bottom',
       operation: 'create',
     });
   } catch (error) {
@@ -341,6 +353,7 @@ router.post('/:id/retry', async (req, res) => {
       previewStart: old.preview_start_seconds,
       existingLang: old.existing_subtitles_lang,
       addedPosition: old.added_position,
+      addedAlign: old.added_align || 'bottom',
       operation: 'retry',
     });
   } catch (error) {

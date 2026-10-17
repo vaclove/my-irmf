@@ -17,6 +17,7 @@ const LAYOUT_LABELS = {
   paired: 'CS+EN paired',
   zones: 'CS+EN separate timings',
   single: 'one language',
+  dual: 'CZ bottom, EN top',
   added: 'added to burned-in subtitles',
 }
 

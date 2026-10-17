@@ -3,14 +3,16 @@ import { Link } from 'react-router-dom'
 import Modal from '../Modal'
 import { subtitleBurnApi } from '../../utils/api'
 import { useToast } from '../../contexts/ToastContext'
-import BurnedInPositioner from './BurnedInPositioner'
+import BurnedInPositioner, { defaultPlacement } from './BurnedInPositioner'
 
 const LANGS = [
   { lang: 'cs', label: 'Czech', original: 'subtitles_cs', synced: 'subtitles_cs_synced' },
   { lang: 'en', label: 'English', original: 'subtitles_en', synced: 'subtitles_en_synced' },
 ]
 const MAX_LINE_CHARS = 42
-const DEFAULT_ADDED_POSITION = 0.78
+// Below this share of EN cues timed like a CS cue, the two languages change
+// at visibly different moments.
+const MATCHED_TIMING = 0.8
 
 /** Default per language: the synced file when there is one, else the original. */
 function defaultChoice(sources, { original, synced }) {
@@ -30,15 +32,14 @@ function parseTime(text) {
 function layoutText(check, existingLang) {
   if (existingLang) {
     const existing = LANGS.find((l) => l.lang === existingLang).label
-    return `Added to the ${existing} subtitles already burned into the picture: yellow, at the height set below. The picture is left as it is.`
+    const added =
+      existingLang === 'cs' ? 'English, smaller and light grey' : 'Czech, white'
+    return `Added to the ${existing} subtitles already burned into the picture: ${added}, at the place set below. The picture is left as it is.`
   }
-  if (check.layout === 'paired') {
-    return `CS and EN share timings (${Math.round(check.paired_ratio * 100)} % of cues match): each subtitle renders as one block, EN above CS.`
+  if (check.layout === 'dual') {
+    return 'Czech at the bottom (white), English at the top (smaller, light grey). With black bars above and below the picture, each goes into its bar.'
   }
-  if (check.layout === 'zones') {
-    return `CS and EN timings differ (only ${Math.round(check.paired_ratio * 100)} % of cues match): each language keeps its own fixed place, EN above CS.`
-  }
-  return 'One language only: larger white subtitles.'
+  return 'One language only: larger white subtitles at the bottom.'
 }
 
 /**
@@ -54,18 +55,27 @@ function SubtitleExportModal({ onClose, movieId, kind, sources, lastAdded, onCre
   // Mounted per opening (the parent renders it only while open), so the
   // defaults come from the files as they are now.
   const [existingLang, setExistingLang] = useState(lastAdded?.existing_subtitles_lang || '')
-  const [position, setPosition] = useState(
-    lastAdded?.added_position != null ? Number(lastAdded.added_position) : DEFAULT_ADDED_POSITION
+  const [placement, setPlacement] = useState(() =>
+    lastAdded?.added_position != null
+      ? { align: lastAdded.added_align || 'bottom', edge: Number(lastAdded.added_position) }
+      : defaultPlacement(lastAdded?.existing_subtitles_lang === 'cs' ? 'en' : 'cs')
   )
   const [choice, setChoice] = useState(() => ({
     cs: lastAdded?.existing_subtitles_lang === 'cs' ? '' : defaultChoice(sources, LANGS[0]),
     en: lastAdded?.existing_subtitles_lang === 'en' ? '' : defaultChoice(sources, LANGS[1]),
   }))
-  const onPositionChange = useCallback((p) => setPosition(p), [])
+  const onPlacementChange = useCallback((p) => setPlacement(p), [])
 
   const changeExisting = (lang) => {
     setExistingLang(lang)
-    if (lang) setChoice((c) => ({ ...c, [lang]: '' }))
+    if (!lang) return
+    setChoice((c) => ({ ...c, [lang]: '' }))
+    // The saved place belongs to the saved burned-in language.
+    setPlacement(
+      lang === lastAdded?.existing_subtitles_lang && lastAdded?.added_position != null
+        ? { align: lastAdded.added_align || 'bottom', edge: Number(lastAdded.added_position) }
+        : defaultPlacement(lang === 'cs' ? 'en' : 'cs')
+    )
   }
   const addedLang = existingLang ? LANGS.find((l) => l.lang !== existingLang) : null
   const addedKind = addedLang ? choice[addedLang.lang] : ''
@@ -119,7 +129,8 @@ function SubtitleExportModal({ onClose, movieId, kind, sources, lastAdded, onCre
         en: choice.en || null,
         preview_start_seconds: kind === 'preview' ? previewStart : null,
         existing_subtitles_lang: existingLang || null,
-        added_position: existingLang ? position : null,
+        added_position: existingLang ? placement.edge : null,
+        added_align: existingLang ? placement.align : null,
       })
       info(kind === 'preview' ? 'Preview clip queued' : 'Export queued')
       if (onCreated) await onCreated()
@@ -191,8 +202,8 @@ function SubtitleExportModal({ onClose, movieId, kind, sources, lastAdded, onCre
           <BurnedInPositioner
             movieId={movieId}
             subtitleKind={addedKind}
-            position={position}
-            onChange={onPositionChange}
+            placement={placement}
+            onChange={onPlacementChange}
             autoDetect={lastAdded?.added_position == null}
           />
         )}
@@ -219,6 +230,13 @@ function SubtitleExportModal({ onClose, movieId, kind, sources, lastAdded, onCre
         {check && !checking && (
           <div className="rounded-md bg-gray-50 border border-gray-200 p-3 text-sm text-gray-700 space-y-1">
             <div>{layoutText(check, existingLang)}</div>
+            {!existingLang && check.layout === 'dual' && check.paired_ratio < MATCHED_TIMING && (
+              <div className="text-yellow-800">
+                Only {Math.round(check.paired_ratio * 100)} % of the cues are timed the same in both languages, so
+                Czech and English will change at different moments. Best is English translated into the Czech
+                cue timing (at most 2 lines per language).
+              </div>
+            )}
             {LANGS.filter(({ lang }) => check[lang]).map(({ lang, label }) => (
               <div key={lang}>
                 {label}: {check[lang].cues} subtitles

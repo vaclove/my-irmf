@@ -4,51 +4,47 @@
  * into its image).
  *
  * Look — the same for every movie:
- *   CS  bottom, white, full size (the main language)
- *   EN  directly above, light yellow, ~88 % of the CS size
- *   one language only: white and larger — two lines of it need much less
- *   room than two lines of each
+ *   CS  bottom, white, full size (the main language — where the audience
+ *       looks by habit)
+ *   EN  top, light grey (85 % white), 85 % of the CS size: it keeps out of
+ *       the way of the Czech audience and the position alone tells the
+ *       languages apart (no colour, and italics keep their own meaning)
+ *   one language only: bottom, white and larger
  *   added to a master with subtitles already burned in: the new language in
- *   the second (yellow) colour at the CS size, at a height chosen in the app
- *   so it clears the existing ones; the picture stays untouched (no crop,
- *   centered, same size)
- *   Roboto Medium with a black outline and a soft shadow. Sizes are fractions
+ *   its usual style (EN grey/smaller, CS white), anchored at the top or the
+ *   bottom at an edge chosen in the app so it clears the existing ones; the
+ *   picture stays untouched (no crop, centered, same size)
+ *   Liberation Sans Bold (Arial-like, the classic cinema subtitle look) with
+ *   a black outline and a soft shadow. Sizes are fractions
  *   of the canvas height, so 1080p and 2160p renders look the same on screen.
  *
  * Canvas: 1920x1080, or 3840x2160 for UHD masters. The picture (with any
- * letterbox baked into the master cropped away) is scaled to fit; when it is
- * wider than 16:9 it is pushed up so the black band below it holds the
- * subtitles instead of the picture.
- *
- * Layouts:
- *   paired  CS and EN share timings (one is a translation of the other):
- *           each moment renders as one block, EN directly above CS
- *   zones   independent timings: each language keeps a fixed zone (EN sits
- *           above room for two CS lines), so nothing jumps when only one
- *           language changes
- *   single  one language only
+ * letterbox baked into the master cropped away) is scaled to fit and
+ * centered. When a black band above or below it holds two lines of a
+ * language, that language sits inside the band (CS in the bottom one, EN in
+ * the top one) and the picture stays clean. A single language pushes the
+ * picture up instead, to use one band below.
  */
 
 const { parseSubtitles } = require('./subtitles');
 
-const FONT = 'Roboto Medium';
+const FONT = 'Liberation Sans';
 const CS_SIZE = 0.048; // of the canvas height: 52 px at 1080p
-const EN_SIZE = 0.042; // 45 px at 1080p
+const EN_SIZE = 0.0408; // 85 % of CS: 44 px at 1080p (below 80 % the back rows suffer)
 const SINGLE_SIZE = 0.06; // 65 px at 1080p, when only one language is burned in
-const LINE_HEIGHT = 1.2; // libass line box of Roboto, in font sizes
-const GAP = 0.012; // between the EN and CS blocks
-const MARGIN_BOTTOM = 0.035;
+const LINE_HEIGHT = 1.2; // libass line box (Liberation Sans: ~1.15), in font sizes
+const MARGIN = 0.035; // from the top/bottom edge
+const MIN_BAND_MARGIN = 0.01; // inside a letterbox band, to keep two lines in it
 const MARGIN_SIDE = 0.07; // of the canvas width
 const OUTLINE = 0.0028;
 const SHADOW = 0.0014;
 // ASS colours are &HAABBGGRR.
 const CS_COLOUR = '&H00FFFFFF'; // white
-const EN_COLOUR = '&H0080E6FF'; // #FFE680
+const EN_COLOUR = '&H00D9D9D9'; // 85 % white
 const OUTLINE_COLOUR = '&H00000000';
 const SHADOW_COLOUR = '&H80000000';
 
 const PAIR_TOLERANCE_MS = 250;
-const PAIRED_MIN_RATIO = 0.8;
 const MAX_LINE_CHARS = 42;
 
 const even = (n) => Math.max(2, Math.round(n / 2) * 2);
@@ -59,23 +55,30 @@ function metrics(canvasHeight, { single = false } = {}) {
   const singleSize = Math.round(H * SINGLE_SIZE);
   const csSize = Math.round(H * CS_SIZE);
   const enSize = Math.round(H * EN_SIZE);
-  const gap = Math.round(H * GAP);
-  const margin = Math.round(H * MARGIN_BOTTOM);
-  const csLines = 2 * csSize * LINE_HEIGHT;
-  const enLines = 2 * enSize * LINE_HEIGHT;
+  const margin = Math.round(H * MARGIN);
   return {
     csSize,
     enSize,
     singleSize,
-    gap,
     margin,
+    minMargin: Math.round(H * MIN_BAND_MARGIN),
     outline: Math.round(H * OUTLINE * 10) / 10,
     shadow: Math.round(H * SHADOW * 10) / 10,
-    // Bottom margin of the EN zone in the zones layout.
-    enZoneMargin: Math.round(margin + csLines + gap),
-    // Room for two lines of each language (or of the only one).
-    blockHeight: Math.ceil(single ? margin + 2 * singleSize * LINE_HEIGHT : margin + csLines + gap + enLines),
+    // Two lines of each language.
+    csBlock: Math.ceil(2 * csSize * LINE_HEIGHT),
+    enBlock: Math.ceil(2 * enSize * LINE_HEIGHT),
+    // Room below the picture a single language wants.
+    blockHeight: Math.ceil(margin + 2 * (single ? singleSize : csSize) * LINE_HEIGHT),
   };
+}
+
+/**
+ * Margin from the canvas edge for a block of two lines next to a black band:
+ * inside the band when it fits (as close to the usual margin as the band
+ * allows), else the usual margin over the picture.
+ */
+function bandMargin(band, block, m) {
+  return band >= block + m.minMargin ? Math.min(m.margin, band - block) : m.margin;
 }
 
 /**
@@ -83,7 +86,8 @@ function metrics(canvasHeight, { single = false } = {}) {
  * @param {{width:number, height:number, sar?:number, crop?:{x,y,w,h}|null, single?:boolean, centered?:boolean}} source
  *   coded size, sample aspect ratio, the letterbox crop (if any), whether
  *   only one language is burned in, and whether to keep the picture centered
- *   (subtitles added to burned-in ones are placed by hand against it)
+ *   even then (subtitles added to burned-in ones are placed against it)
+ * @returns {{canvas, picture, crop, band, margins: {cs, en}, metrics}}
  */
 function computeLayout({ width, height, sar = 1, crop = null, single = false, centered = false }) {
   const uhd = width > 2560 || height > 1440;
@@ -96,17 +100,20 @@ function computeLayout({ width, height, sar = 1, crop = null, single = false, ce
   const pw = Math.min(W, even(srcW * scale));
   const ph = Math.min(H, even(srcH * scale));
   const free = H - ph;
-  // Centered when the band below already holds two lines of each language
-  // (or of the only one), otherwise pushed up (at most to the top edge) to make room.
-  const py =
-    centered || free / 2 >= m.blockHeight
-      ? Math.floor(free / 4) * 2
-      : Math.max(0, Math.floor((free - m.blockHeight) / 2) * 2);
+  // Centered; only a single language pushes it up (at most to the top edge)
+  // when the band below can't hold two lines of it.
+  const push = single && !centered && free / 2 < m.blockHeight;
+  const py = push ? Math.max(0, Math.floor((free - m.blockHeight) / 2) * 2) : Math.floor(free / 4) * 2;
+  const bandBelow = H - py - ph;
   return {
     canvas: { width: W, height: H },
     picture: { x: Math.floor((W - pw) / 4) * 2, y: py, width: pw, height: ph },
     crop: crop || null,
-    band: H - py - ph,
+    band: bandBelow,
+    margins: {
+      cs: single ? m.margin : bandMargin(bandBelow, m.csBlock, m),
+      en: bandMargin(py, m.enBlock, m),
+    },
     metrics: m,
   };
 }
@@ -152,8 +159,9 @@ function letterboxCrop(samples, width, height) {
 const ENTITIES = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&nbsp;': ' ', '&quot;': '"', '&#39;': "'" };
 
 /**
- * SRT/VTT cue text -> ASS text. Keeps <i>/<b>/<u>, drops other markup and
- * any ASS override blocks except a top position ({\an8} and friends).
+ * SRT/VTT cue text -> ASS text. Keeps <i>/<u>, drops <b> (everything is
+ * bold), other markup, and any ASS override blocks except a top position
+ * ({\an8} and friends).
  * @returns {{ass: string, lines: string[], top: boolean}}
  */
 function cueToAss(text) {
@@ -163,7 +171,9 @@ function cueToAss(text) {
     return '';
   });
   t = t.replace(/\{/g, '(').replace(/\}/g, ')');
-  t = t.replace(/<\s*(\/?)\s*([ibu])\s*>/gi, (_, close, tag) => `{\\${tag.toLowerCase()}${close ? 0 : 1}}`);
+  // <b> is dropped: the style is bold already, and a closing {\\b0} would
+  // switch the rest of the cue to the regular weight.
+  t = t.replace(/<\s*(\/?)\s*([iu])\s*>/gi, (_, close, tag) => `{\\${tag.toLowerCase()}${close ? 0 : 1}}`);
   t = t.replace(/<[^>]*>/g, '');
   t = t.replace(/&(amp|lt|gt|nbsp|quot|#39);/g, (e) => ENTITIES[e]);
   const assLines = t
@@ -223,11 +233,13 @@ function pairCues(cs, en, toleranceMs = PAIR_TOLERANCE_MS) {
   return { pairs, ratio: pairs.size / Math.max(cs.length, en.length, 1) };
 }
 
-/** 'single' | 'paired' | 'zones' plus the pairing ratio. */
+/**
+ * 'single' | 'dual', plus how many cues share their timing with the other
+ * language (both languages should change at the same moments).
+ */
 function chooseLayout(cs, en) {
   if (!cs?.length || !en?.length) return { layout: 'single', ratio: null };
-  const { ratio } = pairCues(cs, en);
-  return { layout: ratio >= PAIRED_MIN_RATIO ? 'paired' : 'zones', ratio };
+  return { layout: 'dual', ratio: pairCues(cs, en).ratio };
 }
 
 /** Readability numbers for the pre-flight warning. */
@@ -281,41 +293,13 @@ function assTime(ms) {
   return `${h}:${m}:${s}.${String(cs % 100).padStart(2, '0')}`;
 }
 
-function styleLine(name, size, colour, marginSide, marginV, m) {
+function styleLine(name, size, colour, alignment, marginSide, marginV, m) {
   return (
     `Style: ${name},${FONT},${size},${colour},${colour},${OUTLINE_COLOUR},${SHADOW_COLOUR},` +
-    `0,0,0,0,100,100,0,0,1,${m.outline},${m.shadow},2,${marginSide},${marginSide},${marginV},1`
+    // Bold = -1 (Liberation Sans Bold).
+    `-1,0,0,0,100,100,0,0,1,${m.outline},${m.shadow},${alignment},${marginSide},${marginSide},${marginV},1`
   );
 }
-
-/**
- * One event per moment where the set of visible cues stays the same, so a
- * pair always renders as one block (EN above CS).
- */
-function mergeTimeline(items) {
-  const points = [...new Set(items.flatMap((i) => [i.start, i.end]))].sort((a, b) => a - b);
-  const byStart = [...items].sort((a, b) => a.start - b.start);
-  const out = [];
-  let k = 0;
-  let active = [];
-  for (let p = 0; p < points.length - 1; p++) {
-    const a = points[p];
-    const b = points[p + 1];
-    while (k < byStart.length && byStart[k].start <= a) active.push(byStart[k++]);
-    active = active.filter((i) => i.end > a);
-    if (active.length === 0) continue;
-    const key = active
-      .map((i) => i.id)
-      .sort()
-      .join(',');
-    const last = out[out.length - 1];
-    if (last && last.key === key && last.end === a) last.end = b;
-    else out.push({ start: a, end: b, key, items: [...active] });
-  }
-  return out;
-}
-
-const joinAss = (items) => items.map((i) => i.ass).join('\\N');
 
 /**
  * Build the ASS script.
@@ -326,73 +310,41 @@ const joinAss = (items) => items.map((i) => i.ass).join('\\N');
  * @param {number} [opts.offsetMs] shift (preview clips start at 0)
  * @param {number} [opts.lengthMs] clip events to [0, lengthMs] after the shift
  * @param {string} [opts.title]
- * @param {number} [opts.addedPosition] the master already has subtitles
- *   burned in: bottom edge of the added language as a fraction of the canvas
- *   height
+ * @param {{align: 'top'|'bottom', edge: number}} [opts.added] the master
+ *   already has subtitles burned in: where the added language goes — its
+ *   top or bottom edge as a fraction of the canvas height
  * @returns {{script: string, mode: string, ratio: number|null, events: number}}
  */
-function buildAss({ cs = [], en = [], layout, offsetMs = 0, lengthMs = null, title = '', addedPosition = null }) {
+function buildAss({ cs = [], en = [], layout, offsetMs = 0, lengthMs = null, title = '', added = null }) {
   const { width: W, height: H } = layout.canvas;
   const m = layout.metrics;
   const side = Math.round(W * MARGIN_SIDE);
   const chosen = chooseLayout(cs, en);
-  const added = addedPosition != null;
   const mode = added ? 'added' : chosen.layout;
-  const ratio = added ? null : chosen.ratio;
 
-  let events = [];
-  if (mode === 'paired') {
-    const { pairs } = pairCues(cs, en);
-    // Snap paired EN cues to their CS timing so the block changes as one.
-    const enTimed = en.map((c) => ({ ...c }));
-    for (const [ci, ei] of pairs) {
-      enTimed[ei].start = cs[ci].start;
-      enTimed[ei].end = cs[ci].end;
-    }
-    const items = [
-      ...cs.map((c, i) => ({ ...c, lang: 'cs', id: `c${i}` })),
-      ...enTimed.map((c, i) => ({ ...c, lang: 'en', id: `e${i}` })),
-    ];
-    for (const seg of mergeTimeline(items)) {
-      const csItems = seg.items.filter((i) => i.lang === 'cs').sort((a, b) => a.start - b.start);
-      const enItems = seg.items.filter((i) => i.lang === 'en').sort((a, b) => a.start - b.start);
-      const pos = seg.items.some((i) => i.top) ? '{\\an8}' : '';
-      let style;
-      let text;
-      if (csItems.length && enItems.length) {
-        style = 'CS';
-        text = `${pos}{\\rEN}${joinAss(enItems)}\\N{\\rGap}\\h\\N{\\rCS}${joinAss(csItems)}`;
-      } else if (csItems.length) {
-        style = 'CS';
-        text = pos + joinAss(csItems);
-      } else {
-        style = 'EN';
-        text = pos + joinAss(enItems);
-      }
-      events.push({ start: seg.start, end: seg.end, style, text });
-    }
-  } else {
-    for (const c of cs) events.push({ start: c.start, end: c.end, style: 'CS', text: (c.top ? '{\\an8}' : '') + c.ass });
-    for (const c of en) events.push({ start: c.start, end: c.end, style: 'EN', text: (c.top ? '{\\an8}' : '') + c.ass });
-  }
-
-  events = events
+  // Each language on its own: they sit apart, so nothing needs merging. A
+  // cue's own {\an8} (text in the picture below) still moves it to the top.
+  const events = [
+    ...cs.map((c) => ({ start: c.start, end: c.end, style: 'CS', text: (c.top ? '{\\an8}' : '') + c.ass })),
+    ...en.map((c) => ({ start: c.start, end: c.end, style: 'EN', text: (c.top ? '{\\an8}' : '') + c.ass })),
+  ]
     .map((e) => ({ ...e, start: e.start - offsetMs, end: e.end - offsetMs }))
     .map((e) => (lengthMs != null ? { ...e, start: Math.max(0, e.start), end: Math.min(lengthMs, e.end) } : e))
     .filter((e) => e.end > e.start && e.end > 0)
     .sort((a, b) => a.start - b.start);
 
-  let csMarginV = m.margin;
-  let enMarginV = mode === 'zones' ? m.enZoneMargin : m.margin;
-  // One language: the same large white style whichever it is.
-  let csStyle = mode === 'single' ? [m.singleSize, CS_COLOUR] : [m.csSize, CS_COLOUR];
-  let enStyle = mode === 'single' ? [m.singleSize, CS_COLOUR] : [m.enSize, EN_COLOUR];
-  if (added) {
-    // The burned-in language is the white one: the added one is yellow,
-    // bottom-anchored at the chosen height (growing upwards).
-    const marginV = Math.max(m.margin, Math.round(H * (1 - Math.min(1, Math.max(0, addedPosition)))));
-    csStyle = enStyle = [m.csSize, EN_COLOUR];
-    csMarginV = enMarginV = marginV;
+  // [size, colour, alignment (2 = bottom, 8 = top), marginV]
+  let csStyle = [m.csSize, CS_COLOUR, 2, layout.margins.cs];
+  let enStyle = [m.enSize, EN_COLOUR, 8, layout.margins.en];
+  if (mode === 'single') {
+    csStyle = enStyle = [m.singleSize, CS_COLOUR, 2, layout.margins.cs];
+  } else if (mode === 'added') {
+    const edge = Math.min(1, Math.max(0, Number(added.edge)));
+    const top = added.align === 'top';
+    const alignment = top ? 8 : 2;
+    const marginV = Math.max(m.minMargin, Math.round(H * (top ? edge : 1 - edge)));
+    csStyle = [m.csSize, CS_COLOUR, alignment, marginV];
+    enStyle = [m.enSize, EN_COLOUR, alignment, marginV];
   }
   const lines = [
     '[Script Info]',
@@ -406,17 +358,15 @@ function buildAss({ cs = [], en = [], layout, offsetMs = 0, lengthMs = null, tit
     '',
     '[V4+ Styles]',
     'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-    styleLine('CS', ...csStyle, side, csMarginV, m),
-    styleLine('EN', ...enStyle, side, enMarginV, m),
-    // The spacer line between EN and CS in a paired block.
-    styleLine('Gap', Math.max(1, Math.round(m.gap / LINE_HEIGHT)), CS_COLOUR, side, m.margin, m),
+    styleLine('CS', csStyle[0], csStyle[1], csStyle[2], side, csStyle[3], m),
+    styleLine('EN', enStyle[0], enStyle[1], enStyle[2], side, enStyle[3], m),
     '',
     '[Events]',
     'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
     ...events.map((e) => `Dialogue: 0,${assTime(e.start)},${assTime(e.end)},${e.style},,0,0,0,,${e.text}`),
     '',
   ];
-  return { script: lines.join('\n'), mode, ratio, events: events.length };
+  return { script: lines.join('\n'), mode, ratio: chosen.ratio, events: events.length };
 }
 
 module.exports = {
