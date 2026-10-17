@@ -22,8 +22,9 @@ internet connection.
   the progress. Any common format works (MP4, MOV, MKV, 4K, HEVC…). HEIC photos from
   iPhones are not supported — export them as JPEG.
 - **Trailer of** links a video to a film: the screen then shows the film's next screening
-  over the trailer ("Na festivalu · Šílený Max · Zítra · 20:00 · Velký sál"). Once the film
-  has been screened, the caption disappears.
+  ("Na festivalu · Šílený Max · Zítra · 20:00 · Velký sál") — over the trailer in a
+  browser, as a 7 s slide with the film's photo just before it on the TV box (nothing can be
+  drawn over the native player). Once the film has been screened, it disappears.
 - **Reload screens** makes every screen load the player again from scratch within a
   minute — use it after a change to the player's design. Cached photos and videos stay.
 
@@ -76,8 +77,26 @@ is installed over the network with `adb`:
    Start it: `adb shell monkey -p de.ozerov.fully 1`.
 4. In Fully Kiosk (hold Back for the menu): **Start URL** `https://my.irmf.cz/tv/`;
    *Web Content Settings → Autoplay Videos* on; *Device Management → Keep Screen On* on,
-   *Launch on Boot* on; turn off the Android TV screensaver (*Settings → Device Preferences →
-   Screen saver → Never*).
+   *Launch on Boot* on; *Advanced Web Settings → Enable JavaScript Interface (PLUS)* on — it
+   asks for the camera permission (the box has none; without it the dialog returns on every
+   start). Turn off the Android TV screensaver (`adb shell settings put secure
+   screensaver_enabled 0`) and set the output to **1080p 50 Hz** (*Settings → Display →
+   Screen resolution → Display Mode*): festival videos are 25 fps, which judders at 60 Hz.
+5. Fully **PLUS licence** (8.90 € per device, bought for Device ID `c94ec8f8-dcc8a776`) —
+   without it the JavaScript interface works but shows a watermark.
+
+### Native video playback
+
+In a WebView the Mi Box S drops ~11 % of the frames of a 1080p video (measured with
+`getVideoPlaybackQuality`; HEVC and VP9 ~40 %) — the decoding is in hardware, the
+WebView's compositing is not fast enough. With Fully's JavaScript interface the player
+therefore downloads every video with `fully.downloadFile` into Fully's app-specific storage
+(`/storage/emulated/0/Android/data/de.ozerov.fully/files/<slide id>`; shared storage is
+not writable for Fully) and plays it with `fully.playVideo` — Android's native player on
+the hardware video plane, no dropped frames, ~25 % CPU instead of ~110 %. Files whose size
+differs from the manifest or that left it are deleted; videos not downloaded yet play in
+`<video>` meanwhile. `?debug=1` shows the number of native files and the frames dropped by
+the last `<video>`.
 
 Useful `adb` commands: `adb shell dumpsys webviewupdate | grep -i version` (WebView version),
 `adb shell df -h /data` (free space), `adb exec-out screencap -p > screen.png` (screenshot).
@@ -94,6 +113,8 @@ the disk holds only its real size; with a 3.2 GB quota the free disk is the real
   worker is still installed — DevTools → Application → Service workers → Unregister, or
   bump `SHELL_CACHE` (see above).
 - **Screen shows old design**: *Reload screens* in the admin.
+- **Videos stutter on the box**: check that the debug box says `native video: N files`
+  (JavaScript interface on, licence active); otherwise they play in the WebView.
 - **A video stays "Preparing for the TV"**: the worker (Container Apps Job
   `movie-transcoder`) did not run — see `docs/TRANSCODER_SETUP.md`. *Retry* appears when it
   failed, or after 10 minutes without progress (e.g. the message reached a worker that was

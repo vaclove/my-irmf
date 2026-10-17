@@ -6,6 +6,11 @@
  * list of slides — the programme of the day, photos and videos (partner
  * videos, trailers) — read from /api/public/tv/manifest every minute.
  *
+ * In Fully Kiosk Browser with its JavaScript interface (a PLUS feature) videos
+ * play in Android's native player from files downloaded to the box: the
+ * WebView drops ~11 % of the frames of a 1080p video on a Mi Box S, the native
+ * player none. Elsewhere they play in <video>.
+ *
  * Plain script, no build step: it runs on low-end TV boxes and must keep
  * working offline. sw.js caches this page and the last data; this script
  * downloads every photo, video and programme image into the Cache API, so
@@ -30,6 +35,9 @@
   var VIDEO_READY_TIMEOUT_MS = 10 * 1000;
   var FADE_MS = 500; // matches the .slide opacity transition
   var ASSET_CACHE = 'irmf-tv-assets';
+  var TRAILER_INTRO_SECONDS = 7;
+  var NATIVE_DOWNLOAD_TIMEOUT_MS = 30 * 60 * 1000;
+  var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   // Without a manifest (offline before the first load, older server) just the programme
   var DEFAULT_SLIDES = [{ kind: 'programme' }];
 
@@ -164,6 +172,8 @@
       'storage: ' + (state.storage || '-'),
       'showing: ' + state.current,
       'last video: ' + (state.lastVideo || '-'),
+      'native video: ' + (native.enabled ? Object.keys(native.files).length + ' files' +
+        (native.downloading ? ', downloading ' + native.downloading.id : '') : 'off (no Fully JS interface)'),
       'error: ' + (state.lastError || '-'),
     ].join('\n');
   }
@@ -244,6 +254,7 @@
       if (state.manifest && JSON.stringify(state.manifest) !== JSON.stringify(manifest)) state.restartLoop = true;
       state.manifest = manifest;
       syncCache();
+      syncNative();
     }).catch(function (err) {
       state.lastError = 'manifest: ' + errorText(err);
     }).then(renderStatus);
@@ -260,6 +271,7 @@
     return registration.then(function (reg) {
       return reg ? reg.update().catch(function () {}) : null;
     }).catch(function () {}).then(function () {
+      stopNativeVideo();
       location.reload();
     });
   }
@@ -269,11 +281,15 @@
   var syncing = null;
   var syncAgain = false;
 
-  /** Absolute URL → size of every photo and video in the manifest (hidden ones too: they stay cached). */
+  /**
+   * Absolute URL → size of every photo and video in the manifest (hidden ones
+   * too: they stay cached). With the native player videos are kept as files
+   * instead (see syncNative).
+   */
   function mediaSizes() {
     var sizes = {};
     (state.manifest ? state.manifest.slides : []).forEach(function (s) {
-      if (s.url) sizes[new URL(s.url, location.href).href] = s.size || 0;
+      if (s.url && !(native.enabled && s.kind === 'video')) sizes[new URL(s.url, location.href).href] = s.size || 0;
     });
     return sizes;
   }
@@ -356,6 +372,110 @@
       state.cache.files = keys.length;
       state.cache.bytes = keys.reduce(function (sum, req) { return sum + (sizes[req.url] || 0); }, 0);
     });
+  }
+
+  // ---------- native video player (Fully Kiosk) ----------
+
+  /**
+   * Fully's JavaScript interface: download each video to the box (named by
+   * slide id, so a replaced file shows up as a size mismatch) and play it in
+   * Android's native player. Downloads must go to Fully's app-specific
+   * storage — shared storage is not writable for it.
+   */
+  var native = (function () {
+    var fully = window.fully;
+    var enabled = !!(fully && fully.playVideo && fully.downloadFile && fully.getFileList && fully.getInternalAppSpecificStoragePath);
+    return {
+      enabled: enabled,
+      dir: enabled ? fully.getInternalAppSpecificStoragePath() : null,
+      files: {},          // slide id → size of the complete local file
+      downloading: null,  // { id, timer }
+    };
+  })();
+
+  function nativeFileUrl(slideId) {
+    return 'file://' + native.dir + '/' + slideId;
+  }
+
+  function nativeFileList() {
+    try {
+      return JSON.parse(window.fully.getFileList(native.dir) || '[]');
+    } catch (err) {
+      return [];
+    }
+  }
+
+  /**
+   * Bring the files in line with the manifest: drop unknown or incomplete
+   * ones, then download the smallest missing video (one at a time; the
+   * download callbacks call this again).
+   */
+  function syncNative() {
+    if (!native.enabled || !state.manifest || native.downloading) return;
+    var before = Object.keys(native.files).sort().join();
+    var wanted = {};
+    state.manifest.slides.forEach(function (s) {
+      if (s.kind === 'video' && s.url) wanted[s.id] = s;
+    });
+    native.files = {};
+    nativeFileList().forEach(function (f) {
+      if (f.type !== 'file' || !UUID_RE.test(f.name)) return;
+      var slide = wanted[f.name];
+      if (!slide || (slide.size && f.size !== slide.size)) {
+        window.fully.deleteFile(native.dir + '/' + f.name);
+        return;
+      }
+      native.files[f.name] = f.size;
+    });
+    var next = Object.keys(wanted).map(function (id) { return wanted[id]; })
+      .filter(function (s) { return !native.files[s.id]; })
+      .sort(function (a, b) { return (a.size || 0) - (b.size || 0); })[0];
+    // Videos became playable natively (or went away): rebuild the loop after this slide
+    if (Object.keys(native.files).sort().join() !== before) state.restartLoop = true;
+    renderStatus();
+    if (!next) return;
+    native.downloading = {
+      id: next.id,
+      // No callback ever came (download lost): try again
+      timer: setTimeout(nativeDownloadDone, NATIVE_DOWNLOAD_TIMEOUT_MS),
+    };
+    window.fully.downloadFile(new URL(next.url, location.href).href, native.dir, false);
+  }
+
+  function nativeDownloadDone() {
+    if (native.downloading) clearTimeout(native.downloading.timer);
+    native.downloading = null;
+    syncNative();
+  }
+
+  function nativeDownloadFailed(url, dir, code) {
+    state.lastError = 'video download failed (' + code + ')';
+    if (native.downloading) clearTimeout(native.downloading.timer);
+    native.downloading = null;
+    setTimeout(syncNative, RETRY_MS);
+  }
+
+  if (native.enabled) {
+    window.__irmfTvDownloadDone = nativeDownloadDone;
+    window.__irmfTvDownloadFailed = nativeDownloadFailed;
+    window.fully.bind('onDownloadSuccess', '__irmfTvDownloadDone();');
+    window.fully.bind('onDownloadFailure', '__irmfTvDownloadFailed("$url", "$dir", "$code");');
+  }
+
+  function stopNativeVideo() {
+    if (native.enabled) {
+      try { window.fully.stopVideo(); } catch (err) { /* nothing playing */ }
+    }
+  }
+
+  /**
+   * Play a downloaded video full screen in the native player. There is no
+   * "ended" event: wait for its length (the player closes itself at the end),
+   * then make sure it is gone.
+   */
+  function playNative(slide) {
+    window.fully.playVideo(slide.file, false, false, false, true);
+    return sleep(slide.seconds * 1000).then(stopNativeVideo);
   }
 
   // ---------- programme slides ----------
@@ -540,6 +660,35 @@
     return [day.charAt(0).toUpperCase() + day.slice(1), entry.time, entry.venue].join(' · ');
   }
 
+  /** Before a trailer played natively (nothing can be drawn over it): when its film is on. */
+  function trailerIntroSlide(screening) {
+    return {
+      el: h('div', { class: 'message trailer-intro' },
+        screening.entry.image ? h('img', { class: 'backdrop', src: screening.entry.image, alt: '' }) : null,
+        h('div', { class: 'eyebrow' }, 'Trailer · na festivalu'),
+        h('div', { class: 'trailer-title' }, screening.movie.name || ''),
+        h('div', { class: 'trailer-when' }, screeningWhen(screening.entry))),
+      seconds: TRAILER_INTRO_SECONDS,
+      label: 'trailer intro ' + (screening.movie.name || ''),
+    };
+  }
+
+  /** Slides for a video: native playback when the file is on the box, else <video>. */
+  function videoSlides(slide) {
+    if (native.enabled && native.files[slide.id]) {
+      var screening = nextScreening(slide.movie_id);
+      var played = {
+        el: h('div', { class: 'media' }),
+        file: nativeFileUrl(slide.id),
+        seconds: Math.ceil((slide.media_seconds || 120) + 1),
+        media: true,
+        label: 'native video ' + (slide.title || slide.id),
+      };
+      return screening ? [trailerIntroSlide(screening), played] : [played];
+    }
+    return [videoSlide(slide)];
+  }
+
   function videoSlide(slide) {
     // src is set in show(): a detached <video> with a src would start downloading at once
     var video = h('video', { class: 'contain', preload: 'auto', playsinline: '' });
@@ -567,7 +716,7 @@
       if (slide.hidden) return;
       if (slide.kind === 'programme') slides = slides.concat(programmeSlides());
       else if (slide.kind === 'photo' && slide.url) slides.push(photoSlide(slide));
-      else if (slide.kind === 'video' && slide.url) slides.push(videoSlide(slide));
+      else if (slide.kind === 'video' && slide.url) slides = slides.concat(videoSlides(slide));
     });
     if (!slides.length) slides.push({ el: messageSlide('IRMF', 'International Road Movie Festival'), seconds: 20, label: 'empty playlist' });
     return slides;
@@ -660,8 +809,10 @@
       requestAnimationFrame(function () {
         requestAnimationFrame(function () { wrapper.classList.add('visible'); });
       });
-      return (slide.video ? playVideo(slide.video, slide.seconds).then(function () { recordQuality(slide); }) : sleep(slide.seconds * 1000))
-        .then(function () { return true; });
+      var playing = slide.file ? sleep(FADE_MS).then(function () { return playNative(slide); })
+        : slide.video ? playVideo(slide.video, slide.seconds).then(function () { recordQuality(slide); })
+          : sleep(slide.seconds * 1000);
+      return playing.then(function () { return true; });
     });
   }
 
@@ -675,7 +826,7 @@
         return show(slide).then(function (ok) { if (ok !== false) shown++; });
       });
     }, Promise.resolve()).then(function () {
-      if (state.reloadPending) location.reload();
+      if (state.reloadPending) { stopNativeVideo(); location.reload(); }
       // Everything was skipped (e.g. only videos that can't load offline): don't spin
       if (!shown) return show({ el: messageSlide('IRMF', 'International Road Movie Festival'), seconds: 20, label: 'nothing to show' });
     }).then(function () {
