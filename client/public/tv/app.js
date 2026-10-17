@@ -163,6 +163,7 @@
         (state.cache.pending ? ', downloading ' + state.cache.pending : '') + (state.cache.full ? ', STORAGE FULL' : ''),
       'storage: ' + (state.storage || '-'),
       'showing: ' + state.current,
+      'last video: ' + (state.lastVideo || '-'),
       'error: ' + (state.lastError || '-'),
     ].join('\n');
   }
@@ -623,6 +624,12 @@
     wrapper.remove();
   }
 
+  /** For ?debug=1: frames the box dropped while playing the last video. */
+  function recordQuality(slide) {
+    var q = slide.video.getVideoPlaybackQuality ? slide.video.getVideoPlaybackQuality() : null;
+    if (q) state.lastVideo = slide.label + ': dropped ' + q.droppedVideoFrames + ' of ' + q.totalVideoFrames + ' frames';
+  }
+
   var current = null;
 
   /**
@@ -631,7 +638,7 @@
    * Resolves false when the slide could not be shown (a video that won't load).
    */
   function show(slide) {
-    var wrapper = h('div', { class: 'slide' }, slide.el, h('div', { class: 'progress' }));
+    var wrapper = h('div', { class: 'slide' }, slide.el);
     if (slide.video) slide.video.src = slide.src;
     sceneEl.appendChild(wrapper);
     return whenReady(wrapper, slide).then(function (ready) {
@@ -639,7 +646,6 @@
         release(wrapper);
         return false;
       }
-      wrapper.lastChild.style.animationDuration = (slide.video && slide.video.duration ? slide.video.duration : slide.seconds) + 's';
       var previous = current;
       current = wrapper;
       if (!previous) return true;
@@ -654,7 +660,7 @@
       requestAnimationFrame(function () {
         requestAnimationFrame(function () { wrapper.classList.add('visible'); });
       });
-      return (slide.video ? playVideo(slide.video, slide.seconds) : sleep(slide.seconds * 1000))
+      return (slide.video ? playVideo(slide.video, slide.seconds).then(function () { recordQuality(slide); }) : sleep(slide.seconds * 1000))
         .then(function () { return true; });
     });
   }
