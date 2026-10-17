@@ -1,0 +1,16 @@
+#!/usr/bin/perl
+# CUPS filter for the Xprinter XP-58IIN: runs Xprinter's rastertozj and pads
+# its output with NUL bytes after the ESC @ reset it sends at the start of a
+# job. The printer ignores input for a moment after that reset, so without the
+# padding it misses the first image command and prints the image as garbage text.
+use strict;
+my $filter = $ENV{XPRINTER_FILTER} || '/Library/Printers/Xprinter/Filter/rastertozj';
+open(my $in, '-|', $filter, @ARGV) or die "ERROR: cannot run $filter: $!\n";
+binmode $in;
+binmode STDOUT;
+read($in, my $head, 2);
+print $head;
+print "\0" x 256 if $head eq "\x1b\x40";
+while (read($in, my $buf, 65536)) { print $buf }
+close($in);
+exit($? >> 8);

@@ -207,7 +207,7 @@ async function loadProgramme(editionId) {
            ps.hidden_from_public, ps.goout_schedule_id,
            COALESCE(NULLIF(ps.title_override_cs, ''), m.name_cs, mb.name_cs) AS title,
            v.name_cs AS venue, v.capacity,
-           COUNT(bs.id) FILTER (WHERE bs.guest_id IS NOT NULL)::int AS scans_badges,
+           COUNT(bs.id) FILTER (WHERE bs.guest_id IS NOT NULL AND bs.goout_status IS NULL)::int AS scans_badges,
            COUNT(bs.id) FILTER (WHERE bs.goout_status IN ('checked_in', 'unverified'))::int AS scans_tickets,
            COUNT(bs.id) FILTER (WHERE bs.goout_status = 'pass')::int AS scans_passes,
            COUNT(bs.id)::int AS scans_total
@@ -461,4 +461,50 @@ async function getEditionPresale(editionId, { refresh = false } = {}) {
   return { ...presale, comparison, updatedAt: new Date().toISOString() };
 }
 
-module.exports = { getEditionPresale };
+// Tickets of a sale, loaded again from GoOut. If GoOut fails, the last loaded
+// tickets are used and marked stale.
+async function loadSaleTicketsFresh(sale) {
+  const key = `sale:${sale.saleId}`;
+  const previous = cache.get(key);
+  cache.delete(key);
+  try {
+    return await loadSaleTickets(sale.saleId, sale.state);
+  } catch (error) {
+    if (!previous) throw error;
+    cache.set(key, previous);
+    return { ...(await previous.promise), stale: true };
+  }
+}
+
+/**
+ * Valid GoOut tickets (paid and free) of screenings, for box-office capacity.
+ * @param {string[]} scheduleIds - GoOut schedule ids of the screenings
+ * @param {boolean} fresh - reload the tickets from GoOut instead of the 5-minute cache
+ * @returns {Promise<Object>} schedule id -> { sold, soldOut, stale } or { error }
+ */
+async function getSoldBySchedule(scheduleIds, { fresh = false } = {}) {
+  const salesBySchedule = await loadSalesBySchedule();
+  const result = {};
+  await mapLimit(scheduleIds, 4, async (scheduleId) => {
+    const sales = salesBySchedule[scheduleId];
+    if (!sales) {
+      result[scheduleId] = { error: `No GoOut sale for schedule ${scheduleId}` };
+      return;
+    }
+    try {
+      const loaded = await Promise.all(sales.map(sale =>
+        fresh ? loadSaleTicketsFresh(sale) : loadSaleTickets(sale.saleId, sale.state)
+      ));
+      result[scheduleId] = {
+        sold: loaded.reduce((sum, r) => sum + r.tickets.filter(t => t.valid).length, 0),
+        soldOut: sales.every(sale => sale.state === 'sold_out'),
+        stale: loaded.some(r => r.stale)
+      };
+    } catch (error) {
+      result[scheduleId] = { error: error.message };
+    }
+  });
+  return result;
+}
+
+module.exports = { getEditionPresale, getSoldBySchedule };

@@ -69,6 +69,7 @@ function App() {
                   <Route path="/programme/venues" element={<ProgrammingTabs />} />
                   <Route path="/programme/tv" element={<ProgrammingTabs />} />
                   <Route path="/tickets" element={<TicketsTabs />} />
+                  <Route path="/tickets/box-office" element={<TicketsTabs />} />
                   <Route path="/tickets/scan" element={<TicketsTabs />} />
                   <Route path="/badges/:editionId" element={<BadgeSettings />} />
                   <Route path="/settings" element={<Settings />} />
