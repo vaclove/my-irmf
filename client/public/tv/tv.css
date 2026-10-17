@@ -185,6 +185,8 @@ html, body {
 
 /* ---------- message slide (no data, errors) ---------- */
 .message {
+  position: absolute;
+  inset: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -194,6 +196,13 @@ html, body {
 }
 .message .logo { height: 360px; margin-bottom: 72px; }
 .message .eyebrow { margin-bottom: 24px; }
+
+/* Before a natively played trailer: the film's photo, dimmed, behind the text */
+.trailer-intro .backdrop { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0.3; }
+.trailer-intro > :not(.backdrop) { position: relative; }
+.trailer-intro .eyebrow { margin-bottom: 32px; }
+.trailer-title { font-size: 96px; font-weight: 700; line-height: 1.1; max-width: 1600px; }
+.trailer-when { margin-top: 32px; font-size: 52px; color: var(--light-blue); }
 
 /* ---------- debug status (?debug=1) ---------- */
 #status {
