@@ -69,8 +69,9 @@ function App() {
                   <Route path="/programme/venues" element={<ProgrammingTabs />} />
                   <Route path="/programme/tv" element={<ProgrammingTabs />} />
                   <Route path="/tickets" element={<TicketsTabs />} />
-                  <Route path="/tickets/box-office" element={<TicketsTabs />} />
+                  <Route path="/tickets/accreditations" element={<TicketsTabs />} />
                   <Route path="/tickets/scan" element={<TicketsTabs />} />
+                  <Route path="/tickets/presale" element={<TicketsTabs />} />
                   <Route path="/badges/:editionId" element={<BadgeSettings />} />
                   <Route path="/settings" element={<Settings />} />
                   <Route path="/settings/sections" element={<Sections />} />
@@ -83,6 +84,7 @@ function App() {
                   <Route path="/blocks" element={<RedirectTo to="/programme/blocks" />} />
                   <Route path="/venues" element={<RedirectTo to="/programme/venues" />} />
                   <Route path="/scanner" element={<RedirectTo to="/tickets/scan" />} />
+                  <Route path="/tickets/box-office" element={<RedirectTo to="/tickets" />} />
                 </Routes>
               </Layout>
             </ProtectedRoute>

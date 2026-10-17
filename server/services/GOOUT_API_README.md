@@ -134,6 +134,19 @@ the only place that shows GoOut ticket sales:
 4. Ticket for this screening or festival pass of this edition: checked in to the screening's check-in at GoOut (422 = already used; a ticket can be checked in to each check-in once, so a pass works for every screening); anything else is rejected
 5. If GoOut does not answer within 1 s, the ticket is let in and stored with `goout_status = 'unverified'`
 6. The name on the ticket comes back in the check-in response and is stored in `badge_scans.holder_name`, so the scanner can show who came in
+7. A festival pass converted to our badge (see below) is rejected locally, before GoOut is asked
+
+## Festival passes converted to badges
+
+`services/goout-accreditations.js` backs Tickets → Accreditations:
+
+1. Lists the tickets of the edition's festival pass sales (schedules without a start time), fresh from
+   `reporting/v1/purchases?saleIds[]=…&include=tickets`. The name is on each ticket (`firstName`,
+   `lastName`); email, phone and language are on the purchase
+2. Converting a valid (paid/prepaid) pass creates a guest of category `public` in the edition (year and
+   `public` tags, `guest_editions`, a confirmed manual invitation, a badge number) and prints the badge
+3. `goout_accreditations.goout_ticket_id` is unique, so one pass gives one badge even when two desks
+   convert it at once; a guest holds at most one converted pass per edition
 
 ## API Documentation
 
