@@ -1,7 +1,7 @@
 /**
  * Movie worker — runs as an Azure Container Apps Job triggered by a
  * storage-queue message. One execution drains the queue, then exits so the
- * platform scales to zero. Five job types share the queue, discriminated by
+ * platform scales to zero. Six job types share the queue, discriminated by
  * the message's `type` field (absent = transcode, for back-compat):
  *
  *   transcode      reads the master (Azure Blob via a read URL, or Drive for
@@ -18,6 +18,9 @@
  *                  subtitle_burn_jobs
  *   db_backup      runs pg_dump against DATABASE_URL, uploads the dump to the
  *                  shared drive's Backups folder, prunes to the newest N
+ *   tv_video       transcodes a video uploaded for the TV player (tv_slides row,
+ *                  job_id = slide id) to a 1080p H.264/AAC MP4 with normalised
+ *                  loudness, replacing the uploaded source in Azure (Hot)
  *
  * Reuses the app's Drive service and chunked-upload sink (shared server modules)
  * so naming, auth, and upload behavior stay identical to the in-app paths.
@@ -98,6 +101,9 @@ const RECONNECT_ARGS = [
 // An output shorter than its source by more than this is treated as truncated
 // (ffmpeg ends "successfully" when its input stream dies mid-way).
 const DURATION_TOLERANCE_S = 10;
+// TV player videos: what a low-end TV box decodes smoothly (see tv_slides)
+const TV_VIDEO_PRESET = process.env.TV_VIDEO_PRESET || 'medium';
+const TV_VIDEO_CRF = process.env.TV_VIDEO_CRF || '20';
 const DURATION_TOLERANCE_RATIO = 0.02;
 
 function log(msg, extra) {
@@ -1684,6 +1690,123 @@ function sweepTempFiles() {
   }
 }
 
+/**
+ * Transcode a TV player video (tv_slides row, job id = slide id): fit into
+ * 1920×1080 (square pixels, at most 30 fps), H.264 High 4.1 that TV boxes
+ * decode in hardware, stereo AAC at -16 LUFS so partner videos and trailers
+ * play at the same volume. The output replaces the uploaded source.
+ * Returns true when the message should be deleted.
+ */
+async function processTvVideoJob(slideId, dequeueCount) {
+  if (dequeueCount > MAX_DEQUEUE) {
+    await pool.query(
+      `UPDATE tv_slides SET status = 'failed', error_message = 'Transcode crashed repeatedly and was abandoned',
+         updated_at = now() WHERE id = $1 AND status = 'processing'`,
+      [slideId]
+    );
+    log('tv video poison message abandoned', { slideId, dequeueCount });
+    return true;
+  }
+  const slideRes = await pool.query('SELECT id, status, source_blob_name, blob_name FROM tv_slides WHERE id = $1', [slideId]);
+  const slide = slideRes.rows[0];
+  if (!slide || slide.status !== 'processing' || !slide.source_blob_name) {
+    log('tv video not runnable, skipping', { slideId, status: slide?.status });
+    return true;
+  }
+
+  const tempPath = path.join(process.env.MOVIE_TRANSCODE_TMPDIR || os.tmpdir(), `irmf-tv-${slideId}.mp4`);
+  let ffmpegChild = null;
+  let deleted = false;
+  // Deleting the slide in the admin cancels the job
+  const deleteTimer = setInterval(async () => {
+    try {
+      const r = await pool.query('SELECT 1 FROM tv_slides WHERE id = $1', [slideId]);
+      if (r.rows.length === 0) {
+        deleted = true;
+        if (ffmpegChild) ffmpegChild.kill('SIGKILL');
+      }
+    } catch {
+      // transient; try again next tick
+    }
+  }, CANCEL_POLL_MS);
+
+  try {
+    const inputUrl = await movieStorage.readUrl(slide.source_blob_name, { expiresInSec: VISIBILITY_TIMEOUT_S });
+    const media = await probeMedia(inputUrl);
+    if (!media || !media.duration || !media.video) throw new Error('Could not read the video (no video track or duration)');
+
+    let lastPctWrite = 0;
+    const args = [
+      '-hide_banner', '-nostdin', '-y', '-loglevel', 'error',
+      ...RECONNECT_ARGS, '-i', inputUrl,
+      ...RECONNECT_ARGS, '-i', inputUrl,
+      '-map', '0:v:0', '-map', '1:a:0?',
+      // Square pixels first (anamorphic sources: HDV, widescreen DVD), then fit
+      '-vf', "scale='trunc(iw*sar/2)*2':ih,setsar=1,"
+        + "scale='min(1920,iw)':'min(1080,ih)':force_original_aspect_ratio=decrease,"
+        + 'scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1',
+      '-fpsmax', '30',
+      '-c:v', 'libx264', '-preset', TV_VIDEO_PRESET, '-crf', TV_VIDEO_CRF,
+      '-maxrate', '8M', '-bufsize', '16M', '-profile:v', 'high', '-level', '4.1', '-pix_fmt', 'yuv420p',
+      '-af', 'loudnorm=I=-16:TP=-1.5:LRA=11',
+      '-c:a', 'aac', '-b:a', '160k', '-ac', '2', '-ar', '48000',
+      '-movflags', '+faststart',
+    ];
+    if (MAX_THREADS) args.push('-threads', String(MAX_THREADS));
+    args.push('-progress', 'pipe:1', tempPath);
+    const ffmpegLog = await spawnFfmpegWithProgress({
+      args,
+      durationSeconds: media.duration,
+      onSpawn: (c) => (ffmpegChild = c),
+      onProgress: (pct) => {
+        const now = Date.now();
+        if (now - lastPctWrite < 2000) return;
+        lastPctWrite = now;
+        pool.query('UPDATE tv_slides SET progress_percent = $2, updated_at = now() WHERE id = $1', [slideId, pct]).catch(() => {});
+      },
+    });
+    if (deleted) return true;
+    await assertCompleteOutput({ outputPath: tempPath, expectedSeconds: media.duration, label: 'Video', stderrTail: ffmpegLog });
+    const output = await probeMedia(tempPath);
+
+    const blobName = `tv/${slideId}/video-${Date.now()}.mp4`;
+    const written = await movieStorage.uploadStream(blobName, fs.createReadStream(tempPath), {
+      fileKind: 'tv',
+      contentType: 'video/mp4',
+    });
+    const done = await pool.query(
+      `UPDATE tv_slides SET status = 'ready', progress_percent = 100, error_message = NULL,
+         blob_name = $2, source_blob_name = NULL, size = $3, width = $4, height = $5,
+         media_seconds = $6, updated_at = now()
+       WHERE id = $1 RETURNING id`,
+      [slideId, blobName, written.size, output?.video?.width || null, output?.video?.height || null,
+        output?.duration || media.duration]
+    );
+    if (done.rows.length === 0) {
+      // Deleted while uploading
+      await movieStorage.deleteBlob(blobName).catch(() => {});
+      return true;
+    }
+    await movieStorage.deleteBlob(slide.source_blob_name).catch(() => {});
+    if (slide.blob_name && slide.blob_name !== blobName) await movieStorage.deleteBlob(slide.blob_name).catch(() => {});
+    log('tv video completed', { slideId, size: written.size });
+    return true;
+  } catch (error) {
+    if (!deleted) {
+      const message = redact(error.message || 'Unknown error');
+      await pool.query(
+        `UPDATE tv_slides SET status = 'failed', error_message = $2, updated_at = now() WHERE id = $1`,
+        [slideId, message.slice(0, 1000)]
+      );
+      log('tv video failed', { slideId, error: message });
+    }
+    return true; // terminal — retry is user-driven
+  } finally {
+    clearInterval(deleteTimer);
+    fs.promises.unlink(tempPath).catch(() => {});
+  }
+}
+
 async function main() {
   const conn = process.env.AZURE_STORAGE_CONNECTION_STRING;
   if (!conn) {
@@ -1733,7 +1856,9 @@ async function main() {
               ? await processTransferJob(jobId, msg.dequeueCount, queue)
               : jobType === 'subtitle_burn'
                 ? await processBurnJob(jobId, msg.dequeueCount)
-                : await processJob(jobId, msg.dequeueCount);
+                : jobType === 'tv_video'
+                  ? await processTvVideoJob(jobId, msg.dequeueCount)
+                  : await processJob(jobId, msg.dequeueCount);
     } catch (e) {
       // Unexpected crash: leave the message so it redelivers (dequeueCount rises).
       log('unexpected job error; leaving message', { jobId, error: e.message });

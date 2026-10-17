@@ -2,9 +2,14 @@
  * IRMF TV player — a looping showcase for a TV in the festival venue
  * (Fully Kiosk Browser on a TV box, or any Chrome in kiosk mode).
  *
+ * What it plays is managed in my.irmf.cz → Programme → TV Screen: an ordered
+ * list of slides — the programme of the day, photos and videos (partner
+ * videos, trailers) — read from /api/public/tv/manifest every minute.
+ *
  * Plain script, no build step: it runs on low-end TV boxes and must keep
- * working offline. sw.js caches this page, the last programme data and every
- * image it shows, so after the first load the loop survives a lost connection.
+ * working offline. sw.js caches this page and the last data; this script
+ * downloads every photo, video and programme image into the Cache API, so
+ * after the first load the loop survives a lost connection.
  *
  * URL parameters (for testing):
  *   ?debug=1                  show a status box (cache, data, errors)
@@ -14,15 +19,19 @@
   'use strict';
 
   var API = '/api/public';
-  // Scenes played in a loop. Later this comes from my.irmf.cz; for now only
-  // the programme exists.
-  var PLAYLIST = [{ type: 'programme', overviewSeconds: 15, featureSeconds: 12 }];
-  var ROWS_PER_PAGE = 10;
+  var PROGRAMME_SCENE = { overviewSeconds: 15, featureSeconds: 12 };
+  var PHOTO_SECONDS = 8;
+  var ROWS_PER_PAGE = 8; // what fits under the heading together with the all-day line
   var SYNOPSIS_MAX = 420;
+  var MANIFEST_REFRESH_MS = 60 * 1000;
   var DATA_REFRESH_MS = 5 * 60 * 1000;
   var UPDATE_CHECK_MS = 5 * 60 * 1000;
   var RETRY_MS = 30 * 1000;
+  var VIDEO_READY_TIMEOUT_MS = 10 * 1000;
+  var FADE_MS = 500; // matches the .slide opacity transition
   var ASSET_CACHE = 'irmf-tv-assets';
+  // Without a manifest (offline before the first load, older server) just the programme
+  var DEFAULT_SLIDES = [{ kind: 'programme' }];
 
   var params = new URLSearchParams(location.search);
   var DEBUG = params.has('debug');
@@ -35,12 +44,16 @@
   var clockEl = document.getElementById('clock');
 
   var state = {
-    data: null,          // { edition, entries }
+    data: null,            // { edition, entries }
+    manifest: null,        // { settings, slides } from my.irmf.cz
+    reloadBaseline: undefined,
     loadedAt: null,
     lastError: null,
-    cachedImages: 0,
+    cache: { files: 0, bytes: 0, pending: 0, full: false },
     reloadPending: false,
+    restartLoop: false,    // the manifest changed: start the loop again after this slide
     shellTag: null,
+    current: '',
   };
 
   // ---------- helpers ----------
@@ -105,6 +118,14 @@
     return out;
   }
 
+  function unique(list) {
+    return list.filter(function (item, i) { return item && list.indexOf(item) === i; });
+  }
+
+  function errorText(err) {
+    return String((err && err.message) || err);
+  }
+
   // ---------- stage + clock ----------
 
   function fitStage() {
@@ -128,13 +149,20 @@
     if (!DEBUG) return;
     statusEl.hidden = false;
     var d = state.data;
+    var m = state.manifest;
     statusEl.textContent = [
       'now: ' + now().toString().slice(0, 24) + (timeOffset ? ' (override)' : ''),
+      'page loaded: ' + new Date(performance.timeOrigin).toTimeString().slice(0, 8),
       'viewport: ' + document.documentElement.clientWidth + 'x' + document.documentElement.clientHeight + ' @' + window.devicePixelRatio + 'x',
       'sw: ' + (navigator.serviceWorker && navigator.serviceWorker.controller ? 'controlling' : 'not controlling'),
       'edition: ' + (d ? d.edition.name + ' ' + d.edition.start + '..' + d.edition.end : '-'),
       'entries: ' + (d ? d.entries.length : '-') + ', loaded ' + (state.loadedAt ? state.loadedAt.toTimeString().slice(0, 8) : '-'),
-      'cached images: ' + state.cachedImages,
+      'slides: ' + (m ? m.slides.map(function (s) { return s.kind + (s.hidden ? '(hidden)' : ''); }).join(' ') : 'default') +
+        ', programme days: ' + programmeDays(),
+      'cache: ' + state.cache.files + ' files, ' + (state.cache.bytes / 1e6).toFixed(0) + ' MB' +
+        (state.cache.pending ? ', downloading ' + state.cache.pending : '') + (state.cache.full ? ', STORAGE FULL' : ''),
+      'storage: ' + (state.storage || '-'),
+      'showing: ' + state.current,
       'error: ' + (state.lastError || '-'),
     ].join('\n');
   }
@@ -146,6 +174,10 @@
       if (!res.ok) throw new Error(url + ': HTTP ' + res.status);
       return res.json();
     });
+  }
+
+  function programmeDays() {
+    return (state.manifest && state.manifest.settings.programme_days) || 'today';
   }
 
   /** The running or next edition; after the last one ends, the last one. */
@@ -178,10 +210,14 @@
       synopsis: shorten(e.movie_synopsis_cs || e.block_description_cs || e.movie_synopsis_en || e.block_description_en, SYNOPSIS_MAX),
       image: (e.movie_image_urls && e.movie_image_urls.large) || (blockImage && blockImage.image_urls.large) || null,
       films: blockMovies.map(function (m) { return m.name_cs || m.name_en; }),
+      // Films screened here (for trailers: "when is this film on?")
+      movies: (e.movie_id ? [{ id: e.movie_id, name: e.movie_name_cs || e.movie_name_en }] : [])
+        .concat(blockMovies.map(function (m) { return { id: m.id, name: m.name_cs || m.name_en }; })),
       highlighted: !!e.highlighted,
     };
   }
 
+  /** The programme of the running or next edition. */
   function loadData() {
     var today = localDate(now());
     return getJson(API + '/editions').then(function (res) {
@@ -191,73 +227,173 @@
         state.data = { edition: edition, entries: (prog.programming || []).map(normalize) };
         state.loadedAt = new Date();
         state.lastError = null;
-        precacheImages(state.data.entries);
+        syncCache();
       });
     }).catch(function (err) {
-      state.lastError = String(err && err.message || err);
+      state.lastError = errorText(err);
+    }).then(renderStatus);
+  }
+
+  /** What to play and the settings, from my.irmf.cz. */
+  function loadManifest() {
+    return getJson(API + '/tv/manifest').then(function (manifest) {
+      var requested = manifest.settings.reload_requested_at || null;
+      if (state.reloadBaseline === undefined) state.reloadBaseline = requested;
+      else if (requested !== state.reloadBaseline) return hardReload();
+      if (state.manifest && JSON.stringify(state.manifest) !== JSON.stringify(manifest)) state.restartLoop = true;
+      state.manifest = manifest;
+      syncCache();
+    }).catch(function (err) {
+      state.lastError = 'manifest: ' + errorText(err);
     }).then(renderStatus);
   }
 
   /**
-   * Keep every programme image in the Cache API so slides render offline.
-   * s3.irmf.cz sends no CORS headers, so these are opaque responses — fine for
-   * <img>. Images that left the programme are dropped.
+   * "Reload screens" in the admin: update the service worker and load the
+   * page again — the page is fetched network first, so new styles and scripts
+   * arrive. Nothing cached is dropped: a connection lost right now falls back
+   * to the cached copy instead of blanking the screen.
    */
-  function precacheImages(entries) {
-    if (!window.caches) return;
-    var urls = entries.map(function (e) { return e.image; }).filter(Boolean)
-      .filter(function (url, i, all) { return all.indexOf(url) === i; });
-    caches.open(ASSET_CACHE).then(function (cache) {
-      var chain = Promise.resolve();
-      urls.forEach(function (url) {
-        chain = chain.then(function () {
-          return cache.match(url).then(function (hit) {
-            if (hit) return;
-            return fetch(url, { mode: 'no-cors' }).then(function (res) {
-              if (res.ok || res.type === 'opaque') return cache.put(url, res);
-            }).catch(function () { /* offline: try again on the next refresh */ });
-          });
-        });
-      });
-      return chain.then(function () { return cache.keys(); }).then(function (keys) {
-        var keep = 0;
-        return Promise.all(keys.map(function (req) {
-          if (urls.indexOf(req.url) === -1) return cache.delete(req);
-          keep++;
-        })).then(function () { state.cachedImages = keep; renderStatus(); });
-      });
+  function hardReload() {
+    var registration = navigator.serviceWorker ? navigator.serviceWorker.getRegistration() : Promise.resolve(null);
+    return registration.then(function (reg) {
+      return reg ? reg.update().catch(function () {}) : null;
+    }).catch(function () {}).then(function () {
+      location.reload();
     });
   }
 
-  // ---------- programme scene ----------
+  // ---------- offline cache of photos, videos and programme images ----------
+
+  var syncing = null;
+  var syncAgain = false;
+
+  /** Absolute URL → size of every photo and video in the manifest (hidden ones too: they stay cached). */
+  function mediaSizes() {
+    var sizes = {};
+    (state.manifest ? state.manifest.slides : []).forEach(function (s) {
+      if (s.url) sizes[new URL(s.url, location.href).href] = s.size || 0;
+    });
+    return sizes;
+  }
+
+  function wantedAssets(sizes) {
+    var images = state.data ? state.data.entries.map(function (e) { return e.image; }) : [];
+    // Small things first, so a big video download doesn't hold up the programme images
+    return unique(images).concat(Object.keys(sizes).sort(function (a, b) { return sizes[a] - sizes[b]; }));
+  }
+
+  function isMediaUrl(url) {
+    return url.indexOf(location.origin + API + '/tv/media/') === 0;
+  }
+
+  /** Whether the source that lists this kind of asset has loaded, so a missing URL really is unused. */
+  function sourceLoaded(url) {
+    return isMediaUrl(url) ? !!state.manifest : !!state.data;
+  }
+
+  /**
+   * Download every asset that is not cached yet (one at a time) and drop the
+   * ones no longer used. s3.irmf.cz sends no CORS headers, so programme
+   * images are opaque responses — fine for <img>. The manifest and the
+   * programme load separately: only assets of a loaded source are pruned.
+   */
+  function syncCache() {
+    if (!window.caches) return;
+    if (syncing) { syncAgain = true; return; }
+    var sizes = mediaSizes();
+    var urls = wantedAssets(sizes);
+    syncing = caches.open(ASSET_CACHE).then(function (cache) {
+      return cache.keys().then(function (keys) {
+        var cached = keys.map(function (req) { return req.url; });
+        return Promise.all(cached.filter(function (url) { return urls.indexOf(url) === -1 && sourceLoaded(url); })
+          .map(function (url) { return cache.delete(url); }))
+          .then(function () {
+            var missing = urls.filter(function (url) { return cached.indexOf(url) === -1; });
+            state.cache.pending = missing.length;
+            return missing.reduce(function (chain, url) {
+              return chain.then(function () { return cacheOne(cache, url, sizes[url] || 0); });
+            }, Promise.resolve());
+          });
+      }).then(function () { return measureCache(cache, sizes); });
+    }).catch(function (err) {
+      state.lastError = 'cache: ' + errorText(err);
+    }).then(function () {
+      syncing = null;
+      renderStatus();
+      if (syncAgain) { syncAgain = false; syncCache(); }
+    });
+  }
+
+  function cacheOne(cache, url, size) {
+    var sameOrigin = url.indexOf(location.origin) === 0;
+    return roomFor(size).then(function (room) {
+      if (!room) { state.cache.full = true; return; }
+      // no-store: the file goes to the Cache API only, not a second copy into the HTTP cache
+      return fetch(url, { mode: sameOrigin ? 'same-origin' : 'no-cors', cache: 'no-store' }).then(function (res) {
+        if (res.ok || res.type === 'opaque') return cache.put(url, res);
+      });
+    }).catch(function () { /* offline or gone: try again on the next sync */ })
+      .then(function () { state.cache.pending = Math.max(0, state.cache.pending - 1); renderStatus(); });
+  }
+
+  /** Keep 10 % of the browser's storage quota free. */
+  function roomFor(bytes) {
+    if (!bytes || !navigator.storage || !navigator.storage.estimate) return Promise.resolve(true);
+    return navigator.storage.estimate().then(function (est) {
+      return est.usage + bytes < est.quota * 0.9;
+    }).catch(function () { return true; });
+  }
+
+  function measureCache(cache, sizes) {
+    if (navigator.storage && navigator.storage.estimate) {
+      navigator.storage.estimate().then(function (est) {
+        state.storage = (est.usage / 1e6).toFixed(0) + ' of ' + (est.quota / 1e6).toFixed(0) + ' MB';
+      }).catch(function () {});
+    }
+    return cache.keys().then(function (keys) {
+      state.cache.files = keys.length;
+      state.cache.bytes = keys.reduce(function (sum, req) { return sum + (sizes[req.url] || 0); }, 0);
+    });
+  }
+
+  // ---------- programme slides ----------
 
   function entryEnd(e) {
     return e.startMin + Math.max(e.runtime, 15);
   }
 
   /**
-   * Which festival day to show: before the festival its first day, during it
-   * today (or the next day once today's programme is over), after it the last day.
+   * Which festival days to show. The first one: before the festival its first
+   * day, during it today (or the next day once today's programme is over),
+   * after it the last day. With programme_days 'upcoming' every later festival
+   * day follows.
    */
-  function pickDay(entries, d) {
+  function pickDays(entries, d, days) {
     var today = localDate(d);
     var nowMin = minutesOf(d);
-    var days = entries.map(function (e) { return e.date; })
-      .filter(function (day, i, all) { return all.indexOf(day) === i; })
-      .sort();
-    if (!days.length) return null;
-    if (today < days[0]) return { date: days[0], mode: 'first' };
+    var tomorrow = localDate(new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1));
+    var dates = unique(entries.map(function (e) { return e.date; })).sort();
+    if (!dates.length) return [];
+
     var leftToday = entries.some(function (e) {
       return e.date === today && e.time && entryEnd(e) > nowMin;
     });
-    if (leftToday) return { date: today, mode: 'today' };
-    var next = days.filter(function (day) { return day > today; })[0];
-    if (next) {
-      var tomorrow = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
-      return { date: next, mode: next === localDate(tomorrow) ? 'tomorrow' : 'next' };
-    }
-    return { date: days[days.length - 1], mode: 'past' };
+    var future = dates.filter(function (day) { return day > today; });
+    var first;
+    if (today < dates[0]) first = { date: dates[0], mode: 'first' };
+    else if (leftToday) first = { date: today, mode: 'today' };
+    else if (future.length) first = { date: future[0], mode: future[0] === tomorrow ? 'tomorrow' : 'later' };
+    else return [{ date: dates[dates.length - 1], mode: 'past' }];
+
+    if (days !== 'upcoming') return [first];
+    return [first].concat(dates.filter(function (day) { return day > first.date; }).map(function (day) {
+      return { date: day, mode: day === tomorrow ? 'tomorrow' : 'later' };
+    }));
   }
+
+  // "v sobotu", "ve čtvrtek"… by Date.getDay()
+  var ON_WEEKDAY = ['v neděli', 'v pondělí', 'v úterý', 've středu', 've čtvrtek', 'v pátek', 'v sobotu'];
 
   function dayLabels(day) {
     var date = formatDay(day.date);
@@ -265,6 +401,10 @@
       case 'today': return { eyebrow: 'Dnes · ' + date, heading: 'Dnes na programu' };
       case 'tomorrow': return { eyebrow: 'Zítra · ' + date, heading: 'Zítra na programu' };
       case 'first': return { eyebrow: 'Festival začíná · ' + date, heading: 'Program prvního dne' };
+      case 'later': {
+        var on = ON_WEEKDAY[parseDay(day.date).getDay()];
+        return { eyebrow: date, heading: on.charAt(0).toUpperCase() + on.slice(1) + ' na programu' };
+      }
       default: return { eyebrow: date, heading: 'Program' };
     }
   }
@@ -317,13 +457,22 @@
       h('div', null, text));
   }
 
-  function buildProgramme(scene) {
-    if (!state.data) return [{ el: messageSlide('IRMF', 'Načítám program…'), seconds: 10 }];
+  function programmeSlides() {
+    if (!state.data) return [{ el: messageSlide('IRMF', 'Načítám program…'), seconds: 10, label: 'loading' }];
     var d = now();
     var nowMin = minutesOf(d);
-    var day = pickDay(state.data.entries, d);
-    if (!day) return [{ el: messageSlide(state.data.edition.name, 'Program brzy zveřejníme'), seconds: 20 }];
+    var days = pickDays(state.data.entries, d, programmeDays());
+    if (!days.length) return [{ el: messageSlide(state.data.edition.name, 'Program brzy zveřejníme'), seconds: 20, label: 'no programme' }];
 
+    var slides = [];
+    days.forEach(function (day) {
+      slides = slides.concat(daySlides(day, nowMin));
+    });
+    return slides;
+  }
+
+  /** The day's overview (paged) followed by a slide per screening. */
+  function daySlides(day, nowMin) {
     var labels = dayLabels(day);
     var ofDay = state.data.entries.filter(function (e) { return e.date === day.date; });
     var timed = ofDay.filter(function (e) {
@@ -338,71 +487,196 @@
       var last = i === pages.length - 1;
       slides.push({
         el: overviewSlide(labels, rows, last ? allDay : [], pages.length > 1 ? (i + 1) + '/' + pages.length : '', day, nowMin),
-        seconds: scene.overviewSeconds,
+        seconds: PROGRAMME_SCENE.overviewSeconds,
+        label: 'programme ' + day.date,
       });
     });
     timed.concat(allDay).forEach(function (e) {
-      slides.push({ el: featureSlide(e, labels, day, nowMin), seconds: scene.featureSeconds });
+      slides.push({ el: featureSlide(e, labels, day, nowMin), seconds: PROGRAMME_SCENE.featureSeconds, label: e.title });
     });
     return slides;
   }
 
-  var SCENES = { programme: buildProgramme };
+  // ---------- photo and video slides ----------
+
+  function photoSlide(slide) {
+    // Close to 16:9 fills the screen; anything else (portraits…) is shown whole
+    var ratio = slide.width && slide.height ? slide.width / slide.height : 16 / 9;
+    var fill = Math.abs(ratio - 16 / 9) < 0.25;
+    return {
+      el: h('div', { class: 'media' }, h('img', { class: fill ? 'cover' : 'contain', src: slide.url, alt: '' })),
+      seconds: slide.display_seconds || PHOTO_SECONDS,
+      media: true,
+      label: 'photo ' + (slide.title || slide.id),
+    };
+  }
+
+  /** The next screening of a trailer's film, for the caption. */
+  function nextScreening(movieId) {
+    if (!movieId || !state.data) return null;
+    var d = now();
+    var today = localDate(d);
+    var nowMin = minutesOf(d);
+    var found = null;
+    state.data.entries.forEach(function (e) {
+      if (!e.time) return;
+      var movie = e.movies.filter(function (m) { return m.id === movieId; })[0];
+      if (!movie) return;
+      if (e.date < today || (e.date === today && e.startMin < nowMin)) return;
+      if (!found || e.date < found.entry.date || (e.date === found.entry.date && e.startMin < found.entry.startMin)) {
+        found = { entry: e, movie: movie };
+      }
+    });
+    return found;
+  }
+
+  function screeningWhen(entry) {
+    var d = now();
+    var tomorrow = localDate(new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1));
+    var day = entry.date === localDate(d) ? 'Dnes'
+      : entry.date === tomorrow ? 'Zítra'
+        : parseDay(entry.date).toLocaleDateString('cs-CZ', { weekday: 'long', day: 'numeric', month: 'numeric' });
+    return [day.charAt(0).toUpperCase() + day.slice(1), entry.time, entry.venue].join(' · ');
+  }
+
+  function videoSlide(slide) {
+    // src is set in show(): a detached <video> with a src would start downloading at once
+    var video = h('video', { class: 'contain', preload: 'auto', playsinline: '' });
+    // A trailer's caption: when its film is on (nothing once it has been screened)
+    var screening = nextScreening(slide.movie_id);
+    var caption = screening ? h('div', { class: 'caption' },
+      h('div', { class: 'eyebrow' }, 'Na festivalu'),
+      h('div', { class: 'caption-title' }, screening.movie.name || ''),
+      h('div', { class: 'caption-when' }, screeningWhen(screening.entry))) : null;
+    return {
+      el: h('div', { class: 'media' }, video, caption),
+      video: video,
+      src: slide.url,
+      // Stop waiting if 'ended' never comes (stalled stream)
+      seconds: Math.ceil((slide.media_seconds || 120) + 10),
+      media: true,
+      label: 'video ' + (slide.title || slide.id),
+    };
+  }
+
+  function buildSlides() {
+    var list = state.manifest ? state.manifest.slides : DEFAULT_SLIDES;
+    var slides = [];
+    list.forEach(function (slide) {
+      if (slide.hidden) return;
+      if (slide.kind === 'programme') slides = slides.concat(programmeSlides());
+      else if (slide.kind === 'photo' && slide.url) slides.push(photoSlide(slide));
+      else if (slide.kind === 'video' && slide.url) slides.push(videoSlide(slide));
+    });
+    if (!slides.length) slides.push({ el: messageSlide('IRMF', 'International Road Movie Festival'), seconds: 20, label: 'empty playlist' });
+    return slides;
+  }
 
   // ---------- loop ----------
 
-  function whenImagesReady(el) {
-    var imgs = Array.prototype.slice.call(el.querySelectorAll('img'));
-    return Promise.all(imgs.map(function (img) {
+  /** Resolves true when the slide can be shown, false to skip it. */
+  function whenReady(wrapper, slide) {
+    var imgs = Array.prototype.slice.call(wrapper.querySelectorAll('img'));
+    var images = Promise.all(imgs.map(function (img) {
       img.addEventListener('error', function () { img.style.visibility = 'hidden'; });
       var ready = img.decode ? img.decode().catch(function () {}) : Promise.resolve();
       return Promise.race([ready, sleep(4000)]);
     }));
+    if (!slide.video) return images.then(function () { return true; });
+    var video = slide.video;
+    var canPlay = new Promise(function (resolve) {
+      if (video.readyState >= 3) return resolve(true);
+      video.addEventListener('canplay', function () { resolve(true); }, { once: true });
+      video.addEventListener('error', function () { resolve(false); }, { once: true });
+      setTimeout(function () { resolve(false); }, VIDEO_READY_TIMEOUT_MS);
+    });
+    return Promise.all([images, canPlay]).then(function (r) { return r[1]; });
+  }
+
+  /** Play a video slide to its end (with sound if the browser lets us). */
+  function playVideo(video, maxSeconds) {
+    return new Promise(function (resolve) {
+      var done = false;
+      function finish() {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve();
+      }
+      var timer = setTimeout(finish, maxSeconds * 1000);
+      video.addEventListener('ended', finish);
+      video.addEventListener('error', finish);
+      video.play().catch(function () {
+        video.muted = true;
+        video.play().catch(finish);
+      });
+    });
+  }
+
+  /** Free the hardware decoder of a slide that is going away. */
+  function release(wrapper) {
+    Array.prototype.forEach.call(wrapper.querySelectorAll('video'), function (video) {
+      video.pause();
+      video.removeAttribute('src');
+      video.load();
+    });
+    wrapper.remove();
   }
 
   var current = null;
-  var FADE_MS = 500; // matches the .slide opacity transition
 
   /**
    * Fade the current slide out, then the next one in — never both at once:
    * overlapping texts look messy and two full-screen layers stutter on TV boxes.
+   * Resolves false when the slide could not be shown (a video that won't load).
    */
   function show(slide) {
     var wrapper = h('div', { class: 'slide' }, slide.el, h('div', { class: 'progress' }));
-    wrapper.lastChild.style.animationDuration = slide.seconds + 's';
+    if (slide.video) slide.video.src = slide.src;
     sceneEl.appendChild(wrapper);
-    return whenImagesReady(wrapper).then(function () {
+    return whenReady(wrapper, slide).then(function (ready) {
+      if (!ready) {
+        release(wrapper);
+        return false;
+      }
+      wrapper.lastChild.style.animationDuration = (slide.video && slide.video.duration ? slide.video.duration : slide.seconds) + 's';
       var previous = current;
       current = wrapper;
-      if (!previous) return;
+      if (!previous) return true;
       previous.classList.remove('visible');
-      return sleep(FADE_MS).then(function () { previous.remove(); });
-    }).then(function () {
+      return sleep(FADE_MS).then(function () { release(previous); return true; });
+    }).then(function (ready) {
+      if (!ready) return false;
+      state.current = slide.label || '';
+      renderStatus();
+      stage.classList.toggle('media-mode', !!slide.media);
       // Two frames so the browser paints the slide at opacity 0 before fading in
       requestAnimationFrame(function () {
         requestAnimationFrame(function () { wrapper.classList.add('visible'); });
       });
-      return sleep(slide.seconds * 1000);
+      return (slide.video ? playVideo(slide.video, slide.seconds) : sleep(slide.seconds * 1000))
+        .then(function () { return true; });
     });
   }
 
   function loop() {
-    var chain = Promise.resolve();
-    PLAYLIST.forEach(function (scene) {
-      chain = chain.then(function () {
-        var build = SCENES[scene.type];
-        if (!build) return;
-        return build(scene).reduce(function (p, slide) {
-          return p.then(function () { return show(slide); });
-        }, Promise.resolve());
+    var slides = buildSlides();
+    var shown = 0;
+    state.restartLoop = false;
+    return slides.reduce(function (chain, slide) {
+      return chain.then(function () {
+        if (state.restartLoop) return null;
+        return show(slide).then(function (ok) { if (ok !== false) shown++; });
       });
-    });
-    return chain.then(function () {
+    }, Promise.resolve()).then(function () {
       if (state.reloadPending) location.reload();
+      // Everything was skipped (e.g. only videos that can't load offline): don't spin
+      if (!shown) return show({ el: messageSlide('IRMF', 'International Road Movie Festival'), seconds: 20, label: 'nothing to show' });
+    }).then(function () {
       // Without data yet, wait a little before trying the (message) loop again
       return state.data ? null : sleep(RETRY_MS).then(loadData);
     }).catch(function (err) {
-      state.lastError = String(err && err.message || err);
+      state.lastError = errorText(err);
       renderStatus();
       return sleep(5000);
     }).then(loop);
@@ -410,7 +684,7 @@
 
   // ---------- updates ----------
 
-  /** Reload (between scenes) when a new version of the player is deployed. */
+  /** Reload (between loops) when a new version of the player is deployed. */
   function checkForUpdate() {
     fetch('app.js', { method: 'HEAD', cache: 'no-store' }).then(function (res) {
       if (!res.ok) return;
@@ -436,8 +710,11 @@
       state.lastError = 'SW: ' + err.message;
     });
   }
+  // Ask the browser not to evict the cache when space runs low (it may say no)
+  if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(function () {});
 
-  loadData().then(function () {
+  Promise.all([loadManifest(), loadData()]).then(function () {
+    setInterval(loadManifest, MANIFEST_REFRESH_MS);
     setInterval(loadData, DATA_REFRESH_MS);
     checkForUpdate();
     setInterval(checkForUpdate, UPDATE_CHECK_MS);

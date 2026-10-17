@@ -42,15 +42,23 @@ function getQueueClient() {
   return cachedClient;
 }
 
-/** Send a job id to the queue (base64 — the Storage Queue default encoding). */
-async function enqueueJob(jobId) {
+/**
+ * Send a message to the worker queue (base64 — the Storage Queue default
+ * encoding). `type` picks the worker's job handler; absent = transcode.
+ */
+async function enqueueMessage(payload) {
   const client = getQueueClient();
   if (!ensuredQueue) {
     await client.createIfNotExists();
     ensuredQueue = true;
   }
-  const body = Buffer.from(JSON.stringify({ job_id: jobId }), 'utf8').toString('base64');
+  const body = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64');
   await client.sendMessage(body);
+}
+
+/** Send a transcode job id to the queue. */
+async function enqueueJob(jobId) {
+  await enqueueMessage({ job_id: jobId });
 }
 
 /**
@@ -105,4 +113,4 @@ async function enqueueForMovie(movieId, createdBy) {
   }
 }
 
-module.exports = { isConfigured, enqueueJob, enqueueForMovie, QUEUE_NAME };
+module.exports = { isConfigured, enqueueJob, enqueueMessage, enqueueForMovie, QUEUE_NAME };

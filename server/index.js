@@ -37,6 +37,7 @@ const accommodationRoutes = require('./routes/accommodation');
 const associationRoutes = require('./routes/associations');
 const scannerRoutes = require('./routes/scanner');
 const scannerSessionRoutes = require('./routes/scanner-session');
+const tvRoutes = require('./routes/tv');
 const gooutRoutes = require('./routes/goout');
 const dbBackupRoutes = require('./routes/dbBackup');
 const gooutTokenScheduler = require('./services/goout-token-scheduler');
@@ -170,6 +171,9 @@ app.use('/api', publicRoutes);
 // Phone scanners joined through a scanner link (own session keys, no login)
 app.use('/api/scanner-session', scannerSessionRoutes);
 
+// TV player on the venue screen (/tv/) reads its settings without login
+app.use('/api/public/tv', tvRoutes.publicRouter);
+
 // Protected API routes (require @irmf.cz domain)
 app.use('/api/guests', requireIrmfDomain, guestRoutes);
 app.use('/api/editions', requireIrmfDomain, editionRoutes);
@@ -195,6 +199,7 @@ app.use('/api/associations', requireIrmfDomain, associationRoutes);
 app.use('/api/scanner', requireIrmfDomain, scannerRoutes);
 app.use('/api/goout', requireIrmfDomain, gooutRoutes);
 app.use('/api/db-backup', requireIrmfDomain, dbBackupRoutes);
+app.use('/api/tv', requireIrmfDomain, tvRoutes.adminRouter);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });

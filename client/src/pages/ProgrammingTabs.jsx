@@ -4,6 +4,7 @@ import { useEdition } from '../contexts/EditionContext'
 import Programming from './Programming'
 import Blocks from './Blocks'
 import Venues from './Venues'
+import TvScreen from './TvScreen'
 
 const ProgrammingTabs = () => {
   const { selectedEdition } = useEdition()
@@ -14,6 +15,7 @@ const ProgrammingTabs = () => {
   const getActiveTab = () => {
     if (location.pathname === '/programme/blocks') return 'blocks'
     if (location.pathname === '/programme/venues') return 'venues'
+    if (location.pathname === '/programme/tv') return 'tv'
     return 'programming'
   }
   
@@ -25,10 +27,15 @@ const ProgrammingTabs = () => {
       navigate('/programme/blocks')
     } else if (tab === 'venues') {
       navigate('/programme/venues')
+    } else if (tab === 'tv') {
+      navigate('/programme/tv')
     } else {
       navigate('/programme')
     }
   }
+
+  // The TV screen is global (it plays the running or next edition)
+  if (!selectedEdition && activeTab === 'tv') return <TvScreen />
 
   if (!selectedEdition) {
     return (
@@ -73,6 +80,16 @@ const ProgrammingTabs = () => {
           >
             🏛️ Venues
           </button>
+          <button
+            onClick={() => handleTabChange('tv')}
+            className={`py-2 px-1 border-b-2 font-medium text-sm ${
+              activeTab === 'tv'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            📺 TV Screen
+          </button>
         </nav>
       </div>
 
@@ -81,6 +98,7 @@ const ProgrammingTabs = () => {
         {activeTab === 'programming' && <Programming />}
         {activeTab === 'blocks' && <Blocks />}
         {activeTab === 'venues' && <Venues />}
+        {activeTab === 'tv' && <TvScreen />}
       </div>
     </div>
   )
