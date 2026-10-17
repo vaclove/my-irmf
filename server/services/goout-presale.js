@@ -510,4 +510,21 @@ async function getSoldBySchedule(scheduleIds, { fresh = false } = {}) {
   return result;
 }
 
-module.exports = { getEditionPresale, getSoldBySchedule };
+/**
+ * GoOut sales of an edition's festival pass (schedules without a start time).
+ * @returns {Promise<Array<{saleId, state, scheduleId, deals}>>}
+ */
+async function getEditionPassSales(editionId) {
+  const { rows } = await pool.query(`
+    SELECT DISTINCT goout_schedule_id AS id
+    FROM programming_schedule
+    WHERE edition_id = $1 AND goout_schedule_id IS NOT NULL
+  `, [editionId]);
+  const ids = rows.map(r => String(r.id));
+  const [schedules, salesBySchedule] = await Promise.all([loadSchedules(ids), loadSalesBySchedule()]);
+  return ids
+    .filter(id => schedules[id] && !schedules[id].hasTime)
+    .flatMap(id => (salesBySchedule[id] || []).map(sale => ({ ...sale, scheduleId: id })));
+}
+
+module.exports = { getEditionPresale, getSoldBySchedule, getEditionPassSales, VALID_TICKET_STATES, relId };

@@ -1,5 +1,6 @@
 const goOutAPI = require('./goout-api');
 const { pool } = require('../models/database');
+const { findConversion } = require('./goout-accreditations');
 
 // GoOut gets this long to answer; after that the scan falls back to local-only
 // handling (stored with us, double entry blocked per screening)
@@ -108,6 +109,13 @@ async function checkWithGoOut(barcode, screening) {
  *   holderName is the name on the ticket when it was checked in at GoOut
  */
 async function verifyGoOutTicket(barcode, programmingId) {
+  // A pass converted to our badge no longer gets in, its holder uses the badge
+  const conversion = await findConversion(barcode);
+  if (conversion) {
+    const badge = conversion.badgeNumber ? `badge ${conversion.badgeNumber}` : 'a badge';
+    return { rejected: true, httpStatus: 409, error: `Pass exchanged for ${badge} (${conversion.name})` };
+  }
+
   const result = await pool.query(
     'SELECT edition_id, goout_schedule_id, goout_checkin_id FROM programming_schedule WHERE id = $1',
     [programmingId]
