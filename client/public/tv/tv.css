@@ -2,7 +2,14 @@
    scales to the screen, so px below are FHD pixels. Colours: 2026 palette from
    docs/public-web/IRMF-WEB-RUNBOOK.md §5. Keep effects cheap (opacity/transform
    only) — the player runs on low-end TV boxes. */
+/* Festival 2026 type: Aeonik (sans) and Swear Display (serif accents) */
+@font-face { font-family: 'Aeonik'; src: url('fonts/Aeonik-Regular.ttf') format('truetype'); font-weight: 400; font-display: block; }
+@font-face { font-family: 'Aeonik'; src: url('fonts/Aeonik-Medium.ttf') format('truetype'); font-weight: 500 700; font-display: block; }
+@font-face { font-family: 'Swear Display'; src: url('fonts/SwearDisplay-Regular.otf') format('opentype'); font-weight: 400; font-display: block; }
+
 :root {
+  --sans: 'Aeonik', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --serif: 'Swear Display', Georgia, 'Times New Roman', serif;
   --bg: #151313;
   --text: #ffffff;
   --text-soft: #d9d6d0;
@@ -31,7 +38,7 @@ html, body {
   transform-origin: 0 0;
   background: var(--bg);
   color: var(--text);
-  font-family: Roboto, 'Helvetica Neue', Arial, sans-serif;
+  font-family: var(--sans);
 }
 
 /* ---------- top bar ---------- */
@@ -108,61 +115,64 @@ html, body {
 .allday strong { color: var(--lime); text-transform: uppercase; letter-spacing: 2px; font-size: 26px; margin-right: 16px; }
 .more { margin-top: 28px; font-size: 28px; color: var(--muted); }
 
-/* ---------- featured screening ---------- */
+/* ---------- featured screening (2026 festival visual) ---------- */
 .feature .photo {
   position: absolute;
-  left: 0;
-  top: 0;
-  width: 1080px;
-  height: 1080px;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   object-fit: cover;
   background: var(--slate);
 }
-.feature .photo-fade {
+/* Keeps the lime text readable on bright photos */
+.feature .shade {
   position: absolute;
-  left: 780px;
-  top: 0;
-  width: 300px;
-  height: 1080px;
-  background: linear-gradient(90deg, rgba(21, 19, 19, 0), var(--bg));
+  inset: 0;
+  background:
+    linear-gradient(rgba(0, 0, 0, 0.45), rgba(0, 0, 0, 0) 26%),
+    linear-gradient(0deg, rgba(0, 0, 0, 0.7), rgba(0, 0, 0, 0.25) 45%, rgba(0, 0, 0, 0) 65%);
 }
-.feature .info {
+.feature .festival,
+.feature .festival-when {
   position: absolute;
-  left: 1080px;
-  top: 0;
-  width: 840px;
-  height: 1080px;
-  padding: 150px 72px 80px 40px;
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
+  top: 46px;
+  font-family: var(--serif);
+  font-size: 46px;
+  line-height: 0.98;
+  color: var(--lime);
 }
-.feature .when { display: flex; align-items: baseline; gap: 28px; margin: 18px 0 8px; }
-.feature .time { font-size: 120px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
-.feature .venue { font-size: 42px; color: var(--light-blue); }
-.feature .badge { align-self: flex-start; margin: 8px 0 4px; }
-.feature h2 {
-  margin: 20px 0 12px;
-  font-size: 62px;
-  line-height: 1.1;
+.feature .festival { left: 62px; }
+.feature .festival-when { right: 62px; text-align: right; }
+.feature .film {
+  position: absolute;
+  left: 62px;
+  right: 62px;
+  bottom: 96px;
+  color: var(--lime);
+}
+.feature .film-when { font-size: 38px; margin-bottom: 30px; display: flex; align-items: center; gap: 24px; }
+.feature .film-when .badge { font-size: 24px; }
+.feature .film-title {
+  font-size: 76px;
+  /* Room for descenders (j, g): the 2-line clamp clips anything outside the line box */
+  line-height: 1.2;
+  max-width: 1500px;
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 2;
   overflow: hidden;
 }
-.feature .meta { font-size: 30px; color: var(--muted); margin-bottom: 24px; }
-.feature .synopsis {
-  margin: 0;
-  font-size: 31px;
-  line-height: 1.45;
-  color: var(--text-soft);
+.feature .film-title-en {
+  font-family: var(--serif);
+  font-size: 76px;
+  line-height: 1.2;
+  max-width: 1500px;
+  margin-top: -6px;
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 9;
+  -webkit-line-clamp: 2;
   overflow: hidden;
 }
-.feature .block-films { margin-top: 20px; font-size: 28px; color: var(--muted); }
-.feature .block-films strong { color: var(--text-soft); }
 
 /* ---------- photos and videos ---------- */
 .media { position: absolute; inset: 0; background: #000; }

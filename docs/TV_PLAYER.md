@@ -37,6 +37,7 @@ Mi Box S has room for about 1.5 GB, so delete what is no longer needed.
 | Piece | Where |
 |---|---|
 | Player (plain JS, no build step) | `client/public/tv/` → served as `/tv/` |
+| Fonts (2026 visual) | `client/public/tv/fonts/` — Aeonik (sans), Swear Display (serif accents) |
 | Service worker (offline) | `client/public/tv/sw.js`, scope `/tv/` |
 | What to play + settings | `GET /api/public/tv/manifest` (no login) |
 | Files | `GET /api/public/tv/media/:id?v=…` (Range support, cached for a year — `v` changes with the file) |
@@ -62,6 +63,8 @@ Mi Box S has room for about 1.5 GB, so delete what is no longer needed.
 
 - `?debug=1` — status box: page load time, data, slides, cache size, what is showing, errors
 - `?now=2026-10-23T19:10` — pretend it is this local time (to see a festival day)
+- Keys: → / space / PageDown next slide, ← / PageUp previous one (also a click on the right /
+  left half of the screen) — handy for checking slides in a desktop browser
 
 ## The TV box: Mi Box S + Fully Kiosk Browser
 

@@ -19,6 +19,9 @@
  * URL parameters (for testing):
  *   ?debug=1                  show a status box (cache, data, errors)
  *   ?now=2026-10-23T19:00     pretend it is this local time (the clock keeps running)
+ *
+ * Keys: → / space / PageDown next slide, ← / PageUp previous one (also a click
+ * on the right / left half of the screen); the loop then goes on from there.
  */
 (function () {
   'use strict';
@@ -36,6 +39,9 @@
   var FADE_MS = 500; // matches the .slide opacity transition
   var ASSET_CACHE = 'irmf-tv-assets';
   var TRAILER_INTRO_SECONDS = 7;
+  // Festival line on the film slides (2026 = 9th edition, see the 2026 visual)
+  var FIRST_EDITION_YEAR = 2018;
+  var FESTIVAL_PLACE = 'Moving Station';
   var NATIVE_DOWNLOAD_TIMEOUT_MS = 30 * 60 * 1000;
   var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   // Without a manifest (offline before the first load, older server) just the programme
@@ -216,6 +222,7 @@
       startMin: parts ? Number(parts[0]) * 60 + Number(parts[1]) : null,
       runtime: Number(e.total_runtime) || Number(e.movie_runtime) || 0,
       title: e.title_override_cs || e.movie_name_cs || e.block_name_cs || e.title_override_en || e.movie_name_en || e.block_name_en || '',
+      titleEn: e.title_override_en || e.movie_name_en || e.block_name_en || '',
       venue: e.venue_name_cs || e.venue_name_en || '',
       director: e.movie_director || '',
       synopsis: shorten(e.movie_synopsis_cs || e.block_description_cs || e.movie_synopsis_en || e.block_description_en, SYNOPSIS_MAX),
@@ -548,27 +555,39 @@
         allDay.map(function (e) { return e.title + ' (' + e.venue + ')'; }).join(' · ')) : null);
   }
 
+  /** "22—25/10/2026" (or "30/10—2/11/2026" across months). */
+  function festivalDates(edition) {
+    var start = parseDay(edition.start);
+    var end = parseDay(edition.end);
+    var from = start.getMonth() === end.getMonth() ? String(start.getDate()) : start.getDate() + '/' + (start.getMonth() + 1);
+    return from + '—' + end.getDate() + '/' + (end.getMonth() + 1) + '/' + end.getFullYear();
+  }
+
+  /** "Sobota 24. 10. / 10.00 / Velký sál", as in the 2026 visual. */
+  function screeningLine(e) {
+    var d = parseDay(e.date);
+    var weekday = d.toLocaleDateString('cs-CZ', { weekday: 'long' });
+    return [
+      weekday.charAt(0).toUpperCase() + weekday.slice(1) + ' ' + d.getDate() + '. ' + (d.getMonth() + 1) + '.',
+      e.time ? e.time.replace(':', '.') : 'celý den',
+      e.venue,
+    ].filter(Boolean).join(' / ');
+  }
+
+  /** A screening in the style of the 2026 festival visual: the film's photo full screen. */
   function featureSlide(e, labels, day, nowMin) {
-    var photo = e.image ? h('img', { class: 'photo', src: e.image, alt: '' }) : h('div', { class: 'photo' });
-    // Films and blocks show their length; other events (DJ sets, workshops) when they end
-    var isFilm = e.director || e.films.length > 1;
-    var end = e.time && e.runtime ? pad(Math.floor(entryEnd(e) / 60) % 24) + ':' + pad(entryEnd(e) % 60) : '';
-    var meta = isFilm
-      ? [e.director ? 'Režie: ' + e.director : '', e.runtime ? e.runtime + ' min' : ''].filter(Boolean).join(' · ')
-      : (end ? 'Do ' + end : '');
+    var edition = state.data.edition;
     return h('div', { class: 'feature' },
-      photo,
-      h('div', { class: 'photo-fade' }),
-      h('div', { class: 'info' },
-        h('div', { class: 'eyebrow' }, labels.eyebrow),
-        h('div', { class: 'when' },
-          h('div', { class: 'time' }, e.time || 'Celý den'),
-          h('div', { class: 'venue' }, e.venue)),
-        isRunning(e, day, nowMin) ? h('div', { class: 'badge' }, 'Právě běží') : null,
-        h('h2', null, e.title),
-        meta ? h('div', { class: 'meta' }, meta) : null,
-        h('p', { class: 'synopsis' }, e.synopsis),
-        e.films.length > 1 ? h('div', { class: 'block-films' }, h('strong', null, 'Ve bloku: '), e.films.join(' · ')) : null));
+      e.image ? h('img', { class: 'photo', src: e.image, alt: '' }) : h('div', { class: 'photo' }),
+      h('div', { class: 'shade' }),
+      h('div', { class: 'festival' },
+        (edition.year - FIRST_EDITION_YEAR + 1) + '. Mezinárodní filmový', h('br'), 'festival road movie'),
+      h('div', { class: 'festival-when' }, festivalDates(edition), h('br'), FESTIVAL_PLACE),
+      h('div', { class: 'film' },
+        h('div', { class: 'film-when' }, screeningLine(e),
+          isRunning(e, day, nowMin) ? h('span', { class: 'badge' }, 'Právě běží') : null),
+        h('div', { class: 'film-title' }, e.title),
+        e.titleEn && e.titleEn !== e.title ? h('div', { class: 'film-title-en' }, e.titleEn) : null));
   }
 
   function messageSlide(eyebrow, text) {
@@ -613,7 +632,8 @@
       });
     });
     timed.concat(allDay).forEach(function (e) {
-      slides.push({ el: featureSlide(e, labels, day, nowMin), seconds: PROGRAMME_SCENE.featureSeconds, label: e.title });
+      // The festival visual replaces the logo and clock on these
+      slides.push({ el: featureSlide(e, labels, day, nowMin), seconds: PROGRAMME_SCENE.featureSeconds, label: e.title, bare: true });
     });
     return slides;
   }
@@ -804,7 +824,7 @@
       if (!ready) return false;
       state.current = slide.label || '';
       renderStatus();
-      stage.classList.toggle('media-mode', !!slide.media);
+      stage.classList.toggle('media-mode', !!(slide.media || slide.bare));
       // Two frames so the browser paints the slide at opacity 0 before fading in
       requestAnimationFrame(function () {
         requestAnimationFrame(function () { wrapper.classList.add('visible'); });
@@ -812,20 +832,57 @@
       var playing = slide.file ? sleep(FADE_MS).then(function () { return playNative(slide); })
         : slide.video ? playVideo(slide.video, slide.seconds).then(function () { recordQuality(slide); })
           : sleep(slide.seconds * 1000);
-      return playing.then(function () { return true; });
+      return untilSkipped(playing).then(function () {
+        if (skip.dir && slide.file) stopNativeVideo();
+        return true;
+      });
     });
   }
+
+  // ---------- skipping slides by hand (keys, clicks) ----------
+
+  var skip = { dir: 0, resolve: null };
+
+  /** Resolves when `playing` does, or earlier when the viewer skips. */
+  function untilSkipped(playing) {
+    return new Promise(function (resolve) {
+      skip.resolve = resolve;
+      playing.then(resolve);
+    }).then(function () { skip.resolve = null; });
+  }
+
+  function skipSlide(dir) {
+    if (!skip.resolve) return false; // between slides (fading): ignore
+    skip.dir = dir;
+    skip.resolve();
+    return true;
+  }
+
+  document.addEventListener('keydown', function (event) {
+    var dir = ['ArrowRight', ' ', 'PageDown'].indexOf(event.key) !== -1 ? 1
+      : ['ArrowLeft', 'PageUp'].indexOf(event.key) !== -1 ? -1 : 0;
+    if (dir && skipSlide(dir)) event.preventDefault();
+  });
+  document.addEventListener('click', function (event) {
+    skipSlide(event.clientX > document.documentElement.clientWidth / 2 ? 1 : -1);
+  });
 
   function loop() {
     var slides = buildSlides();
     var shown = 0;
     state.restartLoop = false;
-    return slides.reduce(function (chain, slide) {
-      return chain.then(function () {
-        if (state.restartLoop) return null;
-        return show(slide).then(function (ok) { if (ok !== false) shown++; });
+    // One slide after another; a skip back steps to the previous one (from
+    // the first to the last: the slide on screen can't be shown again in place)
+    function step(i) {
+      if (i >= slides.length || state.restartLoop) return Promise.resolve();
+      return show(slides[i]).then(function (ok) {
+        if (ok !== false) shown++;
+        var dir = skip.dir;
+        skip.dir = 0;
+        return step(dir < 0 ? (i > 0 ? i - 1 : slides.length - 1) : i + 1);
       });
-    }, Promise.resolve()).then(function () {
+    }
+    return step(0).then(function () {
       if (state.reloadPending) { stopNativeVideo(); location.reload(); }
       // Everything was skipped (e.g. only videos that can't load offline): don't spin
       if (!shown) return show({ el: messageSlide('IRMF', 'International Road Movie Festival'), seconds: 20, label: 'nothing to show' });
