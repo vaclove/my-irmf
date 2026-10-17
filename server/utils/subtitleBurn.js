@@ -14,7 +14,8 @@
  *   its usual style (EN grey/smaller, CS white), anchored at the top or the
  *   bottom at an edge chosen in the app so it clears the existing ones; the
  *   picture stays untouched (no crop, centered, same size)
- *   Roboto Medium with a black outline and a soft shadow. Sizes are fractions
+ *   Liberation Sans Bold (Arial-like, the classic cinema subtitle look) with
+ *   a black outline and a soft shadow. Sizes are fractions
  *   of the canvas height, so 1080p and 2160p renders look the same on screen.
  *
  * Canvas: 1920x1080, or 3840x2160 for UHD masters. The picture (with any
@@ -27,11 +28,11 @@
 
 const { parseSubtitles } = require('./subtitles');
 
-const FONT = 'Roboto Medium';
+const FONT = 'Liberation Sans';
 const CS_SIZE = 0.048; // of the canvas height: 52 px at 1080p
 const EN_SIZE = 0.0408; // 85 % of CS: 44 px at 1080p (below 80 % the back rows suffer)
 const SINGLE_SIZE = 0.06; // 65 px at 1080p, when only one language is burned in
-const LINE_HEIGHT = 1.2; // libass line box of Roboto, in font sizes
+const LINE_HEIGHT = 1.2; // libass line box (Liberation Sans: ~1.15), in font sizes
 const MARGIN = 0.035; // from the top/bottom edge
 const MIN_BAND_MARGIN = 0.01; // inside a letterbox band, to keep two lines in it
 const MARGIN_SIDE = 0.07; // of the canvas width
@@ -158,8 +159,9 @@ function letterboxCrop(samples, width, height) {
 const ENTITIES = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&nbsp;': ' ', '&quot;': '"', '&#39;': "'" };
 
 /**
- * SRT/VTT cue text -> ASS text. Keeps <i>/<b>/<u>, drops other markup and
- * any ASS override blocks except a top position ({\an8} and friends).
+ * SRT/VTT cue text -> ASS text. Keeps <i>/<u>, drops <b> (everything is
+ * bold), other markup, and any ASS override blocks except a top position
+ * ({\an8} and friends).
  * @returns {{ass: string, lines: string[], top: boolean}}
  */
 function cueToAss(text) {
@@ -169,7 +171,9 @@ function cueToAss(text) {
     return '';
   });
   t = t.replace(/\{/g, '(').replace(/\}/g, ')');
-  t = t.replace(/<\s*(\/?)\s*([ibu])\s*>/gi, (_, close, tag) => `{\\${tag.toLowerCase()}${close ? 0 : 1}}`);
+  // <b> is dropped: the style is bold already, and a closing {\\b0} would
+  // switch the rest of the cue to the regular weight.
+  t = t.replace(/<\s*(\/?)\s*([iu])\s*>/gi, (_, close, tag) => `{\\${tag.toLowerCase()}${close ? 0 : 1}}`);
   t = t.replace(/<[^>]*>/g, '');
   t = t.replace(/&(amp|lt|gt|nbsp|quot|#39);/g, (e) => ENTITIES[e]);
   const assLines = t
@@ -292,7 +296,8 @@ function assTime(ms) {
 function styleLine(name, size, colour, alignment, marginSide, marginV, m) {
   return (
     `Style: ${name},${FONT},${size},${colour},${colour},${OUTLINE_COLOUR},${SHADOW_COLOUR},` +
-    `0,0,0,0,100,100,0,0,1,${m.outline},${m.shadow},${alignment},${marginSide},${marginSide},${marginV},1`
+    // Bold = -1 (Liberation Sans Bold).
+    `-1,0,0,0,100,100,0,0,1,${m.outline},${m.shadow},${alignment},${marginSide},${marginSide},${marginV},1`
   );
 }
 

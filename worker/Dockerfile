@@ -4,12 +4,12 @@
 FROM node:20-slim
 
 # ffmpeg + ffprobe for transcoding and audio extraction (Debian's ffmpeg has
-# libass for burned-in subtitles; Roboto is their font); pg_dump for DB
+# libass for burned-in subtitles; Liberation Sans Bold is their font); pg_dump for DB
 # backups. Debian bookworm's stock postgresql-client is 15, which cannot dump
 # a newer Azure server, so install a pinned major from apt.postgresql.org
 # (pg_dump 17 handles servers up to 17).
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ffmpeg fonts-roboto-unhinted ca-certificates curl gnupg \
+  && apt-get install -y --no-install-recommends ffmpeg fonts-liberation ca-certificates curl gnupg \
   && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
        | gpg --dearmor -o /usr/share/keyrings/pgdg.gpg \
   && echo "deb [signed-by=/usr/share/keyrings/pgdg.gpg] http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
