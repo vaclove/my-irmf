@@ -15,6 +15,7 @@ const LINE_MIN = 0.015 // a run of text rows: one line (1.5 % of the frame heigh
 const LINE_MAX = 0.22 // up to ~3 touching lines (22 %)
 const MIN_FRAME_SHARE = 0.03 // of sampled frames a row must hold text in (sparse dialogue)
 const MIN_FRAME_HITS = 3
+const BAR_MAX_LUMA = 32 // brightest pixel of a letterbox bar row
 const CLUSTER_GAP = 0.06 // rows closer than this belong to one band (line spacing)
 
 const luma = (d, i) => 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]
@@ -70,6 +71,22 @@ export function textRows(image) {
   }
   flush()
   return rows
+}
+
+/**
+ * Height in rows of a black bar at the top of a frame (a letterbox baked into
+ * the master), or null for a frame that is mostly dark (fades, night).
+ */
+export function topBarRows(image) {
+  const { data, width: w, height: h } = image
+  let rows = 0
+  for (let y = 0; y < h; y++) {
+    let max = 0
+    for (let x = 0; x < w; x += 2) max = Math.max(max, luma(data, (y * w + x) * 4))
+    if (max >= BAR_MAX_LUMA) break
+    rows++
+  }
+  return rows >= h * 0.4 ? null : rows
 }
 
 /**
@@ -131,11 +148,13 @@ export function sampleTimes(duration, cueTimes = [], { even = 60, fromCues = 60 
 }
 
 /**
- * Seek through a video and find its burned-in subtitle band.
+ * Seek through a video and find its burned-in subtitle band and any black
+ * bar at the top.
  * @param {string} url direct (CORS-readable) URL of the preview proxy
  * @param {{cueTimes?: number[], onProgress?: (done: number, total: number) => void}} opts
  *   cueTimes: seconds when the added subtitles are on screen
- * @returns {Promise<{top, bottom, frames, samples, videoWidth, videoHeight}|null>}
+ * @returns {Promise<{band: {top, bottom, frames}|null, topBar: number, samples, videoWidth, videoHeight}>}
+ *   band and topBar as fractions of the frame height
  */
 export async function detectBurnedInSubtitles(url, { cueTimes = [], onProgress } = {}) {
   const video = document.createElement('video')
@@ -169,19 +188,29 @@ export async function detectBurnedInSubtitles(url, { cueTimes = [], onProgress }
   const times = sampleTimes(video.duration, cueTimes)
   const samples = times.length
   const framesRows = []
+  const topBars = []
   try {
     for (let i = 0; i < samples; i++) {
       const seeked = once('seeked')
       video.currentTime = times[i]
       await seeked
       ctx.drawImage(video, 0, 0, width, height)
-      framesRows.push(textRows(ctx.getImageData(0, 0, width, height)))
+      const image = ctx.getImageData(0, 0, width, height)
+      framesRows.push(textRows(image))
+      const bar = topBarRows(image)
+      if (bar != null) topBars.push(bar)
       if (onProgress) onProgress(i + 1, samples)
     }
   } finally {
     video.removeAttribute('src')
     video.load()
   }
-  const band = subtitleBand(framesRows, height)
-  return band && { ...band, samples, videoWidth, videoHeight }
+  return {
+    band: subtitleBand(framesRows, height),
+    // The thinnest bar seen: a scene reaching into it means it is picture.
+    topBar: topBars.length ? Math.min(...topBars) / height : 0,
+    samples,
+    videoWidth,
+    videoHeight,
+  }
 }

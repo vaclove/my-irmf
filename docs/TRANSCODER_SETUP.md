@@ -146,9 +146,13 @@ upload masters straight to Blob Storage through short-lived SAS URLs.
 the picture (Files tab → *Screening export*): a ~60 s preview clip or the full
 movie, 1920x1080 (3840x2160 for 4K masters), H.264 CRF 18 with the original
 audio (AAC/AC-3/E-AC-3/MP3 copied, anything else re-encoded to AAC; preview
-clips re-encode AC-3/E-AC-3 too, as browsers can't play them). The
-worker crops a letterbox baked into the master, pushes a wider-than-16:9
-picture up so the subtitles sit in the black band below it. The output is a
+clips re-encode AC-3/E-AC-3 too, as browsers can't play them). Czech goes
+at the bottom (white), English at the top (85 % size, light grey; the
+position alone tells them apart). The worker crops a letterbox baked into
+the master and centers the picture; with black bands above and below it,
+each language goes into its band when two lines fit (check that the
+projection shows the bands — no masking or zoom). A single language stays at
+the bottom, larger, and pushes the picture up instead. The output is a
 regular MP4 (VLC seeks fragmented MP4 badly: seconds of grey smear after a
 jump), rendered onto an Azure Files scratch volume — a feature film does not
 fit the replica's ~8 GB ephemeral disk — and then uploaded to Blob Storage.
@@ -160,12 +164,14 @@ app-side.
 
 **Masters with subtitles already burned in** (e.g. a foreign film with Czech
 subtitles in the picture): the export dialog's *Subtitles already burned into
-the master* option burns in only the other language, yellow, at a height
-chosen against the movie's preview (`added_position`, bottom edge as a
-fraction of the 16:9 frame). The browser detects the burned-in subtitles in
-frames of the preview proxy (`client/src/utils/burnedInDetect.js`: outlined
-bright text rows, sampled evenly and at the added subtitles' cue times) and
-suggests a place just above them. It reads the proxy straight from Blob
+the master* option burns in only the other language in its usual style, at
+a place chosen against the movie's preview (`added_align` top/bottom and
+`added_position`, that edge as a fraction of the 16:9 frame). The browser
+detects the burned-in subtitles and a black bar at the top in frames of the
+preview proxy (`client/src/utils/burnedInDetect.js`: outlined bright text
+rows, sampled evenly and at the added subtitles' cue times) and suggests
+English at the top (inside the bar when two lines fit) or Czech just above
+the burned-in English. It reads the proxy straight from Blob
 Storage, so the blob CORS rule must allow `GET` from the app origins. Such
 exports keep the picture as it is: no letterbox crop, centered.
 

@@ -3,13 +3,18 @@ import { movieFileApi, subtitleBurnApi } from '../../utils/api'
 import { detectBurnedInSubtitles, pictureInCanvas } from '../../utils/burnedInDetect'
 
 // Mirrors the export look (server/utils/subtitleBurn.js): sizes are fractions
-// of the 16:9 canvas height, the added language is yellow at the CS size.
-const FONT_SIZE = 0.048
+// of the 16:9 canvas height; EN is smaller and light grey, CS white.
+const STYLE = {
+  cs: { size: 0.048, color: '#FFFFFF' },
+  en: { size: 0.0408, color: '#D9D9D9' },
+}
 const LINE_HEIGHT = 1.2
 const OUTLINE = 0.0028
 const SIDE_MARGIN = 0.07
-const MIN_POSITION = 0.12 // low enough for a letterbox bar at the top
-const MAX_POSITION = 0.965 // the export's bottom margin
+const MARGIN = 0.035 // the export's usual distance from the top/bottom edge
+const MIN_BAND_MARGIN = 0.01
+const MIN_EDGE = 0.01
+const MAX_EDGE = 0.99
 const GAP_ABOVE_BURNED_IN = 0.03
 // A detected band shorter than this is one line of text; a second line of
 // burned-in subtitles would then reach about this many line heights higher.
@@ -28,7 +33,12 @@ const SAMPLE_TEXT = {
   en: 'A sample of the added subtitles\non two lines',
 }
 
-const clamp = (v) => Math.min(MAX_POSITION, Math.max(MIN_POSITION, v))
+const clamp = (v) => Math.min(MAX_EDGE, Math.max(MIN_EDGE, v))
+
+/** Default placement of the added language: EN at the top, CS at the bottom. */
+export function defaultPlacement(lang) {
+  return lang === 'en' ? { align: 'top', edge: MARGIN } : { align: 'bottom', edge: 1 - MARGIN }
+}
 
 function formatTime(sec) {
   const t = Math.max(0, Math.floor(sec || 0))
@@ -49,11 +59,14 @@ function plainText(text) {
 /**
  * Place subtitles added to a master that already has some burned in: the
  * movie's preview in the export's 16:9 frame, with the added subtitles drawn
- * over it at `position` (their bottom edge, as a fraction of the frame
- * height). Drag the subtitles to move them; "Detect" finds the burned-in ones
- * in the preview and puts the added ones just above them.
+ * over it. `placement` is {align: 'top'|'bottom', edge}: the block's top or
+ * bottom edge as a fraction of the frame height (top-anchored blocks grow
+ * down, bottom-anchored ones up). Drag the subtitles to move them. "Detect"
+ * finds the burned-in ones and a black bar at the top in the preview: EN goes
+ * to the top (inside the bar when two lines fit), CS just above the
+ * burned-in subtitles.
  */
-function BurnedInPositioner({ movieId, subtitleKind, position, onChange, autoDetect }) {
+function BurnedInPositioner({ movieId, subtitleKind, placement, onChange, autoDetect }) {
   const boxRef = useRef(null)
   const videoRef = useRef(null)
   const drag = useRef(null)
@@ -70,6 +83,8 @@ function BurnedInPositioner({ movieId, subtitleKind, position, onChange, autoDet
   const autoRan = useRef(false)
 
   const lang = CUES_LANG[subtitleKind]?.slice(0, 2) || 'cs'
+  const style = STYLE[lang]
+  const block = 2 * style.size * LINE_HEIGHT // two lines, in canvas fractions
 
   // Preview source: a direct blob URL (pixels readable for detection), else
   // the app's stream URL (playable, no detection).
@@ -130,37 +145,44 @@ function BurnedInPositioner({ movieId, subtitleKind, position, onChange, autoDet
     setMessage(null)
     setDetecting(0)
     try {
-      const band = await detectBurnedInSubtitles(source.url, {
+      const result = await detectBurnedInSubtitles(source.url, {
         cueTimes: cues.filter((c) => c.startMs != null).map((c) => (c.startMs + c.endMs) / 2000),
         onProgress: (done, total) => setDetecting(done / total),
       })
-      if (!band) {
-        setDetected(null)
-        setMessage('No burned-in subtitles found in the preview. Place the subtitles by hand.')
-        return
+      const pic = pictureInCanvas(result.videoWidth, result.videoHeight)
+      const { band } = result
+      let found = null
+      if (band) {
+        let top = pic.top + band.top * pic.height
+        const bottom = pic.top + band.bottom * pic.height
+        // Only one line found: leave room for a second one above it.
+        const lineHeight = bottom - top
+        if (lineHeight < SINGLE_LINE_MAX) top -= lineHeight * SECOND_LINE
+        found = { top, bottom }
       }
-      const pic = pictureInCanvas(band.videoWidth, band.videoHeight)
-      let top = pic.top + band.top * pic.height
-      const bottom = pic.top + band.bottom * pic.height
-      // Only one line found: leave room for a second one above it.
-      const lineHeight = bottom - top
-      if (lineHeight < SINGLE_LINE_MAX) top -= lineHeight * SECOND_LINE
-      setDetected({ top, bottom })
-      // Below the picture when the black band there holds two lines,
-      // otherwise just above the burned-in subtitles.
-      const bandBelow = 1 - (pic.top + pic.height)
-      const twoLines = 2 * FONT_SIZE * LINE_HEIGHT + (1 - MAX_POSITION)
-      onChange(clamp(bandBelow >= twoLines && bottom <= pic.top + pic.height ? MAX_POSITION : top - GAP_ABOVE_BURNED_IN))
+      setDetected(found)
+
+      if (lang === 'en') {
+        // Top; inside a black bar there (letterbox outside or inside the
+        // master) when two lines fit, as the export does.
+        const topBand = pic.top + result.topBar * pic.height
+        const edge = topBand >= block + MIN_BAND_MARGIN ? Math.min(MARGIN, topBand - block) : MARGIN
+        onChange({ align: 'top', edge: clamp(edge) })
+      } else if (found) {
+        onChange({ align: 'bottom', edge: clamp(found.top - GAP_ABOVE_BURNED_IN) })
+      }
       setMessage(
-        `Burned-in subtitles found in ${band.frames} of ${band.samples} sampled frames (marked red). ` +
-          'Check a few moments with two-line subtitles and drag to adjust.'
+        band
+          ? `Burned-in subtitles found in ${band.frames} of ${result.samples} sampled frames (marked red). ` +
+              'Check a few moments with two-line subtitles and drag to adjust.'
+          : 'No burned-in subtitles found in the preview. Check the placement by hand.'
       )
     } catch (error) {
       setMessage('Detection failed: ' + error.message)
     } finally {
       setDetecting(null)
     }
-  }, [source, cues, onChange])
+  }, [source, cues, lang, block, onChange])
 
   useEffect(() => {
     if (autoDetect && source?.direct && cuesLoaded && !autoRan.current) {
@@ -172,14 +194,17 @@ function BurnedInPositioner({ movieId, subtitleKind, position, onChange, autoDet
   const onPointerDown = (e) => {
     e.preventDefault()
     e.currentTarget.setPointerCapture(e.pointerId)
-    drag.current = { y: e.clientY, position }
+    drag.current = { y: e.clientY, edge: placement.edge }
   }
   const onPointerMove = (e) => {
     if (!drag.current || !boxHeight) return
-    onChange(clamp(drag.current.position + (e.clientY - drag.current.y) / boxHeight))
+    onChange({ ...placement, edge: clamp(drag.current.edge + (e.clientY - drag.current.y) / boxHeight) })
   }
   const onPointerUp = () => {
     drag.current = null
+  }
+  const setAlign = (align) => {
+    if (align !== placement.align) onChange({ align, edge: align === 'top' ? MARGIN : 1 - MARGIN })
   }
 
   const togglePlay = () => {
@@ -195,13 +220,13 @@ function BurnedInPositioner({ movieId, subtitleKind, position, onChange, autoDet
   const ms = time * 1000
   const active = cues.filter((c) => c.startMs != null && c.startMs <= ms && ms < c.endMs)
   const text = active.length ? active.map((c) => plainText(c.text)).join('\n') : SAMPLE_TEXT[lang]
-  const fontPx = boxHeight * FONT_SIZE
   const o = Math.max(1, Math.round(boxHeight * OUTLINE))
   const outline = [
     [-o, -o], [0, -o], [o, -o], [-o, 0], [o, 0], [-o, o], [0, o], [o, o],
   ]
     .map(([x, y]) => `${x}px ${y}px 0 #000`)
     .join(', ')
+  const top = placement.align === 'top'
 
   return (
     <div className="space-y-2">
@@ -232,14 +257,14 @@ function BurnedInPositioner({ movieId, subtitleKind, position, onChange, autoDet
           style={{
             left: `${SIDE_MARGIN * 100}%`,
             right: `${SIDE_MARGIN * 100}%`,
-            bottom: `${(1 - position) * 100}%`,
-            fontSize: `${fontPx}px`,
+            ...(top ? { top: `${placement.edge * 100}%` } : { bottom: `${(1 - placement.edge) * 100}%` }),
+            fontSize: `${boxHeight * style.size}px`,
             lineHeight: LINE_HEIGHT,
             fontFamily: 'Roboto, "Helvetica Neue", Arial, sans-serif',
             fontWeight: 500,
-            color: '#FFE680',
+            color: style.color,
             textShadow: outline,
-            borderBottom: '1px dashed rgba(255, 230, 128, 0.7)',
+            [top ? 'borderTop' : 'borderBottom']: '1px dashed rgba(255, 255, 255, 0.6)',
           }}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
@@ -273,6 +298,18 @@ function BurnedInPositioner({ movieId, subtitleKind, position, onChange, autoDet
           className="flex-1"
         />
         <span className="tabular-nums text-gray-600">{formatTime(time)}</span>
+        <div className="inline-flex rounded-md border border-gray-300 overflow-hidden">
+          {['top', 'bottom'].map((align) => (
+            <button
+              key={align}
+              type="button"
+              onClick={() => setAlign(align)}
+              className={`px-2 py-1 ${placement.align === align ? 'bg-gray-200 font-medium' : 'hover:bg-gray-50'}`}
+            >
+              {align === 'top' ? 'Top' : 'Bottom'}
+            </button>
+          ))}
+        </div>
         <button
           type="button"
           onClick={detect}
@@ -284,8 +321,8 @@ function BurnedInPositioner({ movieId, subtitleKind, position, onChange, autoDet
         </button>
       </div>
       <div className="text-xs text-gray-500">
-        Drag the yellow subtitles above (or below) the burned-in ones. Bottom edge at{' '}
-        {Math.round(position * 100)} % of the frame height.
+        Drag the added subtitles clear of the burned-in ones. {top ? 'Top' : 'Bottom'} edge at{' '}
+        {Math.round(placement.edge * 100)} % of the frame height; {top ? 'longer subtitles grow downwards' : 'longer subtitles grow upwards'}.
         {message && <span className="block mt-1 text-gray-700">{message}</span>}
       </div>
     </div>

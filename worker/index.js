@@ -1182,7 +1182,7 @@ async function processBurnJob(jobId, dequeueCount) {
       offsetMs: startMs,
       lengthMs,
       title: movie.name_cs || movie.name_en || '',
-      addedPosition: overBurnedIn ? Number(job.added_position) : null,
+      added: overBurnedIn ? { align: job.added_align || 'bottom', edge: Number(job.added_position) } : null,
     });
     fs.writeFileSync(assPath, ass.script, 'utf8');
 
