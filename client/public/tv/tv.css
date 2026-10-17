@@ -64,18 +64,6 @@ html, body {
   will-change: opacity;
 }
 .slide.visible { opacity: 1; }
-.progress {
-  position: absolute;
-  left: 0;
-  bottom: 0;
-  width: 100%;
-  height: 4px;
-  background: rgba(191, 222, 84, 0.35);
-  transform-origin: 0 0;
-  transform: scaleX(0);
-}
-.slide.visible .progress { animation: progress linear forwards; } /* duration set per slide */
-@keyframes progress { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 
 .eyebrow {
   color: var(--lime);
