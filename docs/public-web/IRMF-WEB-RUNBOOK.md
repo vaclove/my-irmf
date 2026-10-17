@@ -243,40 +243,31 @@ grep -rn "'default'  => '#FF2D55'" wp-content/themes/grandconference/lib/customi
 The setting key is the nearest preceding `'settings'  => 'tg_xxx'` line (note: this theme uses a
 `$controls[]` array, **not** `add_setting()`).
 
-### Genre badge colours — deliberately NOT part of the brand palette
+### Film section colours — updated 2026-10-13
 
-The film-genre badges are a separate semantic system, **owned separately — ask before touching.**
-They are hardcoded in *three* places that override each other:
+User-approved palette from the print legend, applied to both sites and the **2026**
+edition's section configuration in My IRMF:
 
-- `grandconference-child-cz/style.css` (`:root`)
-- `MoviesList.php`, `MoviesSchedule.php` (inline `<style>`, these win on `/movies` and `/program`)
-- `MoviesPage.php` (inline `<style>`, wins on `/movie`)
-
-Current values in `MoviesList.php` / `MoviesSchedule.php`:
-```
---movie-color-feature:       #574752
---movie-color-short:         #F9EE60   <- still the retired 2025 yellow
---movie-color-documentary:   #71832F
---movie-color-retrospective: #51A9A6
---movie-color-discussion:    #F3C09F
---movie-color-special:       #E73E3A
---movie-color-accompanying:  #D6CEE8
-```
-
-**The constraint if these are ever remapped:** badges are a coloured background with text on top.
-Only three palette colours (`#3B5E7A`, `#332E2E`, `#7A64D8`) pass AA with *white* text, so a
-7-genre mapping must set the text colour per genre. This mapping was worked out and verified —
-all seven pass AA — but is **not applied**:
-
-| Genre | Background | Text | Ratio |
+| Section key | Label | Background | Badge text |
 |---|---|---|---|
-| feature | `#3B5E7A` slate blue | white | 6.84:1 |
-| documentary | `#A3C2B0` mint | `#332E2E` | 6.94:1 |
-| short | `#BFDE54` lime | `#332E2E` | 8.78:1 |
-| retrospective | `#63A3D2` light blue | `#332E2E` | 4.90:1 |
-| discussion | `#F0B5CF` pink | `#332E2E` | 7.78:1 |
-| special | `#7A64D8` purple | white | 4.52:1 |
-| accompanying | `#A19C8C` warm grey | `#332E2E` | 4.87:1 |
+| student | Studentské filmy / Student Films | `#0094BB` | `#1A1A1A` |
+| short | Krátké filmy / Short Films | `#81CCB6` | `#1A1A1A` |
+| documentary | Dokumentární filmy / Documentary Films | `#6B6EB3` | white |
+| be_equal | BE EQUAL! | `#EEAEC8` | `#1A1A1A` |
+| special | Speciální projekce / Special Screenings | `#C7DB4E` | `#1A1A1A` |
+| accompanying | Doprovodný program / Accompanying Programme | `#DFDCCE` | `#1A1A1A` |
+
+Public-site definitions live in **all four** files in each child theme:
+`style.css`, `MoviesList.php`, `MoviesSchedule.php`, `MoviesPage.php`.
+The inline template styles override the stylesheet. The new `student` and `be_equal`
+keys have CZ/EN translations, badge styles, and catalogue filters (hidden until films
+are assigned). Movie detail currently displays the section as plain text.
+Other section colours retain their previous values.
+
+The backend uses per-edition rows in `sections`; no backend code deployment was needed.
+Added active `student` and `be_equal` rows for 2026 and updated the four existing colours.
+Film assignments were not changed. Older editions' DB rows and new-edition defaults were
+not changed; the public templates' CSS palette is shared across archive pages.
 
 ---
 
@@ -293,7 +284,7 @@ all seven pass AA — but is **not applied**:
 | Média / press | page **3517** |
 | Program (schedule) | page **3467** → `MoviesSchedule.php` |
 | Movies list | page **2642** → `MoviesList.php` |
-| Single movie | page **2551** → `MoviesPage.php` |
+| Single movie | page **2551** → `MoviesPage.php` (`/katalog/<year>/<slug>/`, §16) |
 | 2026 hero image | attachment **8526**, `/uploads/2026/08/hero-banner-2026.jpg` (1200×980) |
 
 Find things without guessing:
@@ -338,6 +329,15 @@ Two bugs were found and fixed here; both will recur if the widget is rebuilt:
    binding order and Sina binds during Elementor's frontend init — i.e. after DOM ready.** Binding
    once up front puts you *first* and Sina overwrites you; re-attaching moves you back to the end
    of the queue so you always run last.
+
+   **Replaced 2026-10-14.** The re-binding trick still let Sina's value flash: the server HTML says
+   „00", Sina then writes its own „07", and only then did our handler run. Now `irmf_countdown_total_days`
+   computes the total itself from the widget's `data-time` (visitor's local time, like Sina) and
+   prints it **without a leading zero** („7"). A MutationObserver on `.sina-cd-day` corrects every
+   write by Sina before the next paint, and `irmf-layout/layout.css` (§18) keeps the number
+   `visibility: hidden` until the script adds `.irmf-ready`; without JS it shows after 3 s.
+   Previous versions: `~/backups/functions-pre-countdown-digits-20261014.php` (padded „07"),
+   `~/backups/functions-pre-countdown-observer-20261014.php` (unpadded, but flashing).
 
 Labels ("Days") only render when `text_state == 'yes'`; it is empty here, which is what the design
 wants — the heading already says "Dní do festivalu".
@@ -947,3 +947,154 @@ synopsis next to the still.
 Backups of the previous templates on both accounts: `~/backups/MoviesSchedule-pre-all-day-20261013.php`,
 `~/backups/MoviesPage-pre-all-day-20261013.php`, then `MoviesPage-pre-accompanying-details-20261013.php`
 and `MoviesSchedule-pre-no-allday-heading-20261013.php`.
+
+### 2026-10-13 — Festival guide venues (CZ + EN)
+
+Updated the food recommendations in CZ page **3947**, widget `fa61bf1`, and EN page
+**3888**, widget `5c48a35`: replaced Le Frenchie with **Kafe Smetanka / BRÁNA espresso bar**
+(one list item, separate links) and added **Trafika espresso bar**. Fred and Salzmanni were
+already absent. Other venues remain, including both Da Pietro locations. The print-only
+pairing was not applied to the web list. Changed “in Pilsen city centre” / “V centru města
+Plzně” to “in Pilsen” / “V Plzni” to cover the new locations.
+
+Full DB backups on each account: `~/backups/guide-venues-20261013.sql.gz` (gzip verified).
+Original Elementor data: CZ `~/backups/guide-3947-elementor-20261013-174948.json`,
+EN `~/backups/guide-3888-elementor-20261013-174949.json`. The dry-run/apply script is
+`~/tmp/irmf-update-guide.php` on both accounts. Elementor structure counts and write readback
+passed; caches cleared; both public pages' rendered text and venue links verified in browser.
+
+
+### 2026-10-13 — Section palette and guide spacing
+
+Applied the §5 film-section palette and new-section support on both public websites.
+Original four theme files are in `~/backups/film-colors-20261013.tar.gz` on each account.
+Staged updated files: `~/tmp/section-colors-20261013/`. Child theme stylesheet version
+incremented to 3.13. PHP lint passed on all six templates; caches cleared. Browser checks
+confirmed catalogue and schedule badge colours in CZ/EN, new-section CSS and translations,
+and working movie details.
+
+2026 backend section rows were updated transactionally through Azure Kudu using the app's
+configured database connection. Original rows are backed up at
+`/home/data/irmf-section-backups/sections-2026-2026-10-13T17-54-21-295Z.json`.
+Dry run rolled back before the real transaction; persisted colours verified after commit.
+
+Guide accommodation heading now has **32px top padding**: CZ widget `b72fe0e`,
+EN `5f019a0`. Verified computed padding and list-to-heading gap at 390px mobile width,
+without horizontal overflow. Pre-spacing Elementor backups:
+CZ `~/backups/guide-3947-elementor-20261013-175321.json`,
+EN `~/backups/guide-3888-elementor-20261013-175323.json`.
+
+### 2026-10-13 — Mobile ticket-button arrow spacing
+
+Both `MoviesSchedule.php` templates retain `display: flex` on full-width mobile ticket
+buttons. The previous mobile `display: block` disabled the existing 8px gap between
+the text and the `::after` arrow. PHP lint passed and caches cleared.
+Backup on each account: `~/backups/MoviesSchedule-pre-ticket-spacing-20261013.php`.
+
+## 16. SEO film URLs (2026-10-14)
+
+Film detail moved from `/movie/<uuid>/` to **`/katalog/<edition year>/<slug>/`** (CZ) and
+**`/catalogue/<edition year>/<slug>/`** (EN), e.g. `irmf.cz/katalog/2026/drobna-nehoda/` and
+`irmf.net/catalogue/2026/it-was-just-an-accident/`.
+
+- **Slugs live in my.irmf.cz** (`movies.slug_cs` / `slug_en`, migration 063, unique per edition),
+  editable in the admin film form under "Public URL". Generated from the title on creation and
+  **not changed by a rename** — changing a slug by hand breaks the old link (no redirect is kept).
+- API: `GET /api/public/movies/by-slug/<year>/<slug>?lang=cs|en`. The film list, programme
+  (`movie_paths`, block films' `paths`) and detail (`paths`) return ready-made paths — the
+  templates no longer build film URLs themselves.
+- Rewrite `irmf_catalogue_rewrite` in each child `functions.php` → page 2551 with query vars
+  `catalogue_year` + `catalogue_slug`. After touching it run `wp rewrite flush`.
+- `MoviesPage.php` fetches the film server-side (transient `irmf_movie_head2_*`), sets canonical/
+  `og:url` to the new URL, **301-redirects** `/movie/<id>/` and non-canonical spellings (no
+  trailing slash, uppercase) there, and answers **404** for an unknown slug.
+- Old `/movie/<uuid>/` links in page content (e.g. EN Awards pages) keep working via the 301.
+- Backups: CZ `~/backups/irmf-db-pre-slugs-20261014-2112.sql.gz` +
+  `child-theme-cz-pre-slugs-20261014-2112.tar.gz`; EN `~/backups/irmf-net-db-pre-slugs-20261014-2112.sql.gz` +
+  `child-theme-en-pre-slugs-20261014-2112.tar.gz`.
+
+## 17. Programme strip above the footer (2026-10-14)
+
+Every page now has a programme promo between the content and the footer: the **homepage**
+shows a black "departures board" („Příští odjezdy" / "Next departures"), **every other page** an
+endless band of film cards („Na plátně" / "On screen"). The **programme page (3467)** has
+none, because it would only repeat itself. On a film detail page, that film is left out.
+
+Files, identical on both sites, in the child theme's `irmf-strip/` folder:
+- `irmf-strip.php`: included from the end of `functions.php`. On the `get_footer` hook (fires
+  right before `footer.php` prints `<div id="footer">`), it prints an empty
+  `<section id="irmf-strip" hidden>` with `data-variant` (`board`/`band`), `data-lang` (from
+  `get_locale()`) and the programme-page URL. No Elementor change: the footer post 2444 is untouched.
+- `strip.js`: fetches `/api/public/editions` → newest year → `/api/public/programming`, cached
+  10 min in `sessionStorage`. It runs in the browser, so WP Fastest Cache never holds stale
+  screenings. Blocks are split into one card per film; a multi-day all-day event is one card.
+  Only entries that have not ended are shown; times are Prague time. Live labels
+  („Právě běží", „Za 15 min", „Dnes", „Zítra") refresh every minute. **Nothing to show (no programme
+  yet, festival over, API down) → the section stays hidden.** Links use `movie_paths` (§16).
+- `strip.css`: everything scoped under `.irmf-strip`, IRMFont 400 only. **The box copies the theme's
+  `#page_content_wrapper`, not the footer**: 960px; from 1200px wide, 90px side padding up to
+  1425px; up to 960px, 30px padding. The 1140px Elementor cap sits inside (`.irs-inner`), so the strip
+  lines up with the page content at every width. The footer is a different box: under ~1320px its
+  columns are wider than the content (newsletter card sticks out ~27px). That is pre-existing and
+  left alone: a fixed margin on the card would break the wide-screen alignment.
+  Section colours are duplicated here: update them together with §5.
+
+Behaviour: the band pauses on hover/focus and can be swiped on touch, dragged with the mouse or moved
+one card at a time with the ‹ › arrows (hidden on mobile, where swiping is enough). The board advances
+one row every 3.5 s, pauses on hover and has ▲ ▼ arrows; the mouse wheel over the rows steps one row
+(deltas summed, max one step per 300 ms; the wheel anywhere else scrolls the page as usual). After an arrow click, autoplay waits 5 s (band)
+or 8 s (board). The band's arrows use their own animation, because `scrollBy({behavior:'smooth'})`
+does nothing on this element. `prefers-reduced-motion` turns autoplay off; arrows still work.
+The board shows the location („Plzeň – Jižní Předměstí"), not the current date and time.
+To see it as it will look during the festival, add `?irmf_strip_now=2026-10-23T16:45` to any URL.
+
+Annual rollover: nothing to do. It picks up the newest edition by itself and stays hidden
+until that edition has a programme. To remove it, delete the `require_once` line at the end
+of `functions.php`.
+
+Backups of both child themes before the change: `~/backups/child-theme-pre-strip-20261014-2118.tar.gz`.
+
+**The irmf.net `style.css` trap:** the EN child stylesheet is enqueued by the parent theme as
+`style.css?ver=<WordPress version>`, so bumping `Version:` in its header changes nothing. Edits to it reach
+returning visitors only after a WordPress update (cache max-age is a year). Put EN CSS changes in a
+file versioned by `filemtime`, like `strip.css`. (A short-lived newsletter rule in `style.css` on
+both sites was reverted for this reason; both are back to `Version: 3.13`, identical to
+`~/backups/style-pre-newsletter-edge-20261014.css`.)
+
+## 18. Guide: pop-up gastro zone dropped (2026-10-14)
+
+There is no pop-up gastro zone this year, only the café. CZ guide **3947**, widget `fa61bf1`
+(and the `post_content` fallback): removed „Předsálí festivalu se promění každý den od 18 do 22h
+v pop-up gastro zónu." and reworded the next sentence to „Po celou dobu trvání festivalu bude otevřena
+kavárna v Moving Station pro drinky a drobné občerstvení." The EN guide (3888) never mentioned the gastro zone, so
+it is unchanged. Backups: `~/backups/guide-3947-elementor-20261014-194017.json` and
+`guide-3947-content-20261014-194017.html`. Pre-rewording backups use
+timestamp `20261014-194236`. Scripts: `~/tmp/irmf-remove-gastro.php`, `~/tmp/irmf-reword-cafe.php`.
+
+## 18. Phone spacing under the header + centred hero title (2026-10-14)
+
+On phones (≤ 767px) every page had 80px of empty space between the fixed header and the first content,
+160px on the homepage. That is desktop spacing nobody had overridden for mobile: the first Elementor
+section has 80px top padding (homepage hero: 100px margin + 60px padding), and the templates
+copy it: `.schedule-container` (MoviesSchedule.php) and `.movie-header` (MoviesPage.php) have 80px
+(EN film detail 40px). Now it is **30px everywhere** on both sites. Desktop is unchanged.
+
+Files, identical on both sites, in the child theme's `irmf-layout/` folder, included from the end of `functions.php`:
+- `layout.css` (versioned by `filemtime`, loaded on every page):
+  - first top section of every Elementor page (`#page_content_wrapper .elementor > .elementor-top-section:first-of-type`):
+    `margin-top: 0; padding-top: 30px`. The id beats Elementor's per-element rules, so no page had to be
+    edited in Elementor. **A new page gets this too**; to give one page more room on phones, set it in
+    Elementor and add `!important`, or exclude the page here.
+  - programme: `body .schedule-container { padding-top: 30px }` (`body` beats the template's later inline `<style>`).
+  - homepage hero title (widget `1373666`, same id on both sites) centred like the lines under it.
+    Needs `!important`, because the Customizer's Additional CSS has a global
+    `h1.elementor-heading-title { text-align: left !important; … }`.
+- `irmf-layout.php`: enqueues the CSS and prints a small script in `wp_footer` that keeps `#wrapper`'s
+  top padding equal to the fixed header's height on phones (ResizeObserver). The theme (`custom.js`) measures it only
+  at DOM ready + 200 ms + 1 s; if the header is still growing then (font, logo), the page top hides under it.
+  With 80px of slack nobody noticed; with 30px it would show.
+- Film detail: `MoviesPage.php` has a `@media (max-width: 767px) { .movie-header { padding-top: 10px } }`
+  (+ 20px container padding = 30px).
+
+Backups: `~/backups/MoviesPage-pre-mobile-top-gap-20261014.php` (before the film detail change),
+`~/backups/functions-pre-layout-20261014.php`, `~/backups/MoviesPage-pre-layout-20261014.php` on both accounts.
