@@ -9,7 +9,7 @@
  *   EN  top, light grey (85 % white), 85 % of the CS size: it keeps out of
  *       the way of the Czech audience and the position alone tells the
  *       languages apart (no colour, and italics keep their own meaning)
- *   one language only: bottom, white and larger
+ *   one language only: bottom, white, the CS size
  *   added to a master with subtitles already burned in: the new language in
  *   its usual style (EN grey/smaller, CS white), anchored at the top or the
  *   bottom at an edge chosen in the app so it clears the existing ones; the
@@ -33,7 +33,6 @@ const { parseSubtitles } = require('./subtitles');
 const FONT = 'Liberation Sans';
 const CS_SIZE = 0.059; // of the canvas height: 64 px at 1080p, the size of distributor subtitles
 const EN_SIZE = 0.0502; // 85 % of CS: 54 px at 1080p (below 80 % the back rows suffer)
-const SINGLE_SIZE = 0.065; // 70 px at 1080p, when only one language is burned in
 const LINE_HEIGHT = 1.2; // libass line box (Liberation Sans: ~1.15), in font sizes
 const MARGIN = 0.035; // from the top/bottom edge
 const MIN_BAND_MARGIN = 0.01; // inside a letterbox band, to keep two lines in it
@@ -52,17 +51,15 @@ const MAX_LINE_CHARS = 42;
 
 const even = (n) => Math.max(2, Math.round(n / 2) * 2);
 
-/** Font sizes and spacing in canvas pixels; `single` = one language only. */
-function metrics(canvasHeight, { single = false } = {}) {
+/** Font sizes and spacing in canvas pixels. */
+function metrics(canvasHeight) {
   const H = canvasHeight;
-  const singleSize = Math.round(H * SINGLE_SIZE);
   const csSize = Math.round(H * CS_SIZE);
   const enSize = Math.round(H * EN_SIZE);
   const margin = Math.round(H * MARGIN);
   return {
     csSize,
     enSize,
-    singleSize,
     margin,
     minMargin: Math.round(H * MIN_BAND_MARGIN),
     outline: Math.round(H * OUTLINE * 10) / 10,
@@ -72,7 +69,7 @@ function metrics(canvasHeight, { single = false } = {}) {
     csBlock: Math.ceil(2 * csSize * LINE_HEIGHT),
     enBlock: Math.ceil(2 * enSize * LINE_HEIGHT),
     // Room below the picture a single language wants.
-    blockHeight: Math.ceil(margin + 2 * (single ? singleSize : csSize) * LINE_HEIGHT),
+    blockHeight: Math.ceil(margin + 2 * csSize * LINE_HEIGHT),
   };
 }
 
@@ -97,7 +94,7 @@ function computeLayout({ width, height, sar = 1, crop = null, single = false, ce
   const uhd = width > 2560 || height > 1440;
   const W = uhd ? 3840 : 1920;
   const H = uhd ? 2160 : 1080;
-  const m = metrics(H, { single });
+  const m = metrics(H);
   const srcW = (crop ? crop.w : width) * (sar > 0 ? sar : 1);
   const srcH = crop ? crop.h : height;
   const scale = Math.min(W / srcW, H / srcH);
@@ -340,7 +337,7 @@ function buildAss({ cs = [], en = [], layout, offsetMs = 0, lengthMs = null, tit
   let csStyle = [m.csSize, CS_COLOUR, 2, layout.margins.cs];
   let enStyle = [m.enSize, EN_COLOUR, 8, layout.margins.en];
   if (mode === 'single') {
-    csStyle = enStyle = [m.singleSize, CS_COLOUR, 2, layout.margins.cs];
+    csStyle = enStyle = [m.csSize, CS_COLOUR, 2, layout.margins.cs];
   } else if (mode === 'added') {
     const edge = Math.min(1, Math.max(0, Number(added.edge)));
     const top = added.align === 'top';
