@@ -31,9 +31,9 @@
 const { parseSubtitles } = require('./subtitles');
 
 const FONT = 'Liberation Sans';
-const CS_SIZE = 0.048; // of the canvas height: 52 px at 1080p
-const EN_SIZE = 0.0408; // 85 % of CS: 44 px at 1080p (below 80 % the back rows suffer)
-const SINGLE_SIZE = 0.06; // 65 px at 1080p, when only one language is burned in
+const CS_SIZE = 0.059; // of the canvas height: 64 px at 1080p, the size of distributor subtitles
+const EN_SIZE = 0.0502; // 85 % of CS: 54 px at 1080p (below 80 % the back rows suffer)
+const SINGLE_SIZE = 0.065; // 70 px at 1080p, when only one language is burned in
 const LINE_HEIGHT = 1.2; // libass line box (Liberation Sans: ~1.15), in font sizes
 const MARGIN = 0.035; // from the top/bottom edge
 const MIN_BAND_MARGIN = 0.01; // inside a letterbox band, to keep two lines in it

@@ -1,6 +1,6 @@
 {
   "name": "my-irmf-transcode-worker",
-  "version": "1.5.2",
+  "version": "1.5.3",
   "private": true,
   "description": "Out-of-process movie worker (Azure Container Apps Job): preview transcodes, subtitle sync, burned-in subtitle exports, Drive<->Azure file transfers and DB backups, driven by a storage queue.",
   "main": "index.js",

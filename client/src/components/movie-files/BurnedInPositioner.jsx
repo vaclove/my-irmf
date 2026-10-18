@@ -5,8 +5,8 @@ import { detectBurnedInSubtitles, pictureInCanvas } from '../../utils/burnedInDe
 // Mirrors the export look (server/utils/subtitleBurn.js): sizes are fractions
 // of the 16:9 canvas height; EN is smaller and light grey, CS white.
 const STYLE = {
-  cs: { size: 0.048, color: '#FFFFFF' },
-  en: { size: 0.0408, color: '#D9D9D9' },
+  cs: { size: 0.059, color: '#FFFFFF' },
+  en: { size: 0.0502, color: '#D9D9D9' },
 }
 const LINE_HEIGHT = 1.2
 const OUTLINE = 0.0014
