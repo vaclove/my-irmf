@@ -39,7 +39,7 @@ function layoutText(check, existingLang) {
   if (check.layout === 'dual') {
     return 'Czech at the bottom (white), English at the top (smaller, light grey). With black bars above and below the picture, each goes into its bar.'
   }
-  return 'One language only: larger white subtitles at the bottom.'
+  return 'One language only: white subtitles at the bottom.'
 }
 
 /**
