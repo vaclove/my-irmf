@@ -160,8 +160,9 @@ function letterboxCrop(samples, width, height) {
 const ENTITIES = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&nbsp;': ' ', '&quot;': '"', '&#39;': "'" };
 
 /**
- * SRT/VTT cue text -> ASS text. Keeps <b>/<i>/<u>, drops other markup and
- * any ASS override blocks except a top position ({\an8} and friends).
+ * SRT/VTT cue text -> ASS text. Keeps <i>/<u>, drops <b> (many subtitle
+ * files wrap every cue in it; one weight for all), other markup, and any ASS
+ * override blocks except a top position ({\an8} and friends).
  * @returns {{ass: string, lines: string[], top: boolean}}
  */
 function cueToAss(text) {
@@ -171,7 +172,7 @@ function cueToAss(text) {
     return '';
   });
   t = t.replace(/\{/g, '(').replace(/\}/g, ')');
-  t = t.replace(/<\s*(\/?)\s*([biu])\s*>/gi, (_, close, tag) => `{\\${tag.toLowerCase()}${close ? 0 : 1}}`);
+  t = t.replace(/<\s*(\/?)\s*([iu])\s*>/gi, (_, close, tag) => `{\\${tag.toLowerCase()}${close ? 0 : 1}}`);
   t = t.replace(/<[^>]*>/g, '');
   t = t.replace(/&(amp|lt|gt|nbsp|quot|#39);/g, (e) => ENTITIES[e]);
   const assLines = t
