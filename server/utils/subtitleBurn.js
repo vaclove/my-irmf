@@ -14,9 +14,11 @@
  *   its usual style (EN grey/smaller, CS white), anchored at the top or the
  *   bottom at an edge chosen in the app so it clears the existing ones; the
  *   picture stays untouched (no crop, centered, same size)
- *   Liberation Sans Bold (Arial-like, the classic cinema subtitle look) with
- *   a black outline and a soft shadow. Sizes are fractions
- *   of the canvas height, so 1080p and 2160p renders look the same on screen.
+ *   Liberation Sans regular (Arial-like, the classic cinema subtitle look)
+ *   with a thin black outline and a faint, blurred shadow — the light look
+ *   of distributor subtitles rather than a heavy dark rim. Sizes are
+ *   fractions of the canvas height, so 1080p and 2160p renders look the same
+ *   on screen.
  *
  * Canvas: 1920x1080, or 3840x2160 for UHD masters. The picture (with any
  * letterbox baked into the master cropped away) is scaled to fit and
@@ -36,13 +38,14 @@ const LINE_HEIGHT = 1.2; // libass line box (Liberation Sans: ~1.15), in font si
 const MARGIN = 0.035; // from the top/bottom edge
 const MIN_BAND_MARGIN = 0.01; // inside a letterbox band, to keep two lines in it
 const MARGIN_SIDE = 0.07; // of the canvas width
-const OUTLINE = 0.0028;
+const OUTLINE = 0.0014; // 1.5 px at 1080p
 const SHADOW = 0.0014;
+const BLUR = 0.00055; // softens the outline and shadow edges, not the letters
 // ASS colours are &HAABBGGRR.
 const CS_COLOUR = '&H00FFFFFF'; // white
 const EN_COLOUR = '&H00D9D9D9'; // 85 % white
 const OUTLINE_COLOUR = '&H00000000';
-const SHADOW_COLOUR = '&H80000000';
+const SHADOW_COLOUR = '&HA0000000'; // black, ~37 % opaque
 
 const PAIR_TOLERANCE_MS = 250;
 const MAX_LINE_CHARS = 42;
@@ -64,6 +67,7 @@ function metrics(canvasHeight, { single = false } = {}) {
     minMargin: Math.round(H * MIN_BAND_MARGIN),
     outline: Math.round(H * OUTLINE * 10) / 10,
     shadow: Math.round(H * SHADOW * 10) / 10,
+    blur: Math.round(H * BLUR * 10) / 10,
     // Two lines of each language.
     csBlock: Math.ceil(2 * csSize * LINE_HEIGHT),
     enBlock: Math.ceil(2 * enSize * LINE_HEIGHT),
@@ -159,9 +163,8 @@ function letterboxCrop(samples, width, height) {
 const ENTITIES = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&nbsp;': ' ', '&quot;': '"', '&#39;': "'" };
 
 /**
- * SRT/VTT cue text -> ASS text. Keeps <i>/<u>, drops <b> (everything is
- * bold), other markup, and any ASS override blocks except a top position
- * ({\an8} and friends).
+ * SRT/VTT cue text -> ASS text. Keeps <b>/<i>/<u>, drops other markup and
+ * any ASS override blocks except a top position ({\an8} and friends).
  * @returns {{ass: string, lines: string[], top: boolean}}
  */
 function cueToAss(text) {
@@ -171,9 +174,7 @@ function cueToAss(text) {
     return '';
   });
   t = t.replace(/\{/g, '(').replace(/\}/g, ')');
-  // <b> is dropped: the style is bold already, and a closing {\\b0} would
-  // switch the rest of the cue to the regular weight.
-  t = t.replace(/<\s*(\/?)\s*([iu])\s*>/gi, (_, close, tag) => `{\\${tag.toLowerCase()}${close ? 0 : 1}}`);
+  t = t.replace(/<\s*(\/?)\s*([biu])\s*>/gi, (_, close, tag) => `{\\${tag.toLowerCase()}${close ? 0 : 1}}`);
   t = t.replace(/<[^>]*>/g, '');
   t = t.replace(/&(amp|lt|gt|nbsp|quot|#39);/g, (e) => ENTITIES[e]);
   const assLines = t
@@ -296,8 +297,8 @@ function assTime(ms) {
 function styleLine(name, size, colour, alignment, marginSide, marginV, m) {
   return (
     `Style: ${name},${FONT},${size},${colour},${colour},${OUTLINE_COLOUR},${SHADOW_COLOUR},` +
-    // Bold = -1 (Liberation Sans Bold).
-    `-1,0,0,0,100,100,0,0,1,${m.outline},${m.shadow},${alignment},${marginSide},${marginSide},${marginV},1`
+    // Bold = 0 (Liberation Sans regular).
+    `0,0,0,0,100,100,0,0,1,${m.outline},${m.shadow},${alignment},${marginSide},${marginSide},${marginV},1`
   );
 }
 
@@ -324,9 +325,11 @@ function buildAss({ cs = [], en = [], layout, offsetMs = 0, lengthMs = null, tit
 
   // Each language on its own: they sit apart, so nothing needs merging. A
   // cue's own {\an8} (text in the picture below) still moves it to the top.
+  // Blur is not a style field, so every event carries it.
+  const text = (c) => `{${c.top ? '\\an8' : ''}\\blur${m.blur}}${c.ass}`;
   const events = [
-    ...cs.map((c) => ({ start: c.start, end: c.end, style: 'CS', text: (c.top ? '{\\an8}' : '') + c.ass })),
-    ...en.map((c) => ({ start: c.start, end: c.end, style: 'EN', text: (c.top ? '{\\an8}' : '') + c.ass })),
+    ...cs.map((c) => ({ start: c.start, end: c.end, style: 'CS', text: text(c) })),
+    ...en.map((c) => ({ start: c.start, end: c.end, style: 'EN', text: text(c) })),
   ]
     .map((e) => ({ ...e, start: e.start - offsetMs, end: e.end - offsetMs }))
     .map((e) => (lengthMs != null ? { ...e, start: Math.max(0, e.start), end: Math.min(lengthMs, e.end) } : e))
