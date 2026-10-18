@@ -4,7 +4,7 @@
 FROM node:20-slim
 
 # ffmpeg + ffprobe for transcoding and audio extraction (Debian's ffmpeg has
-# libass for burned-in subtitles; Liberation Sans Bold is their font); pg_dump for DB
+# libass for burned-in subtitles; Liberation Sans is their font); pg_dump for DB
 # backups. Debian bookworm's stock postgresql-client is 15, which cannot dump
 # a newer Azure server, so install a pinned major from apt.postgresql.org
 # (pg_dump 17 handles servers up to 17).

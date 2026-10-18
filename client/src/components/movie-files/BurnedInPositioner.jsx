@@ -9,7 +9,7 @@ const STYLE = {
   en: { size: 0.0408, color: '#D9D9D9' },
 }
 const LINE_HEIGHT = 1.2
-const OUTLINE = 0.0028
+const OUTLINE = 0.0014
 const SIDE_MARGIN = 0.07
 const MARGIN = 0.035 // the export's usual distance from the top/bottom edge
 const MIN_BAND_MARGIN = 0.01
@@ -261,7 +261,7 @@ function BurnedInPositioner({ movieId, subtitleKind, placement, onChange, autoDe
             fontSize: `${boxHeight * style.size}px`,
             lineHeight: LINE_HEIGHT,
             fontFamily: '"Liberation Sans", Arial, Helvetica, sans-serif',
-            fontWeight: 700,
+            fontWeight: 400,
             color: style.color,
             textShadow: outline,
             [top ? 'borderTop' : 'borderBottom']: '1px dashed rgba(255, 255, 255, 0.6)',
