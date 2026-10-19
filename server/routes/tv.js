@@ -18,9 +18,9 @@ const SLIDE_COLUMNS = `id, kind, title, movie_id, sort_order, hidden, display_se
 
 async function readSettings() {
   const result = await pool.query(
-    'SELECT programme_days, reload_requested_at, updated_by, updated_at FROM tv_settings WHERE id = 1'
+    'SELECT programme_days, screening_slides, reload_requested_at, updated_by, updated_at FROM tv_settings WHERE id = 1'
   );
-  return result.rows[0] || { programme_days: 'today', reload_requested_at: null };
+  return result.rows[0] || { programme_days: 'today', screening_slides: true, reload_requested_at: null };
 }
 
 async function readSlides() {
@@ -86,16 +86,21 @@ adminRouter.get('/settings', async (req, res) => {
 });
 
 adminRouter.put('/settings', audit, async (req, res) => {
-  const { programme_days } = req.body;
-  if (!PROGRAMME_DAYS.includes(programme_days)) {
+  // Either setting alone may be sent; the other one stays
+  const { programme_days, screening_slides } = req.body;
+  if (programme_days !== undefined && !PROGRAMME_DAYS.includes(programme_days)) {
     return res.status(400).json({ error: `programme_days must be one of: ${PROGRAMME_DAYS.join(', ')}` });
+  }
+  if (screening_slides !== undefined && typeof screening_slides !== 'boolean') {
+    return res.status(400).json({ error: 'screening_slides must be true or false' });
   }
   try {
     const result = await pool.query(`
-      UPDATE tv_settings SET programme_days = $1, updated_by = $2, updated_at = now()
+      UPDATE tv_settings SET programme_days = COALESCE($1, programme_days),
+        screening_slides = COALESCE($2, screening_slides), updated_by = $3, updated_at = now()
       WHERE id = 1
-      RETURNING programme_days, reload_requested_at, updated_by, updated_at
-    `, [programme_days, req.user?.email || null]);
+      RETURNING programme_days, screening_slides, reload_requested_at, updated_by, updated_at
+    `, [programme_days ?? null, screening_slides ?? null, req.user?.email || null]);
     res.json(result.rows[0]);
   } catch (error) {
     logError(error, req, { operation: 'update_tv_settings' });
@@ -109,7 +114,7 @@ adminRouter.post('/reload', audit, async (req, res) => {
     const result = await pool.query(`
       UPDATE tv_settings SET reload_requested_at = now(), updated_by = $1, updated_at = now()
       WHERE id = 1
-      RETURNING programme_days, reload_requested_at, updated_by, updated_at
+      RETURNING programme_days, screening_slides, reload_requested_at, updated_by, updated_at
     `, [req.user?.email || null]);
     res.json(result.rows[0]);
   } catch (error) {
@@ -383,7 +388,11 @@ publicRouter.get('/manifest', async (req, res) => {
       }));
     res.set('Cache-Control', 'no-store');
     res.json({
-      settings: { programme_days: settings.programme_days, reload_requested_at: settings.reload_requested_at },
+      settings: {
+        programme_days: settings.programme_days,
+        screening_slides: settings.screening_slides,
+        reload_requested_at: settings.reload_requested_at,
+      },
       slides,
     });
   } catch (error) {

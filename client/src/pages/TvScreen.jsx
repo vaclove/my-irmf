@@ -17,7 +17,7 @@ const PROGRAMME_DAYS_OPTIONS = [
   {
     value: 'upcoming',
     label: 'Today and the following days',
-    description: 'The same day first, then every later festival day, each with its overview and screening slides.',
+    description: 'The same day first, then every later festival day, each with its programme (and screening slides, if on).',
   },
 ]
 // Photos travel as base64 JSON (server limit 50 MB) and are scaled down on the server
@@ -88,11 +88,11 @@ const TvScreen = () => {
     return () => clearInterval(timer)
   }, [processing, fetchSlides])
 
-  const handleProgrammeDaysChange = async (value) => {
-    if (savingSettings || value === settings?.programme_days) return
+  const saveSettings = async (changes) => {
+    if (savingSettings) return
     setSavingSettings(true)
     try {
-      const response = await tvApi.updateSettings({ programme_days: value })
+      const response = await tvApi.updateSettings(changes)
       setSettings(response.data)
       success('Saved — the screen picks it up within a minute')
     } catch (error) {
@@ -100,6 +100,11 @@ const TvScreen = () => {
     } finally {
       setSavingSettings(false)
     }
+  }
+
+  const handleProgrammeDaysChange = (value) => {
+    if (value === settings?.programme_days) return
+    saveSettings({ programme_days: value })
   }
 
   const handleReloadScreens = async () => {
@@ -312,6 +317,21 @@ const TvScreen = () => {
                 </span>
               </label>
             ))}
+            <label className="flex items-start p-4 border border-gray-200 rounded-md cursor-pointer hover:border-gray-300">
+              <input
+                type="checkbox"
+                checked={settings.screening_slides !== false}
+                onChange={(e) => saveSettings({ screening_slides: e.target.checked })}
+                className="mt-1 h-4 w-4 text-blue-600 rounded"
+              />
+              <span className="ml-3">
+                <span className="block font-medium text-gray-900">A slide for every screening</span>
+                <span className="block text-sm text-gray-600 mt-1">
+                  After the day's programme, each screening full screen with its photo. Turn off to show the
+                  programme alone, e.g. when the films are announced by photo slides.
+                </span>
+              </span>
+            </label>
           </fieldset>
           {settings.updated_by && (
             <p className="text-xs text-gray-500 mt-4">
