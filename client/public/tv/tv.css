@@ -17,6 +17,8 @@
   --lime: #bfde54;
   --light-blue: #63a3d2;
   --slate: #3b5e7a;
+  --mint: #a3c2b0;
+  --ink: #332e2e;
 }
 
 html, body {
@@ -91,29 +93,103 @@ html, body {
   text-transform: uppercase;
 }
 
-/* ---------- programme overview ---------- */
-.overview { padding: 150px 120px 80px; box-sizing: border-box; }
-.overview h1 { margin: 16px 0 44px; font-size: 76px; line-height: 1.05; }
-.rows { display: flex; flex-direction: column; }
-.row {
-  display: grid;
-  grid-template-columns: 190px 1fr 380px;
-  align-items: center;
-  column-gap: 32px;
-  min-height: 66px;
-  padding: 4px 0 4px 24px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-  border-left: 8px solid transparent;
-  font-size: 38px;
+/* ---------- the day's programme (2026 visual: printed programme) ---------- */
+.day {
+  position: absolute;
+  inset: 0;
+  background: var(--ink);
+  color: var(--mint);
 }
-.row.running { border-left-color: var(--lime); background: rgba(191, 222, 84, 0.08); }
-.row .time { color: var(--lime); font-weight: 700; font-variant-numeric: tabular-nums; }
-.row .title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.row .title .badge { margin-left: 16px; font-size: 20px; padding: 4px 12px; vertical-align: middle; }
-.row .venue { color: var(--light-blue); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.allday { margin-top: 36px; font-size: 32px; color: var(--text-soft); }
-.allday strong { color: var(--lime); text-transform: uppercase; letter-spacing: 2px; font-size: 26px; margin-right: 16px; }
-.more { margin-top: 28px; font-size: 28px; color: var(--muted); }
+.day .en { font-family: var(--serif); }
+.day-head {
+  position: absolute;
+  left: 72px;
+  right: 72px;
+  top: 52px;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: 60px;
+  line-height: 1.1;
+}
+.day-head .en { margin-left: 36px; }
+.day-head > .en { margin-left: 0; }
+/* Two columns of three, filled top to bottom like the printed list */
+.cards {
+  position: absolute;
+  left: 72px;
+  right: 72px;
+  top: 164px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: repeat(3, 236px);
+  grid-auto-flow: column;
+  row-gap: 32px;
+  column-gap: 72px;
+}
+.card { display: flex; min-width: 0; }
+.card .still {
+  flex: 0 0 315px;
+  width: 315px;
+  height: 236px;
+  margin-right: 32px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: var(--slate);
+}
+.card-text { display: flex; flex-direction: column; min-width: 0; }
+.card-when {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 8px;
+  font-size: 26px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.card-when .badge { font-size: 18px; padding: 3px 12px; }
+.card-title,
+.card-title-en {
+  font-size: 36px;
+  /* Room for descenders (j, g): the clamp clips anything outside the line box */
+  line-height: 1.15;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.card-title-en { font-family: var(--serif); }
+.card-section {
+  margin-top: auto;
+  padding-top: 6px;
+  font-size: 24px;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.day-foot {
+  position: absolute;
+  left: 72px;
+  right: 72px;
+  bottom: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--serif);
+  font-size: 34px;
+}
+.day-foot .social { display: flex; align-items: center; gap: 12px; }
+.day-foot .social span { margin-left: 8px; }
+.icon {
+  width: 40px;
+  height: 40px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 
 /* ---------- featured screening (2026 festival visual) ---------- */
 .feature .photo {
