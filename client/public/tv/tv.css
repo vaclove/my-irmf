@@ -17,8 +17,9 @@
   --lime: #bfde54;
   --light-blue: #63a3d2;
   --slate: #3b5e7a;
-  --mint: #a3c2b0;
+  --cream: #dfdcce;
   --ink: #332e2e;
+  --plum: #52404f;
 }
 
 html, body {
@@ -98,7 +99,7 @@ html, body {
   position: absolute;
   inset: 0;
   background: var(--ink);
-  color: var(--mint);
+  color: var(--cream);
 }
 .day .en { font-family: var(--serif); }
 .day-head {
@@ -127,7 +128,17 @@ html, body {
   row-gap: 32px;
   column-gap: 72px;
 }
-.card { display: flex; min-width: 0; }
+.card { position: relative; z-index: 0; display: flex; min-width: 0; }
+/* Highlighted screening: the plum box of the printed programme, drawn into
+   the gaps around the card so the layout doesn't move */
+.card.highlighted::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: -14px -18px;
+  border-radius: 8px;
+  background: var(--plum);
+}
 .card .still {
   flex: 0 0 315px;
   width: 315px;
