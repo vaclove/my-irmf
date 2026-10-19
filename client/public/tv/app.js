@@ -29,7 +29,7 @@
   var API = '/api/public';
   var PROGRAMME_SCENE = { overviewSeconds: 15, featureSeconds: 12 };
   var PHOTO_SECONDS = 8;
-  var ROWS_PER_PAGE = 8; // what fits under the heading together with the all-day line
+  var CARDS_PER_PAGE = 6; // two columns of three on the day's programme
   var SYNOPSIS_MAX = 420;
   var MANIFEST_REFRESH_MS = 60 * 1000;
   var DATA_REFRESH_MS = 5 * 60 * 1000;
@@ -91,10 +91,6 @@
   function parseDay(iso) {
     var p = iso.split('-');
     return new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
-  }
-
-  function formatDay(iso) {
-    return parseDay(iso).toLocaleDateString('cs-CZ', { weekday: 'long', day: 'numeric', month: 'long' });
   }
 
   function sleep(ms) {
@@ -210,6 +206,16 @@
     return current || list.sort(function (a, b) { return a.end < b.end ? 1 : -1; })[0] || null;
   }
 
+  /** { cs, en } section names of a film, or of a block whose films share one section. */
+  function sectionOf(e, blockMovies) {
+    if (e.movie_section_name_cs || e.movie_section_name_en) {
+      return { cs: e.movie_section_name_cs || e.movie_section_name_en, en: e.movie_section_name_en || '' };
+    }
+    var named = blockMovies.filter(function (m) { return m.section_name_cs || m.section_name_en; });
+    if (!named.length || unique(blockMovies.map(function (m) { return m.section; })).length !== 1) return null;
+    return { cs: named[0].section_name_cs || named[0].section_name_en, en: named[0].section_name_en || '' };
+  }
+
   function normalize(e) {
     var blockMovies = e.block_movies || [];
     var blockImage = blockMovies.filter(function (m) { return m.image_urls; })[0];
@@ -223,6 +229,9 @@
       runtime: Number(e.total_runtime) || Number(e.movie_runtime) || 0,
       title: e.title_override_cs || e.movie_name_cs || e.block_name_cs || e.title_override_en || e.movie_name_en || e.block_name_en || '',
       titleEn: e.title_override_en || e.movie_name_en || e.block_name_en || '',
+      // A block under its own name: "Blok: …" on the day's programme
+      isBlock: !e.title_override_cs && !e.movie_id && !!(e.block_name_cs || e.block_name_en),
+      section: sectionOf(e, blockMovies),
       venue: e.venue_name_cs || e.venue_name_en || '',
       director: e.movie_director || '',
       synopsis: shorten(e.movie_synopsis_cs || e.block_description_cs || e.movie_synopsis_en || e.block_description_en, SYNOPSIS_MAX),
@@ -520,39 +529,75 @@
     }));
   }
 
-  // "v sobotu", "ve čtvrtek"… by Date.getDay()
-  var ON_WEEKDAY = ['v neděli', 'v pondělí', 'v úterý', 've středu', 've čtvrtek', 'v pátek', 'v sobotu'];
-
-  function dayLabels(day) {
-    var date = formatDay(day.date);
-    switch (day.mode) {
-      case 'today': return { eyebrow: 'Dnes · ' + date, heading: 'Dnes na programu' };
-      case 'tomorrow': return { eyebrow: 'Zítra · ' + date, heading: 'Zítra na programu' };
-      case 'first': return { eyebrow: 'Festival začíná · ' + date, heading: 'Program prvního dne' };
-      case 'later': {
-        var on = ON_WEEKDAY[parseDay(day.date).getDay()];
-        return { eyebrow: date, heading: on.charAt(0).toUpperCase() + on.slice(1) + ' na programu' };
-      }
-      default: return { eyebrow: date, heading: 'Program' };
-    }
-  }
-
   function isRunning(e, day, nowMin) {
     return day.mode === 'today' && e.time && e.startMin <= nowMin && nowMin < entryEnd(e);
   }
 
-  function overviewSlide(labels, rows, allDay, page, day, nowMin) {
-    return h('div', { class: 'overview' },
-      h('div', { class: 'eyebrow' }, labels.eyebrow + (page ? ' · ' + page : '')),
-      h('h1', null, labels.heading),
-      h('div', { class: 'rows' }, rows.map(function (e) {
-        return h('div', { class: 'row' + (isRunning(e, day, nowMin) ? ' running' : '') },
-          h('div', { class: 'time' }, e.time),
-          h('div', { class: 'title' }, e.title, isRunning(e, day, nowMin) ? h('span', { class: 'badge' }, 'Právě běží') : null),
-          h('div', { class: 'venue' }, e.venue));
-      }).reduce(function (el, row) { el.appendChild(row); return el; }, document.createDocumentFragment())),
-      allDay.length ? h('div', { class: 'allday' }, h('strong', null, 'Celý den'),
-        allDay.map(function (e) { return e.title + ' (' + e.venue + ')'; }).join(' · ')) : null);
+  function capitalize(text) {
+    return text.charAt(0).toUpperCase() + text.slice(1);
+  }
+
+  /** Outline icon (24×24 viewBox) from SVG elements given as [tag, attributes]. */
+  function icon(shapes) {
+    var ns = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(ns, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('class', 'icon');
+    shapes.forEach(function (shape) {
+      var el = document.createElementNS(ns, shape[0]);
+      Object.keys(shape[1]).forEach(function (key) { el.setAttribute(key, shape[1][key]); });
+      svg.appendChild(el);
+    });
+    return svg;
+  }
+
+  var INSTAGRAM_ICON = [
+    ['rect', { x: 3, y: 3, width: 18, height: 18, rx: 5 }],
+    ['circle', { cx: 12, cy: 12, r: 4 }],
+    ['circle', { cx: 17.2, cy: 6.8, r: 0.6, fill: 'currentColor' }],
+  ];
+  var FACEBOOK_ICON = [
+    ['rect', { x: 3, y: 3, width: 18, height: 18, rx: 5 }],
+    ['path', { d: 'M15.5 7.5h-1.6a2 2 0 0 0-2 2V21M9.5 12.5h5.5' }],
+  ];
+
+  /** "Blok: Bez mapy, bez brzd" — blocks are named as such, as in the printed programme. */
+  function cardTitle(e, prefix, title) {
+    return (e.isBlock ? prefix + ' ' : '') + title;
+  }
+
+  function programmeCard(e, day, nowMin) {
+    var running = isRunning(e, day, nowMin);
+    var section = e.section;
+    return h('div', { class: 'card' },
+      e.image ? h('img', { class: 'still', src: e.image, alt: '' }) : h('div', { class: 'still' }),
+      h('div', { class: 'card-text' },
+        h('div', { class: 'card-when' },
+          // "9.30 / Velký sál", as in the 2026 visual
+          [e.time ? e.time.replace(/^0/, '').replace(':', '.') : 'Celý den', e.venue].filter(Boolean).join(' / '),
+          running ? h('span', { class: 'badge' }, 'Právě běží') : null),
+        h('div', { class: 'card-title' }, cardTitle(e, 'Blok:', e.title)),
+        e.titleEn && e.titleEn !== e.title ? h('div', { class: 'card-title-en' }, cardTitle(e, 'Block:', e.titleEn)) : null,
+        section ? h('div', { class: 'card-section' }, section.cs,
+          section.en && section.en !== section.cs ? ' / ' : null,
+          section.en && section.en !== section.cs ? h('span', { class: 'en' }, section.en) : null) : null));
+  }
+
+  /** The day's programme in the 2026 visual: Czech in Aeonik, English in Swear Display. */
+  function daySlide(day, cards, page, nowMin) {
+    var d = parseDay(day.date);
+    return h('div', { class: 'day' },
+      h('div', { class: 'day-head' },
+        h('div', null,
+          capitalize(d.toLocaleDateString('cs-CZ', { weekday: 'long' })),
+          h('span', { class: 'en' }, d.toLocaleDateString('en-GB', { weekday: 'long' }))),
+        h('div', { class: 'en' }, d.getDate() + '/' + (d.getMonth() + 1))),
+      h('div', { class: 'cards' }, cards.map(function (e) {
+        return programmeCard(e, day, nowMin);
+      }).reduce(function (el, card) { el.appendChild(card); return el; }, document.createDocumentFragment())),
+      h('div', { class: 'day-foot' },
+        h('div', { class: 'social' }, icon(INSTAGRAM_ICON), icon(FACEBOOK_ICON), h('span', null, '@roadmoviefestival')),
+        page ? h('div', null, page) : null));
   }
 
   /** "22—25/10/2026" (or "30/10—2/11/2026" across months). */
@@ -575,7 +620,7 @@
   }
 
   /** A screening in the style of the 2026 festival visual: the film's photo full screen. */
-  function featureSlide(e, labels, day, nowMin) {
+  function featureSlide(e, day, nowMin) {
     var edition = state.data.edition;
     return h('div', { class: 'feature' },
       e.image ? h('img', { class: 'photo', src: e.image, alt: '' }) : h('div', { class: 'photo' }),
@@ -611,29 +656,29 @@
     return slides;
   }
 
-  /** The day's overview (paged) followed by a slide per screening. */
+  /** The day's programme (paged) followed by a slide per screening. */
   function daySlides(day, nowMin) {
-    var labels = dayLabels(day);
     var ofDay = state.data.entries.filter(function (e) { return e.date === day.date; });
     var timed = ofDay.filter(function (e) {
       return e.time && (day.mode !== 'today' || entryEnd(e) > nowMin);
     });
-    var allDay = ofDay.filter(function (e) { return !e.time; });
+    var entries = timed.concat(ofDay.filter(function (e) { return !e.time; }));
 
     var slides = [];
-    var pages = chunk(timed, ROWS_PER_PAGE);
+    var pages = chunk(entries, CARDS_PER_PAGE);
     if (!pages.length) pages = [[]];
-    pages.forEach(function (rows, i) {
-      var last = i === pages.length - 1;
+    pages.forEach(function (cards, i) {
       slides.push({
-        el: overviewSlide(labels, rows, last ? allDay : [], pages.length > 1 ? (i + 1) + '/' + pages.length : '', day, nowMin),
+        el: daySlide(day, cards, pages.length > 1 ? (i + 1) + '/' + pages.length : '', nowMin),
         seconds: PROGRAMME_SCENE.overviewSeconds,
         label: 'programme ' + day.date,
+        // The day's own header replaces the logo and clock
+        bare: true,
       });
     });
-    timed.concat(allDay).forEach(function (e) {
+    entries.forEach(function (e) {
       // The festival visual replaces the logo and clock on these
-      slides.push({ el: featureSlide(e, labels, day, nowMin), seconds: PROGRAMME_SCENE.featureSeconds, label: e.title, bare: true });
+      slides.push({ el: featureSlide(e, day, nowMin), seconds: PROGRAMME_SCENE.featureSeconds, label: e.title, bare: true });
     });
     return slides;
   }

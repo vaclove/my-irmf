@@ -778,6 +778,7 @@ router.get('/public/programming', async (req, res) => {
       JOIN editions e ON ps.edition_id = e.id
       LEFT JOIN movies m ON ps.movie_id = m.id
       LEFT JOIN editions me ON m.edition_id = me.id
+      LEFT JOIN sections ms ON ms.edition_id = m.edition_id AND ms.key = m.section
       LEFT JOIN movie_blocks mb ON ps.block_id = mb.id
       WHERE ps.hidden_from_public = false
     `;
@@ -826,6 +827,8 @@ router.get('/public/programming', async (req, res) => {
         m.director as movie_director,
         m.runtime as movie_runtime,
         m.section as movie_section,
+        ms.name_cs as movie_section_name_cs,
+        ms.name_en as movie_section_name_en,
         m.synopsis_cs as movie_synopsis_cs,
         m.synopsis_en as movie_synopsis_en,
         m.image_url as movie_image_url,
@@ -888,6 +891,8 @@ router.get('/public/programming', async (req, res) => {
             m.director,
             m.runtime,
             m.section,
+            s.name_cs as section_name_cs,
+            s.name_en as section_name_en,
             m.synopsis_cs,
             m.synopsis_en,
             m.year,
@@ -902,11 +907,12 @@ router.get('/public/programming', async (req, res) => {
           FROM block_movies bm
           JOIN movies m ON bm.movie_id = m.id
           JOIN editions me ON m.edition_id = me.id
+          LEFT JOIN sections s ON s.edition_id = m.edition_id AND s.key = m.section
           JOIN programming_schedule ps ON ps.block_id = bm.block_id
           WHERE ps.id = $1
           ORDER BY bm.sort_order, m.name_cs
         `, [entry.id]);
-        
+
         // Add image URLs to block movies
         entry.block_movies = moviesResult.rows.map(movie => {
           if (movie.image_url) {
