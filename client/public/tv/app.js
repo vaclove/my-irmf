@@ -122,6 +122,13 @@
     return cut.slice(0, cut.lastIndexOf(' ')) + '…';
   }
 
+  /** Czech typography: a one-letter word (k, s, v, z, o, u, a, i) never ends a line. */
+  function glue(text) {
+    // Twice: in "a v Plzni" the second match starts where the first one ended
+    var re = /(^|[\s(„"])([ksvzouaiKSVZOUAI])\s+/g;
+    return (text || '').replace(re, '$1$2 ').replace(re, '$1$2 ');
+  }
+
   function chunk(list, size) {
     var out = [];
     for (var i = 0; i < list.length; i += size) out.push(list.slice(i, i + size));
@@ -227,7 +234,7 @@
       time: time,
       startMin: parts ? Number(parts[0]) * 60 + Number(parts[1]) : null,
       runtime: Number(e.total_runtime) || Number(e.movie_runtime) || 0,
-      title: e.title_override_cs || e.movie_name_cs || e.block_name_cs || e.title_override_en || e.movie_name_en || e.block_name_en || '',
+      title: glue(e.title_override_cs || e.movie_name_cs || e.block_name_cs || e.title_override_en || e.movie_name_en || e.block_name_en),
       titleEn: e.title_override_en || e.movie_name_en || e.block_name_en || '',
       // A block under its own name: "Blok: …" on the day's programme
       isBlock: !e.title_override_cs && !e.movie_id && !!(e.block_name_cs || e.block_name_en),
@@ -569,7 +576,8 @@
   function programmeCard(e, day, nowMin) {
     var running = isRunning(e, day, nowMin);
     var section = e.section;
-    return h('div', { class: 'card' },
+    // Highlighted screenings sit in a box, as in the printed programme
+    return h('div', { class: 'card' + (e.highlighted ? ' highlighted' : '') },
       e.image ? h('img', { class: 'still', src: e.image, alt: '' }) : h('div', { class: 'still' }),
       h('div', { class: 'card-text' },
         h('div', { class: 'card-when' },
@@ -577,7 +585,7 @@
           [e.time ? e.time.replace(/^0/, '').replace(':', '.') : 'Celý den', e.venue].filter(Boolean).join(' / '),
           running ? h('span', { class: 'badge' }, 'Právě běží') : null),
         h('div', { class: 'card-title' }, cardTitle(e, 'Blok:', e.title)),
-        e.titleEn && e.titleEn !== e.title ? h('div', { class: 'card-title-en' }, cardTitle(e, 'Block:', e.titleEn)) : null,
+        e.titleEn && glue(e.titleEn) !== e.title ? h('div', { class: 'card-title-en' }, cardTitle(e, 'Block:', e.titleEn)) : null,
         section ? h('div', { class: 'card-section' }, section.cs,
           section.en && section.en !== section.cs ? ' / ' : null,
           section.en && section.en !== section.cs ? h('span', { class: 'en' }, section.en) : null) : null));
@@ -632,7 +640,7 @@
         h('div', { class: 'film-when' }, screeningLine(e),
           isRunning(e, day, nowMin) ? h('span', { class: 'badge' }, 'Právě běží') : null),
         h('div', { class: 'film-title' }, e.title),
-        e.titleEn && e.titleEn !== e.title ? h('div', { class: 'film-title-en' }, e.titleEn) : null));
+        e.titleEn && glue(e.titleEn) !== e.title ? h('div', { class: 'film-title-en' }, e.titleEn) : null));
   }
 
   function messageSlide(eyebrow, text) {
