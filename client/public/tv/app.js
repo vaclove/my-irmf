@@ -175,7 +175,7 @@
       'edition: ' + (d ? d.edition.name + ' ' + d.edition.start + '..' + d.edition.end : '-'),
       'entries: ' + (d ? d.entries.length : '-') + ', loaded ' + (state.loadedAt ? state.loadedAt.toTimeString().slice(0, 8) : '-'),
       'slides: ' + (m ? m.slides.map(function (s) { return s.kind + (s.hidden ? '(hidden)' : ''); }).join(' ') : 'default') +
-        ', programme days: ' + programmeDays(),
+        ', programme days: ' + programmeDays() + (screeningSlides() ? '' : ', no screening slides'),
       'cache: ' + state.cache.files + ' files, ' + (state.cache.bytes / 1e6).toFixed(0) + ' MB' +
         (state.cache.pending ? ', downloading ' + state.cache.pending : '') + (state.cache.full ? ', STORAGE FULL' : ''),
       'storage: ' + (state.storage || '-'),
@@ -198,6 +198,11 @@
 
   function programmeDays() {
     return (state.manifest && state.manifest.settings.programme_days) || 'today';
+  }
+
+  /** Whether each screening follows the day's programme on a slide of its own (on unless switched off). */
+  function screeningSlides() {
+    return !(state.manifest && state.manifest.settings.screening_slides === false);
   }
 
   /** The running or next edition; after the last one ends, the last one. */
@@ -664,7 +669,7 @@
     return slides;
   }
 
-  /** The day's programme (paged) followed by a slide per screening. */
+  /** The day's programme (paged), followed by a slide per screening unless switched off. */
   function daySlides(day, nowMin) {
     var ofDay = state.data.entries.filter(function (e) { return e.date === day.date; });
     var timed = ofDay.filter(function (e) {
@@ -684,6 +689,7 @@
         bare: true,
       });
     });
+    if (!screeningSlides()) return slides;
     entries.forEach(function (e) {
       // The festival visual replaces the logo and clock on these
       slides.push({ el: featureSlide(e, day, nowMin), seconds: PROGRAMME_SCENE.featureSeconds, label: e.title, bare: true });
