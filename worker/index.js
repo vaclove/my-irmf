@@ -1166,6 +1166,7 @@ async function processBurnJob(jobId, dequeueCount) {
       crop,
       single: !cs.length || !en.length,
       centered: overBurnedIn,
+      hd: job.resolution === '1080p',
     });
 
     const durationMs = media.duration * 1000;
