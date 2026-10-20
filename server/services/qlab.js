@@ -8,12 +8,18 @@ const { logger } = require('../utils/logger');
 
 const STATUS_TTL_MS = 1500;
 const CUELISTS_TTL_MS = 60 * 1000;
+// The bridge takes a new projector frame at most every 10 s; between films
+// once a minute is enough
+const SNAPSHOT_TTL_MS = 10 * 1000;
+const SNAPSHOT_IDLE_TTL_MS = 60 * 1000;
 const TIMEOUT_MS = 5000;
 
 const cache = {
   status: { snapshot: null, inflight: null },
   cuelists: { snapshot: null, inflight: null },
 };
+// The last good frame is kept when a fetch fails; takenAt tells its age
+const snapshot = { jpeg: null, takenAt: null, checkedAt: 0, inflight: null };
 let lastLoggedState = null;
 
 function isConfigured() {
@@ -129,4 +135,42 @@ async function getCuelists() {
   });
 }
 
-module.exports = { isConfigured, getStatus, getCuelists };
+function snapshotTtl() {
+  const status = cache.status.snapshot;
+  return status?.state === 'ok' && status.running.length ? SNAPSHOT_TTL_MS : SNAPSHOT_IDLE_TTL_MS;
+}
+
+async function refreshSnapshot() {
+  try {
+    const res = await fetchQLab('/snapshot.jpg');
+    if (res.ok && (res.headers.get('content-type') || '').startsWith('image/jpeg')) {
+      snapshot.jpeg = Buffer.from(await res.arrayBuffer());
+      snapshot.takenAt = Date.now();
+    } else {
+      await res.body?.cancel(); // 503: projector disconnected or no screen-capture permission
+    }
+  } catch (error) {
+    // Offline: keep the last frame
+  } finally {
+    snapshot.checkedAt = Date.now();
+  }
+}
+
+/** The projector frame as JPEG, or null when none has been taken yet. */
+async function getSnapshot() {
+  if (!isConfigured()) return null;
+  if (!snapshot.inflight && Date.now() - snapshot.checkedAt >= snapshotTtl()) {
+    snapshot.inflight = refreshSnapshot().finally(() => {
+      snapshot.inflight = null;
+    });
+  }
+  if (snapshot.inflight) await snapshot.inflight;
+  return snapshot.jpeg ? { jpeg: snapshot.jpeg, takenAt: snapshot.takenAt } : null;
+}
+
+/** Age of the last frame without fetching one, for the status response. */
+function snapshotAgeMs() {
+  return snapshot.takenAt ? Date.now() - snapshot.takenAt : null;
+}
+
+module.exports = { isConfigured, getStatus, getCuelists, getSnapshot, snapshotAgeMs };

@@ -189,6 +189,9 @@ export const tvApi = {
 export const qlabApi = {
   getStatus: () => api.get('/qlab/status'),
   getCuelists: () => api.get('/qlab/cuelists'),
+  // Relative on purpose: an <img> from :3001 on the :5173 dev page is blocked by
+  // Cross-Origin-Resource-Policy, the Vite proxy keeps it same-origin
+  snapshotUrl: (stamp) => `/api/qlab/snapshot.jpg?t=${stamp}`,
 }
 
 // Movie download jobs API (server-side downloader: public Drive link / FTP)
