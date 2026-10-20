@@ -38,6 +38,7 @@ const associationRoutes = require('./routes/associations');
 const scannerRoutes = require('./routes/scanner');
 const scannerSessionRoutes = require('./routes/scanner-session');
 const tvRoutes = require('./routes/tv');
+const qlabRoutes = require('./routes/qlab');
 const gooutRoutes = require('./routes/goout');
 const boxOfficeRoutes = require('./routes/boxOffice');
 const dbBackupRoutes = require('./routes/dbBackup');
@@ -202,6 +203,7 @@ app.use('/api/goout', requireIrmfDomain, gooutRoutes);
 app.use('/api/box-office', requireIrmfDomain, boxOfficeRoutes);
 app.use('/api/db-backup', requireIrmfDomain, dbBackupRoutes);
 app.use('/api/tv', requireIrmfDomain, tvRoutes.adminRouter);
+app.use('/api/qlab', requireIrmfDomain, qlabRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });

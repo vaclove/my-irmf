@@ -5,6 +5,7 @@ import Programming from './Programming'
 import Blocks from './Blocks'
 import Venues from './Venues'
 import TvScreen from './TvScreen'
+import QLab from './QLab'
 
 const ProgrammingTabs = () => {
   const { selectedEdition } = useEdition()
@@ -16,6 +17,7 @@ const ProgrammingTabs = () => {
     if (location.pathname === '/programme/blocks') return 'blocks'
     if (location.pathname === '/programme/venues') return 'venues'
     if (location.pathname === '/programme/tv') return 'tv'
+    if (location.pathname === '/programme/qlab') return 'qlab'
     return 'programming'
   }
   
@@ -29,13 +31,16 @@ const ProgrammingTabs = () => {
       navigate('/programme/venues')
     } else if (tab === 'tv') {
       navigate('/programme/tv')
+    } else if (tab === 'qlab') {
+      navigate('/programme/qlab')
     } else {
       navigate('/programme')
     }
   }
 
-  // The TV screen is global (it plays the running or next edition)
+  // The TV screen is global (it plays the running or next edition), so is QLab
   if (!selectedEdition && activeTab === 'tv') return <TvScreen />
+  if (!selectedEdition && activeTab === 'qlab') return <QLab />
 
   if (!selectedEdition) {
     return (
@@ -90,6 +95,16 @@ const ProgrammingTabs = () => {
           >
             📺 TV Screen
           </button>
+          <button
+            onClick={() => handleTabChange('qlab')}
+            className={`py-2 px-1 border-b-2 font-medium text-sm ${
+              activeTab === 'qlab'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            🎞️ QLab
+          </button>
         </nav>
       </div>
 
@@ -99,6 +114,7 @@ const ProgrammingTabs = () => {
         {activeTab === 'blocks' && <Blocks />}
         {activeTab === 'venues' && <Venues />}
         {activeTab === 'tv' && <TvScreen />}
+        {activeTab === 'qlab' && <QLab />}
       </div>
     </div>
   )
