@@ -16,11 +16,11 @@ const SLIDE_COLUMNS = `id, kind, title, movie_id, sort_order, hidden, display_se
   progress_percent, error_message, blob_name, source_blob_name, file_name, size, width, height,
   media_seconds, created_by, created_at, updated_at`;
 
+const SETTINGS_COLUMNS = 'programme_days, screening_slides, default_photo_seconds, reload_requested_at, updated_by, updated_at';
+
 async function readSettings() {
-  const result = await pool.query(
-    'SELECT programme_days, reload_requested_at, updated_by, updated_at FROM tv_settings WHERE id = 1'
-  );
-  return result.rows[0] || { programme_days: 'today', reload_requested_at: null };
+  const result = await pool.query(`SELECT ${SETTINGS_COLUMNS} FROM tv_settings WHERE id = 1`);
+  return result.rows[0] || { programme_days: 'today', screening_slides: true, default_photo_seconds: 8, reload_requested_at: null };
 }
 
 async function readSlides() {
@@ -86,20 +86,43 @@ adminRouter.get('/settings', async (req, res) => {
 });
 
 adminRouter.put('/settings', audit, async (req, res) => {
-  const { programme_days } = req.body;
-  if (!PROGRAMME_DAYS.includes(programme_days)) {
+  // Any setting alone may be sent; the others stay. reset_photo_seconds also
+  // drops every photo's own time, so the default applies to all of them.
+  const { programme_days, screening_slides, default_photo_seconds, reset_photo_seconds } = req.body;
+  if (programme_days !== undefined && !PROGRAMME_DAYS.includes(programme_days)) {
     return res.status(400).json({ error: `programme_days must be one of: ${PROGRAMME_DAYS.join(', ')}` });
   }
+  if (screening_slides !== undefined && typeof screening_slides !== 'boolean') {
+    return res.status(400).json({ error: 'screening_slides must be true or false' });
+  }
+  if (default_photo_seconds !== undefined
+    && !(Number.isInteger(default_photo_seconds) && default_photo_seconds >= 2 && default_photo_seconds <= 120)) {
+    return res.status(400).json({ error: 'default_photo_seconds must be a whole number between 2 and 120' });
+  }
+  const client = await pool.connect();
   try {
-    const result = await pool.query(`
-      UPDATE tv_settings SET programme_days = $1, updated_by = $2, updated_at = now()
+    await client.query('BEGIN');
+    const result = await client.query(`
+      UPDATE tv_settings SET programme_days = COALESCE($1, programme_days),
+        screening_slides = COALESCE($2, screening_slides),
+        default_photo_seconds = COALESCE($3, default_photo_seconds), updated_by = $4, updated_at = now()
       WHERE id = 1
-      RETURNING programme_days, reload_requested_at, updated_by, updated_at
-    `, [programme_days, req.user?.email || null]);
+      RETURNING ${SETTINGS_COLUMNS}
+    `, [programme_days ?? null, screening_slides ?? null, default_photo_seconds ?? null, req.user?.email || null]);
+    if (reset_photo_seconds === true) {
+      await client.query(`
+        UPDATE tv_slides SET display_seconds = NULL, updated_at = now()
+        WHERE kind = 'photo' AND display_seconds IS NOT NULL
+      `);
+    }
+    await client.query('COMMIT');
     res.json(result.rows[0]);
   } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
     logError(error, req, { operation: 'update_tv_settings' });
     res.status(500).json({ error: 'Failed to save TV settings' });
+  } finally {
+    client.release();
   }
 });
 
@@ -109,7 +132,7 @@ adminRouter.post('/reload', audit, async (req, res) => {
     const result = await pool.query(`
       UPDATE tv_settings SET reload_requested_at = now(), updated_by = $1, updated_at = now()
       WHERE id = 1
-      RETURNING programme_days, reload_requested_at, updated_by, updated_at
+      RETURNING ${SETTINGS_COLUMNS}
     `, [req.user?.email || null]);
     res.json(result.rows[0]);
   } catch (error) {
@@ -383,7 +406,12 @@ publicRouter.get('/manifest', async (req, res) => {
       }));
     res.set('Cache-Control', 'no-store');
     res.json({
-      settings: { programme_days: settings.programme_days, reload_requested_at: settings.reload_requested_at },
+      settings: {
+        programme_days: settings.programme_days,
+        screening_slides: settings.screening_slides,
+        default_photo_seconds: settings.default_photo_seconds,
+        reload_requested_at: settings.reload_requested_at,
+      },
       slides,
     });
   } catch (error) {

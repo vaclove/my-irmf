@@ -3,7 +3,7 @@ import { tvApi, movieApi } from '../utils/api'
 import { useEdition } from '../contexts/EditionContext'
 import { useToast } from '../contexts/ToastContext'
 import { formatBytes } from '../utils/fileSize'
-import TvSlideList from '../components/tv/TvSlideList'
+import TvSlideList, { PHOTO_SECONDS_OPTIONS, DEFAULT_PHOTO_SECONDS } from '../components/tv/TvSlideList'
 import TvVideoUploadModal from '../components/tv/TvVideoUploadModal'
 
 // The looping showcase on the TV in the venue (client/public/tv/). The player
@@ -17,7 +17,7 @@ const PROGRAMME_DAYS_OPTIONS = [
   {
     value: 'upcoming',
     label: 'Today and the following days',
-    description: 'The same day first, then every later festival day, each with its overview and screening slides.',
+    description: 'The same day first, then every later festival day, each with its programme (and screening slides, if on).',
   },
 ]
 // Photos travel as base64 JSON (server limit 50 MB) and are scaled down on the server
@@ -88,18 +88,33 @@ const TvScreen = () => {
     return () => clearInterval(timer)
   }, [processing, fetchSlides])
 
-  const handleProgrammeDaysChange = async (value) => {
-    if (savingSettings || value === settings?.programme_days) return
+  const saveSettings = async (changes) => {
+    if (savingSettings) return false
     setSavingSettings(true)
     try {
-      const response = await tvApi.updateSettings({ programme_days: value })
+      const response = await tvApi.updateSettings(changes)
       setSettings(response.data)
       success('Saved — the screen picks it up within a minute')
+      return true
     } catch (error) {
       showError(error.response?.data?.error || 'Failed to save TV settings')
+      return false
     } finally {
       setSavingSettings(false)
     }
+  }
+
+  const handleProgrammeDaysChange = (value) => {
+    if (value === settings?.programme_days) return
+    saveSettings({ programme_days: value })
+  }
+
+  const defaultPhotoSeconds = settings?.default_photo_seconds || DEFAULT_PHOTO_SECONDS
+
+  // The photos' own times go too, so every photo shows for the default
+  const handleResetPhotoSeconds = async (count) => {
+    if (!window.confirm(`Show all ${count} photo${count === 1 ? '' : 's'} with their own time for ${defaultPhotoSeconds} s too?`)) return
+    if (await saveSettings({ reset_photo_seconds: true })) await fetchSlides().catch(() => {})
   }
 
   const handleReloadScreens = async () => {
@@ -195,6 +210,8 @@ const TvScreen = () => {
   // Hidden ones count too: screens keep them cached so they can come back without a download
   const cachedMedia = slides.filter((s) => s.kind !== 'programme' && s.status === 'ready')
   const cachedBytes = cachedMedia.reduce((sum, s) => sum + (s.size || 0), 0)
+  const photoOverrides = slides.filter((s) => s.kind === 'photo' && s.display_seconds).length
+  const photoSecondsOptions = [...new Set([...PHOTO_SECONDS_OPTIONS, defaultPhotoSeconds])].sort((a, b) => a - b)
   const programmeLabel = PROGRAMME_DAYS_OPTIONS.find((o) => o.value === settings?.programme_days)?.label || ''
 
   return (
@@ -244,6 +261,34 @@ const TvScreen = () => {
             <p className="text-sm text-gray-600">
               Played top to bottom, then again. Drag ⋮⋮ to reorder; hidden slides are skipped.
             </p>
+            {settings && (
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-sm text-gray-600">
+                <label className="flex items-center gap-2">
+                  Photos are shown for
+                  <select
+                    value={defaultPhotoSeconds}
+                    disabled={savingSettings}
+                    onChange={(e) => saveSettings({ default_photo_seconds: Number(e.target.value) })}
+                    className="border border-gray-300 rounded px-2 py-1 text-sm"
+                  >
+                    {photoSecondsOptions.map((s) => (
+                      <option key={s} value={s}>{s} s</option>
+                    ))}
+                  </select>
+                  each, unless a photo has its own time.
+                </label>
+                {photoOverrides > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => handleResetPhotoSeconds(photoOverrides)}
+                    disabled={savingSettings}
+                    className="text-blue-600 hover:underline disabled:opacity-50"
+                  >
+                    {photoOverrides} with their own time · use {defaultPhotoSeconds} s for all
+                  </button>
+                )}
+              </div>
+            )}
           </div>
           <div className="flex gap-2">
             <input ref={photoInput} type="file" accept="image/*" multiple className="hidden" onChange={(e) => handlePhotosChosen(e.target.files)} />
@@ -271,6 +316,7 @@ const TvScreen = () => {
           slides={slides}
           movies={movies}
           programmeLabel={programmeLabel}
+          defaultPhotoSeconds={defaultPhotoSeconds}
           onReorder={handleReorder}
           onUpdate={handleUpdate}
           onDelete={handleDelete}
@@ -312,6 +358,21 @@ const TvScreen = () => {
                 </span>
               </label>
             ))}
+            <label className="flex items-start p-4 border border-gray-200 rounded-md cursor-pointer hover:border-gray-300">
+              <input
+                type="checkbox"
+                checked={settings.screening_slides !== false}
+                onChange={(e) => saveSettings({ screening_slides: e.target.checked })}
+                className="mt-1 h-4 w-4 text-blue-600 rounded"
+              />
+              <span className="ml-3">
+                <span className="block font-medium text-gray-900">A slide for every screening</span>
+                <span className="block text-sm text-gray-600 mt-1">
+                  After the day's programme, each screening full screen with its photo. Turn off to show the
+                  programme alone, e.g. when the films are announced by photo slides.
+                </span>
+              </span>
+            </label>
           </fieldset>
           {settings.updated_by && (
             <p className="text-xs text-gray-500 mt-4">
