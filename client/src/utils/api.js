@@ -185,6 +185,12 @@ export const tvApi = {
   deleteSlide: (id) => api.delete(`/tv/slides/${id}`),
 }
 
+// Projection QLab status (read-only, proxied and cached by the server)
+export const qlabApi = {
+  getStatus: () => api.get('/qlab/status'),
+  getCuelists: () => api.get('/qlab/cuelists'),
+}
+
 // Movie download jobs API (server-side downloader: public Drive link / FTP)
 export const movieDownloadApi = {
   create: (data) => api.post('/movie-downloads', data),

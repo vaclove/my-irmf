@@ -28,7 +28,7 @@
 
   var API = '/api/public';
   var PROGRAMME_SCENE = { overviewSeconds: 15, featureSeconds: 12 };
-  var PHOTO_SECONDS = 8;
+  var PHOTO_SECONDS = 8; // until the manifest brings settings.default_photo_seconds
   var CARDS_PER_PAGE = 6; // two columns of three on the day's programme
   var SYNOPSIS_MAX = 420;
   var MANIFEST_REFRESH_MS = 60 * 1000;
@@ -198,6 +198,10 @@
 
   function programmeDays() {
     return (state.manifest && state.manifest.settings.programme_days) || 'today';
+  }
+
+  function photoSeconds(slide) {
+    return slide.display_seconds || (state.manifest && state.manifest.settings.default_photo_seconds) || PHOTO_SECONDS;
   }
 
   /** Whether each screening follows the day's programme on a slide of its own (on unless switched off). */
@@ -705,7 +709,7 @@
     var fill = Math.abs(ratio - 16 / 9) < 0.25;
     return {
       el: h('div', { class: 'media' }, h('img', { class: fill ? 'cover' : 'contain', src: slide.url, alt: '' })),
-      seconds: slide.display_seconds || PHOTO_SECONDS,
+      seconds: photoSeconds(slide),
       media: true,
       label: 'photo ' + (slide.title || slide.id),
     };
