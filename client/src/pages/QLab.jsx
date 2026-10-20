@@ -9,6 +9,10 @@ const CUELISTS_POLL_MS = 60 * 1000
 // Refetch the show sooner when a running cue is missing from it
 const CUELISTS_RETRY_MS = 10 * 1000
 const TICK_MS = 250
+// The bridge takes a new projector frame at most every 10 s
+const SNAPSHOT_REFRESH_MS = 10 * 1000
+// Older frames get their age shown (the Mac or projector dropped out)
+const SNAPSHOT_STALE_MS = 30 * 1000
 
 const STATES = {
   ok: { label: 'Live', dot: 'bg-green-500', pill: 'bg-green-50 text-green-700 border-green-200' },
@@ -108,6 +112,41 @@ const ProgressBar = ({ elapsed, duration, paused, large = false }) => {
         style={{ width: `${percent}%` }}
       />
     </div>
+  )
+}
+
+/** What the projector shows now, reloaded every 10 s while the tab is visible. */
+const ProjectorSnapshot = ({ ageMs }) => {
+  const [stamp, setStamp] = useState(Date.now())
+  const [failed, setFailed] = useState(false)
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!document.hidden) setStamp(Date.now())
+    }, SNAPSHOT_REFRESH_MS)
+    return () => clearInterval(interval)
+  }, [])
+
+  return (
+    <figure className="w-full md:w-80 lg:w-96 shrink-0">
+      <div className="relative aspect-video rounded-md overflow-hidden bg-gray-900">
+        <img
+          src={qlabApi.snapshotUrl(stamp)}
+          alt="Projector output"
+          className={`w-full h-full object-contain ${failed ? 'invisible' : ''}`}
+          onLoad={() => setFailed(false)}
+          onError={() => setFailed(true)}
+        />
+        {failed && (
+          <div className="absolute inset-0 flex items-center justify-center text-sm text-gray-400">
+            No projector image
+          </div>
+        )}
+      </div>
+      <figcaption className="mt-1 text-xs text-gray-500">
+        On screen{!failed && ageMs > SNAPSHOT_STALE_MS ? ` · ${formatTime(ageMs / 1000)} ago` : ', every 10 s'}
+      </figcaption>
+    </figure>
   )
 }
 
@@ -262,68 +301,73 @@ const QLab = () => {
 
       {/* Now playing */}
       <div className="bg-white rounded-lg shadow-sm border p-6">
-        {status.state !== 'ok' ? (
-          <div className="text-center py-8">
-            <p className="text-gray-700 font-medium">{stateInfo.label}</p>
-            <p className="text-sm text-gray-500 mt-1">{stateInfo.message}</p>
-          </div>
-        ) : !mainCue ? (
-          <div className="text-center py-8">
-            <p className="text-gray-700 font-medium">Nothing is playing</p>
-            <p className="text-sm text-gray-500 mt-1">QLab is ready, no cue is running.</p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <div className="flex items-start justify-between gap-4">
-              <div className="min-w-0">
-                <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
-                  {mainCue.paused ? 'Paused' : 'Now playing'}
-                  {mainCue.number && ` · cue ${mainCue.number}`}
-                  {mainCue.type && ` · ${mainCue.type}`}
-                </p>
-                <h3 className="text-2xl font-bold text-gray-900 mt-1 break-words">{mainCue.name || 'Untitled cue'}</h3>
+        <div className="flex flex-col md:flex-row gap-6">
+          <div className="flex-1 min-w-0">
+            {status.state !== 'ok' ? (
+              <div className="text-center py-8">
+                <p className="text-gray-700 font-medium">{stateInfo.label}</p>
+                <p className="text-sm text-gray-500 mt-1">{stateInfo.message}</p>
               </div>
-              {mainCue.paused && (
-                <span className="shrink-0 px-3 py-1 rounded-full text-sm font-medium bg-amber-100 text-amber-800">⏸ Paused</span>
-              )}
-            </div>
-            <ProgressBar elapsed={mainElapsed} duration={mainCue.duration} paused={mainCue.paused} large />
-            <div className="grid grid-cols-3 text-sm">
-              <div>
-                <p className="text-gray-500">Elapsed</p>
-                <p className="text-lg font-semibold text-gray-900 tabular-nums">{formatTime(mainElapsed)}</p>
+            ) : !mainCue ? (
+              <div className="text-center py-8">
+                <p className="text-gray-700 font-medium">Nothing is playing</p>
+                <p className="text-sm text-gray-500 mt-1">QLab is ready, no cue is running.</p>
               </div>
-              <div className="text-center">
-                <p className="text-gray-500">Remaining</p>
-                <p className="text-lg font-semibold text-gray-900 tabular-nums">
-                  {mainCue.duration > 0 && mainElapsed !== null ? `−${formatTime(mainCue.duration - mainElapsed)}` : '–'}
-                </p>
+            ) : (
+              <div className="space-y-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                      {mainCue.paused ? 'Paused' : 'Now playing'}
+                      {mainCue.number && ` · cue ${mainCue.number}`}
+                      {mainCue.type && ` · ${mainCue.type}`}
+                    </p>
+                    <h3 className="text-2xl font-bold text-gray-900 mt-1 break-words">{mainCue.name || 'Untitled cue'}</h3>
+                  </div>
+                  {mainCue.paused && (
+                    <span className="shrink-0 px-3 py-1 rounded-full text-sm font-medium bg-amber-100 text-amber-800">⏸ Paused</span>
+                  )}
+                </div>
+                <ProgressBar elapsed={mainElapsed} duration={mainCue.duration} paused={mainCue.paused} large />
+                <div className="grid grid-cols-3 text-sm">
+                  <div>
+                    <p className="text-gray-500">Elapsed</p>
+                    <p className="text-lg font-semibold text-gray-900 tabular-nums">{formatTime(mainElapsed)}</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-gray-500">Remaining</p>
+                    <p className="text-lg font-semibold text-gray-900 tabular-nums">
+                      {mainCue.duration > 0 && mainElapsed !== null ? `−${formatTime(mainCue.duration - mainElapsed)}` : '–'}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-gray-500">Duration</p>
+                    <p className="text-lg font-semibold text-gray-900 tabular-nums">
+                      {mainCue.duration > 0 ? formatTime(mainCue.duration) : '–'}
+                    </p>
+                  </div>
+                </div>
+                {mainCue.duration > 0 && mainElapsed !== null && !mainCue.paused && (
+                  <p className="text-sm text-gray-500">
+                    Ends at{' '}
+                    {new Date(now + (mainCue.duration - mainElapsed) * 1000).toLocaleTimeString('cs-CZ', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </p>
+                )}
               </div>
-              <div className="text-right">
-                <p className="text-gray-500">Duration</p>
-                <p className="text-lg font-semibold text-gray-900 tabular-nums">
-                  {mainCue.duration > 0 ? formatTime(mainCue.duration) : '–'}
-                </p>
+            )}
+            {status.state === 'ok' && nextCue && (
+              <div className="mt-5 pt-4 border-t text-sm text-gray-600">
+                <span className="text-gray-500">Next:</span>{' '}
+                {nextCue.number && <span className="text-gray-500 tabular-nums">{nextCue.number} · </span>}
+                <span className="font-medium text-gray-800">{nextCue.name}</span>
               </div>
-            </div>
-            {mainCue.duration > 0 && mainElapsed !== null && !mainCue.paused && (
-              <p className="text-sm text-gray-500">
-                Ends at{' '}
-                {new Date(now + (mainCue.duration - mainElapsed) * 1000).toLocaleTimeString('cs-CZ', {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })}
-              </p>
             )}
           </div>
-        )}
-        {status.state === 'ok' && nextCue && (
-          <div className="mt-5 pt-4 border-t text-sm text-gray-600">
-            <span className="text-gray-500">Next:</span>{' '}
-            {nextCue.number && <span className="text-gray-500 tabular-nums">{nextCue.number} · </span>}
-            <span className="font-medium text-gray-800">{nextCue.name}</span>
-          </div>
-        )}
+          {status.state === 'ok' && <ProjectorSnapshot ageMs={status.snapshotAgeMs} />}
+        </div>
       </div>
 
       {/* Other running cues */}

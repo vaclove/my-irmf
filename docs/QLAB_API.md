@@ -132,6 +132,15 @@ Strom cue listů. Mění se jen při úpravě show, stačí načíst při startu
 
 Nejvyšší úroveň pole jsou cue listy (`type: "Cue List"`, případně `"Cart"`). `duration` ani časy tu nejsou, ty jsou jen v `/running`.
 
+### `GET /snapshot.jpg` – náhled obrazu z projektoru
+
+Aktuální snímek toho, co jde na plátno (výstup QLabu na projektor), jako `image/jpeg`, 640×360 px, typicky 10–60 kB.
+
+- Nový snímek vzniká **nejvýš jednou za 10 s**. Dotazy v mezidobí dostanou stejný obrázek, takže nemá smysl stahovat ho častěji.
+- Mezi cues nebo po skončení filmu bývá obraz černý. Je to platný snímek, ne chyba.
+- Při chybě vrací `503` s JSON `{"error": "snímek nedostupný: ..."}`, například když projektor není připojený nebo bridge nemá oprávnění snímat obrazovku.
+- Ve vizuálu ho zobraz jako obrázek z **vlastního** endpointu my.irmf.cz (např. `<img src="/api/qlab/snapshot.jpg?t=...">`), nikdy přímo z `qlab.irmf.cz`.
+
 ### `GET /healthz` – dostupnost
 
 `200 {"ok": true}` = QLab je dostupný. `503 {"ok": false, "error": "..."}` = bridge běží, ale QLab ne. Hodí se pro monitoring, ne pro vizuál.
@@ -145,7 +154,7 @@ Nejvyšší úroveň pole jsou cue listy (`type: "Cue List"`, případně `"Cart
 | 200 | JSON | OK | data |
 | 403 | text/html | chybějící nebo špatný service token (chyba konfigurace) | „data nedostupná“, zalogovat jako chybu |
 | 502 / 530 | text/html | Mac je vypnutý, bez sítě, nebo neběží bridge či tunnel | „promítání offline“ |
-| 503 | JSON `{"error": "..."}` | bridge běží, ale QLab není spuštěný nebo nemá otevřený workspace | „QLab neběží“ |
+| 503 | JSON `{"error": "..."}` | bridge běží, ale QLab není spuštěný nebo nemá otevřený workspace. U `/snapshot.jpg`: projektor odpojený nebo chybí oprávnění ke snímání | „QLab neběží“, u snímku placeholder |
 | 404 | JSON | neexistující cesta | chyba v kódu |
 | 405 | JSON | jiná metoda než GET | chyba v kódu |
 
@@ -157,7 +166,8 @@ Timeout požadavku nastav na ~5 s. Offline stav je běžný (mimo promítání b
 2. **Frontend polluje vlastní backend** každé 1–2 s (nebo backend pushuje přes SSE/WebSocket, pokud je to v projektu zavedené).
 3. **Plynulý progress bar:** mezi dotazy dopočítávej čas lokálně: `elapsed + (now - fetchedAt)`, pokud `paused === false`. Při každé nové odpovědi se srovnej se skutečnou hodnotou.
 4. **`/cuelists`** načti zvlášť a zřídka (při startu, pak třeba 1× za minutu). Podle `uniqueID` z `running` zvýrazni, která cue v seznamu právě běží, a co bude další (následující položka ve stejném cue listu).
-5. Proxy endpoint má klientovi vracet jen data, která vizuál potřebuje. Nikdy ne hlavičky, token ani `permissions`.
+5. **Snímek** stahuje backend jednou za 10 s (jen když je `state === "ok"` a něco běží, jinak stačí jednou za minutu), drží poslední úspěšný JPEG v paměti a vrací ho na vlastním endpointu (např. `GET /api/qlab/snapshot.jpg`) s `Content-Type: image/jpeg` a `Cache-Control: no-store`. Frontend obnovuje `<img>` každých 10 s s parametrem proti cache (`?t=<timestamp>`). Když snímek není k dispozici, zobraz placeholder.
+6. Proxy endpoint má klientovi vracet jen data, která vizuál potřebuje. Nikdy ne hlavičky, token ani `permissions`.
 
 ## Příklad serverového kódu (Node / TypeScript)
 
@@ -222,6 +232,25 @@ setInterval(refresh, 1500);
 refresh();
 
 // GET /api/qlab/status  ->  return cache
+
+let snapshot: { fetchedAt: number; jpeg: Buffer } | null = null;
+
+async function refreshSnapshot(): Promise<void> {
+  try {
+    const res = await fetchQLab("/snapshot.jpg");
+    if (res.ok && res.headers.get("content-type")?.startsWith("image/jpeg")) {
+      snapshot = { fetchedAt: Date.now(), jpeg: Buffer.from(await res.arrayBuffer()) };
+    }
+    // jinak ponech poslední úspěšný snímek; podle fetchedAt ho UI může označit jako starý
+  } catch {
+    // offline – stejné jako výše
+  }
+}
+
+setInterval(refreshSnapshot, 10_000);
+refreshSnapshot();
+
+// GET /api/qlab/snapshot.jpg  ->  snapshot.jpeg (image/jpeg, Cache-Control: no-store), nebo 404 když je null
 ```
 
 ## Co nedělat
@@ -229,5 +258,6 @@ refresh();
 - Nevolat `qlab.irmf.cz` z prohlížeče a neposílat service token na klienta.
 - Nepoužívat jiné metody než GET ani jiné cesty, nic dalšího neexistuje. API nikdy nebude umět QLab ovládat.
 - Nepollovat rychleji než 1× za sekundu. Bridge stejně drží odpovědi 0,5 s v cache.
+- Nestahovat `/snapshot.jpg` častěji než jednou za 10 s. Nový snímek stejně nevznikne a snímání běží na promítacím Macu.
 - Nespoléhat na pořadí položek v `running`.
 - Nepředpokládat, že `number`, `duration` nebo `elapsed` jsou vždy vyplněné.
