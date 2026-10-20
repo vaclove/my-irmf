@@ -22,6 +22,8 @@ const router = express.Router();
 
 const TERMINAL_STATUSES = ['completed', 'failed', 'cancelled'];
 const KINDS = ['preview', 'full'];
+// 'auto': 1080p, or 2160p for UHD masters; '1080p': HD even from a 4K master.
+const RESOLUTIONS = ['auto', '1080p'];
 const SUBTITLE_CHOICES = {
   cs: ['subtitles_cs', 'subtitles_cs_synced'],
   en: ['subtitles_en', 'subtitles_en_synced'],
@@ -71,13 +73,16 @@ function pickSubtitles(sources, { cs, en }) {
 async function createJob(
   req,
   res,
-  { movieId, kind, cs, en, previewStart, existingLang, addedPosition, addedAlign, operation }
+  { movieId, kind, cs, en, previewStart, existingLang, addedPosition, addedAlign, resolution, operation }
 ) {
   const movieRes = await pool.query('SELECT id FROM movies WHERE id = $1', [movieId]);
   if (movieRes.rows.length === 0) return res.status(404).json({ error: 'Movie not found' });
   if (!KINDS.includes(kind)) return res.status(400).json({ error: "kind must be 'preview' or 'full'" });
   if (previewStart != null && !(Number.isFinite(Number(previewStart)) && Number(previewStart) >= 0)) {
     return res.status(400).json({ error: 'preview_start_seconds must be a non-negative number' });
+  }
+  if (!RESOLUTIONS.includes(resolution)) {
+    return res.status(400).json({ error: "resolution must be 'auto' or '1080p'" });
   }
 
   const sources = await loadSources(movieId);
@@ -114,8 +119,8 @@ async function createJob(
     `INSERT INTO subtitle_burn_jobs
        (movie_id, kind, source_ref, subtitle_cs_kind, subtitle_cs_ref, subtitle_en_kind, subtitle_en_ref,
         preview_start_seconds, preview_length_seconds, existing_subtitles_lang, added_position, added_align,
-        status, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'pending', $13) RETURNING ${JOB_COLUMNS}`,
+        resolution, status, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'pending', $14) RETURNING ${JOB_COLUMNS}`,
     [
       movieId,
       kind,
@@ -129,6 +134,7 @@ async function createJob(
       existingLang ?? null,
       existingLang != null ? Number(addedPosition) : null,
       existingLang != null ? addedAlign : 'bottom',
+      resolution,
       req.user?.email || null,
     ]
   );
@@ -157,6 +163,7 @@ async function createJob(
       existing_subtitles_lang: existingLang ?? null,
       added_position: existingLang != null ? Number(addedPosition) : null,
       added_align: existingLang != null ? addedAlign : null,
+      resolution,
       operation,
     },
   });
@@ -224,8 +231,17 @@ router.post('/check', async (req, res) => {
 router.post('/', async (req, res) => {
   if (!subtitleBurnQueue.isConfigured()) return notConfigured(res);
   try {
-    const { movie_id, kind, cs, en, preview_start_seconds, existing_subtitles_lang, added_position, added_align } =
-      req.body;
+    const {
+      movie_id,
+      kind,
+      cs,
+      en,
+      preview_start_seconds,
+      existing_subtitles_lang,
+      added_position,
+      added_align,
+      resolution,
+    } = req.body;
     if (!movie_id) return res.status(400).json({ error: 'movie_id is required' });
     await createJob(req, res, {
       movieId: movie_id,
@@ -236,6 +252,7 @@ router.post('/', async (req, res) => {
       existingLang: existing_subtitles_lang || null,
       addedPosition: added_position ?? null,
       addedAlign: added_align || 'bottom',
+      resolution: resolution || 'auto',
       operation: 'create',
     });
   } catch (error) {
@@ -354,6 +371,7 @@ router.post('/:id/retry', async (req, res) => {
       existingLang: old.existing_subtitles_lang,
       addedPosition: old.added_position,
       addedAlign: old.added_align || 'bottom',
+      resolution: old.resolution || 'auto',
       operation: 'retry',
     });
   } catch (error) {

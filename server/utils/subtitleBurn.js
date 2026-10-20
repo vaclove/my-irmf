@@ -20,7 +20,8 @@
  *   fractions of the canvas height, so 1080p and 2160p renders look the same
  *   on screen.
  *
- * Canvas: 1920x1080, or 3840x2160 for UHD masters. The picture (with any
+ * Canvas: 1920x1080, or 3840x2160 for UHD masters unless the export asks
+ * for 1080p. The picture (with any
  * letterbox baked into the master cropped away) is scaled to fit and
  * centered. When a black band above or below it holds two lines of a
  * language, that language sits inside the band (CS in the bottom one, EN in
@@ -84,14 +85,15 @@ function bandMargin(band, block, m) {
 
 /**
  * Canvas and picture placement for a master.
- * @param {{width:number, height:number, sar?:number, crop?:{x,y,w,h}|null, single?:boolean, centered?:boolean}} source
+ * @param {{width:number, height:number, sar?:number, crop?:{x,y,w,h}|null, single?:boolean, centered?:boolean, hd?:boolean}} source
  *   coded size, sample aspect ratio, the letterbox crop (if any), whether
- *   only one language is burned in, and whether to keep the picture centered
- *   even then (subtitles added to burned-in ones are placed against it)
+ *   only one language is burned in, whether to keep the picture centered
+ *   even then (subtitles added to burned-in ones are placed against it), and
+ *   whether to render 1080p even from a UHD master
  * @returns {{canvas, picture, crop, band, margins: {cs, en}, metrics}}
  */
-function computeLayout({ width, height, sar = 1, crop = null, single = false, centered = false }) {
-  const uhd = width > 2560 || height > 1440;
+function computeLayout({ width, height, sar = 1, crop = null, single = false, centered = false, hd = false }) {
+  const uhd = !hd && (width > 2560 || height > 1440);
   const W = uhd ? 3840 : 1920;
   const H = uhd ? 2160 : 1080;
   const m = metrics(H);
