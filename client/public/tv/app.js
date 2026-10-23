@@ -27,6 +27,7 @@
   'use strict';
 
   var API = '/api/public';
+  // Until the manifest brings settings.programme_seconds / screening_seconds
   var PROGRAMME_SCENE = { overviewSeconds: 15, featureSeconds: 12 };
   var PHOTO_SECONDS = 8; // until the manifest brings settings.default_photo_seconds
   var CARDS_PER_PAGE = 6; // two columns of three on the day's programme
@@ -202,6 +203,14 @@
 
   function photoSeconds(slide) {
     return slide.display_seconds || (state.manifest && state.manifest.settings.default_photo_seconds) || PHOTO_SECONDS;
+  }
+
+  function programmePageSeconds() {
+    return (state.manifest && state.manifest.settings.programme_seconds) || PROGRAMME_SCENE.overviewSeconds;
+  }
+
+  function screeningSlideSeconds() {
+    return (state.manifest && state.manifest.settings.screening_seconds) || PROGRAMME_SCENE.featureSeconds;
   }
 
   /** Whether each screening follows the day's programme on a slide of its own (on unless switched off). */
@@ -687,7 +696,7 @@
     pages.forEach(function (cards, i) {
       slides.push({
         el: daySlide(day, cards, pages.length > 1 ? (i + 1) + '/' + pages.length : '', nowMin),
-        seconds: PROGRAMME_SCENE.overviewSeconds,
+        seconds: programmePageSeconds(),
         label: 'programme ' + day.date,
         // The day's own header replaces the logo and clock
         bare: true,
@@ -696,7 +705,7 @@
     if (!screeningSlides()) return slides;
     entries.forEach(function (e) {
       // The festival visual replaces the logo and clock on these
-      slides.push({ el: featureSlide(e, day, nowMin), seconds: PROGRAMME_SCENE.featureSeconds, label: e.title, bare: true });
+      slides.push({ el: featureSlide(e, day, nowMin), seconds: screeningSlideSeconds(), label: e.title, bare: true });
     });
     return slides;
   }

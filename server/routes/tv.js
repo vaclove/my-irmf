@@ -16,11 +16,17 @@ const SLIDE_COLUMNS = `id, kind, title, movie_id, sort_order, hidden, display_se
   progress_percent, error_message, blob_name, source_blob_name, file_name, size, width, height,
   media_seconds, created_by, created_at, updated_at`;
 
-const SETTINGS_COLUMNS = 'programme_days, screening_slides, default_photo_seconds, reload_requested_at, updated_by, updated_at';
+const SETTINGS_COLUMNS = `programme_days, screening_slides, default_photo_seconds, programme_seconds,
+  screening_seconds, reload_requested_at, updated_by, updated_at`;
+// Slide times in seconds, see migrations 072 and 073
+const SECONDS_SETTINGS = ['default_photo_seconds', 'programme_seconds', 'screening_seconds'];
 
 async function readSettings() {
   const result = await pool.query(`SELECT ${SETTINGS_COLUMNS} FROM tv_settings WHERE id = 1`);
-  return result.rows[0] || { programme_days: 'today', screening_slides: true, default_photo_seconds: 8, reload_requested_at: null };
+  return result.rows[0] || {
+    programme_days: 'today', screening_slides: true, default_photo_seconds: 8, programme_seconds: 15,
+    screening_seconds: 12, reload_requested_at: null,
+  };
 }
 
 async function readSlides() {
@@ -88,16 +94,17 @@ adminRouter.get('/settings', async (req, res) => {
 adminRouter.put('/settings', audit, async (req, res) => {
   // Any setting alone may be sent; the others stay. reset_photo_seconds also
   // drops every photo's own time, so the default applies to all of them.
-  const { programme_days, screening_slides, default_photo_seconds, reset_photo_seconds } = req.body;
+  const { programme_days, screening_slides, reset_photo_seconds } = req.body;
   if (programme_days !== undefined && !PROGRAMME_DAYS.includes(programme_days)) {
     return res.status(400).json({ error: `programme_days must be one of: ${PROGRAMME_DAYS.join(', ')}` });
   }
   if (screening_slides !== undefined && typeof screening_slides !== 'boolean') {
     return res.status(400).json({ error: 'screening_slides must be true or false' });
   }
-  if (default_photo_seconds !== undefined
-    && !(Number.isInteger(default_photo_seconds) && default_photo_seconds >= 2 && default_photo_seconds <= 120)) {
-    return res.status(400).json({ error: 'default_photo_seconds must be a whole number between 2 and 120' });
+  const invalidSeconds = SECONDS_SETTINGS.find((name) => req.body[name] !== undefined
+    && !(Number.isInteger(req.body[name]) && req.body[name] >= 2 && req.body[name] <= 120));
+  if (invalidSeconds) {
+    return res.status(400).json({ error: `${invalidSeconds} must be a whole number between 2 and 120` });
   }
   const client = await pool.connect();
   try {
@@ -105,10 +112,13 @@ adminRouter.put('/settings', audit, async (req, res) => {
     const result = await client.query(`
       UPDATE tv_settings SET programme_days = COALESCE($1, programme_days),
         screening_slides = COALESCE($2, screening_slides),
-        default_photo_seconds = COALESCE($3, default_photo_seconds), updated_by = $4, updated_at = now()
+        default_photo_seconds = COALESCE($3, default_photo_seconds),
+        programme_seconds = COALESCE($4, programme_seconds),
+        screening_seconds = COALESCE($5, screening_seconds), updated_by = $6, updated_at = now()
       WHERE id = 1
       RETURNING ${SETTINGS_COLUMNS}
-    `, [programme_days ?? null, screening_slides ?? null, default_photo_seconds ?? null, req.user?.email || null]);
+    `, [programme_days ?? null, screening_slides ?? null, ...SECONDS_SETTINGS.map((name) => req.body[name] ?? null),
+      req.user?.email || null]);
     if (reset_photo_seconds === true) {
       await client.query(`
         UPDATE tv_slides SET display_seconds = NULL, updated_at = now()
@@ -410,6 +420,8 @@ publicRouter.get('/manifest', async (req, res) => {
         programme_days: settings.programme_days,
         screening_slides: settings.screening_slides,
         default_photo_seconds: settings.default_photo_seconds,
+        programme_seconds: settings.programme_seconds,
+        screening_seconds: settings.screening_seconds,
         reload_requested_at: settings.reload_requested_at,
       },
       slides,
