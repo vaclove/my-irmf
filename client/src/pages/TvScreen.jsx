@@ -8,6 +8,14 @@ import TvVideoUploadModal from '../components/tv/TvVideoUploadModal'
 
 // The looping showcase on the TV in the venue (client/public/tv/). The player
 // re-reads the slides and settings every minute.
+// The player's times before they were settings (client/public/tv/app.js)
+const DEFAULT_PROGRAMME_SECONDS = 15
+const DEFAULT_SCREENING_SECONDS = 12
+const PROGRAMME_SECONDS_OPTIONS = [6, 8, 10, 12, 15, 20, 25, 30, 45, 60]
+
+/** The preset times plus the current one, if it is not among them. */
+const secondsOptions = (current) => [...new Set([...PROGRAMME_SECONDS_OPTIONS, current])].sort((a, b) => a - b)
+
 const PROGRAMME_DAYS_OPTIONS = [
   {
     value: 'today',
@@ -211,6 +219,8 @@ const TvScreen = () => {
   const cachedMedia = slides.filter((s) => s.kind !== 'programme' && s.status === 'ready')
   const cachedBytes = cachedMedia.reduce((sum, s) => sum + (s.size || 0), 0)
   const photoOverrides = slides.filter((s) => s.kind === 'photo' && s.display_seconds).length
+  const programmeSeconds = settings?.programme_seconds || DEFAULT_PROGRAMME_SECONDS
+  const screeningSeconds = settings?.screening_seconds || DEFAULT_SCREENING_SECONDS
   const photoSecondsOptions = [...new Set([...PHOTO_SECONDS_OPTIONS, defaultPhotoSeconds])].sort((a, b) => a - b)
   const programmeLabel = PROGRAMME_DAYS_OPTIONS.find((o) => o.value === settings?.programme_days)?.label || ''
 
@@ -373,6 +383,33 @@ const TvScreen = () => {
                 </span>
               </span>
             </label>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-gray-600">
+              <label className="flex items-center gap-2">
+                Each programme page is shown for
+                <select
+                  value={programmeSeconds}
+                  onChange={(e) => saveSettings({ programme_seconds: Number(e.target.value) })}
+                  className="border border-gray-300 rounded px-2 py-1 text-sm"
+                >
+                  {secondsOptions(programmeSeconds).map((s) => (
+                    <option key={s} value={s}>{s} s</option>
+                  ))}
+                </select>
+              </label>
+              <label className={`flex items-center gap-2 ${settings.screening_slides === false ? 'opacity-50' : ''}`}>
+                each screening slide for
+                <select
+                  value={screeningSeconds}
+                  disabled={settings.screening_slides === false}
+                  onChange={(e) => saveSettings({ screening_seconds: Number(e.target.value) })}
+                  className="border border-gray-300 rounded px-2 py-1 text-sm"
+                >
+                  {secondsOptions(screeningSeconds).map((s) => (
+                    <option key={s} value={s}>{s} s</option>
+                  ))}
+                </select>
+              </label>
+            </div>
           </fieldset>
           {settings.updated_by && (
             <p className="text-xs text-gray-500 mt-4">
