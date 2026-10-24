@@ -77,6 +77,8 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+      // The ticket scanner decodes barcodes with a WebAssembly build of zxing-cpp
+      "script-src": ["'self'", "'wasm-unsafe-eval'"],
       "img-src": ["'self'", "data:", "https://irmf.cz", "https://lh3.googleusercontent.com", "https://s3.irmf.cz"],
       // Browser uploads movie files straight to Google Drive resumable-session
       // URLs (legacy editions) or Azure Blob SAS URLs. The TV player (/tv/)
