@@ -1,14 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
+import { CodeScanner } from '../utils/codeScanner';
 import { staffScannerClient } from '../utils/scannerClient';
 import ShareScannerModal from '../components/ShareScannerModal';
 
-// Badges and one-time tickets are Code128, GoOut tickets a QR code with a 13-digit id
-const SCAN_FORMATS = [
-  Html5QrcodeSupportedFormats.CODE_128,
-  Html5QrcodeSupportedFormats.QR_CODE
-];
 const CAMERA_STORAGE_KEY = 'scanner.cameraId';
 
 // Rear cameras ordered main lens first. Ultra-wide and telephoto lenses often
@@ -21,14 +16,6 @@ const orderBackCameras = (cameras) => {
   const isSecondaryLens = (c) =>
     /ultra|wide|širok|tele|dual|duáln|triple|trojit|depth|infrared|macro/i.test(c.label);
   return [...back.filter(c => !isSecondaryLens(c)), ...back.filter(isSecondaryLens)];
-};
-
-// Wide scan area for 1D barcodes, still tall enough for a QR code.
-// Decoding works on this region scaled to its on-screen size, so keep it large.
-const scanBox = (viewfinderWidth, viewfinderHeight) => {
-  const width = Math.floor(viewfinderWidth * 0.9);
-  const height = Math.floor(Math.min(viewfinderHeight * 0.8, width * 0.55));
-  return { width, height };
 };
 
 // client: staff (default) or a phone that joined through a scanner link
@@ -48,8 +35,8 @@ const Scanner = ({ onScanningChange, client = staffScannerClient }) => {
   const [editionHistory, setEditionHistory] = useState([]);
   const [showHistory, setShowHistory] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
-  const scannerRef = useRef(null);
-  const html5QrcodeRef = useRef(null);
+  const scannerContainerRef = useRef(null);
+  const codeScannerRef = useRef(null);
   const selectedScreeningRef = useRef(null);
   const lastScannedBadgeRef = useRef(null);
   const scanCooldownRef = useRef(false);
@@ -85,16 +72,11 @@ const Scanner = ({ onScanningChange, client = staffScannerClient }) => {
     onScanningChange?.(scanning);
   }, [scanning, onScanningChange]);
 
-  // Cleanup scanner on unmount. stop() throws synchronously when the camera never
-  // started (e.g. permission denied), which would crash the page.
+  // Release the camera on unmount
   useEffect(() => {
     return () => {
-      if (html5QrcodeRef.current && scanning) {
-        try {
-          html5QrcodeRef.current.stop().catch(() => {});
-        } catch {
-          // Not running
-        }
+      if (codeScannerRef.current && scanning) {
+        codeScannerRef.current.stop();
       }
     };
   }, [scanning]);
@@ -182,18 +164,13 @@ const Scanner = ({ onScanningChange, client = staffScannerClient }) => {
 
   const initializeScanner = async () => {
     try {
-      const html5Qrcode = new Html5Qrcode("scanner-container", {
-        formatsToSupport: SCAN_FORMATS,
-        // Native BarcodeDetector (Chrome on Android) is far better than the JS decoder
-        useBarCodeDetectorIfSupported: true,
-        verbose: false
-      });
-      html5QrcodeRef.current = html5Qrcode;
+      const scanner = new CodeScanner(scannerContainerRef.current, onScanSuccess);
+      codeScannerRef.current = scanner;
 
       // Listing cameras also triggers the permission prompt, so labels are available
       let backCameras = [];
       try {
-        backCameras = orderBackCameras(await Html5Qrcode.getCameras());
+        backCameras = orderBackCameras(await CodeScanner.getCameras());
       } catch (err) {
         console.warn('Could not list cameras, falling back to facingMode:', err);
       }
@@ -201,75 +178,25 @@ const Scanner = ({ onScanningChange, client = staffScannerClient }) => {
 
       const savedId = localStorage.getItem(CAMERA_STORAGE_KEY);
       const initial = backCameras.find(c => c.id === savedId) || backCameras[0];
-      await startCamera(html5Qrcode, initial?.id || null);
+      setCameraId(initial?.id || null);
+      await scanner.start(initial?.id || null);
     } catch (err) {
       console.error("Error starting scanner:", err);
       setError("Failed to start camera. Please grant camera permissions.");
     }
   };
 
-  const startCamera = async (html5Qrcode, id) => {
-    setCameraId(id);
-
-    await html5Qrcode.start(
-      { facingMode: "environment" }, // ignored when videoConstraints are set
-      {
-        fps: 15,
-        qrbox: scanBox,
-        videoConstraints: {
-          ...(id ? { deviceId: { exact: id } } : { facingMode: "environment" }),
-          width: { ideal: 1920 },
-          height: { ideal: 1080 }
-        }
-      },
-      onScanSuccess,
-      onScanError
-    );
-
-    await tuneCamera(html5Qrcode);
-  };
-
-  // Continuous autofocus and a 2x zoom where the camera supports them. Zoom lets
-  // staff hold the phone further away, beyond the lens' minimum focus distance.
-  const tuneCamera = async (html5Qrcode) => {
-    let capabilities;
-    try {
-      capabilities = html5Qrcode.getRunningTrackCapabilities();
-    } catch (err) {
-      return;
-    }
-
-    if (capabilities.focusMode?.includes('continuous')) {
-      try {
-        await html5Qrcode.applyVideoConstraints({ advanced: [{ focusMode: 'continuous' }] });
-      } catch (err) {
-        console.warn('Could not enable continuous focus:', err);
-      }
-    }
-
-    if (capabilities.zoom) {
-      const zoom = Math.min(2, capabilities.zoom.max);
-      if (zoom > capabilities.zoom.min) {
-        try {
-          await html5Qrcode.applyVideoConstraints({ advanced: [{ zoom }] });
-        } catch (err) {
-          console.warn('Could not set zoom:', err);
-        }
-      }
-    }
-  };
-
   const switchCamera = async () => {
-    const html5Qrcode = html5QrcodeRef.current;
-    if (!html5Qrcode || cameras.length < 2) return;
+    const scanner = codeScannerRef.current;
+    if (!scanner || cameras.length < 2) return;
 
     const index = cameras.findIndex(c => c.id === cameraId);
     const next = cameras[(index + 1) % cameras.length];
     localStorage.setItem(CAMERA_STORAGE_KEY, next.id);
 
     try {
-      await html5Qrcode.stop();
-      await startCamera(html5Qrcode, next.id);
+      setCameraId(next.id);
+      await scanner.start(next.id);
     } catch (err) {
       console.error('Error switching camera:', err);
       setError('Failed to switch camera');
@@ -293,13 +220,7 @@ const Scanner = ({ onScanningChange, client = staffScannerClient }) => {
     }
 
     // Pause scanner during overlay display
-    if (html5QrcodeRef.current) {
-      try {
-        await html5QrcodeRef.current.pause();
-      } catch (err) {
-        console.error('Error pausing scanner:', err);
-      }
-    }
+    codeScannerRef.current?.pause();
 
     // Submit scan to backend (send raw scanned text)
     await submitScan(decodedText);
@@ -311,20 +232,10 @@ const Scanner = ({ onScanningChange, client = staffScannerClient }) => {
     const code = manualCode.replace(/\s/g, '');
     if (!code || scanCooldownRef.current) return;
 
-    if (html5QrcodeRef.current) {
-      try {
-        await html5QrcodeRef.current.pause();
-      } catch (err) {
-        console.error('Error pausing scanner:', err);
-      }
-    }
+    codeScannerRef.current?.pause();
 
     setManualCode('');
     await submitScan(code);
-  };
-
-  const onScanError = (errorMessage) => {
-    // Ignore scan errors (they happen continuously while scanning)
   };
 
   const submitScan = (scannedCode) => {
@@ -381,13 +292,7 @@ const Scanner = ({ onScanningChange, client = staffScannerClient }) => {
           lastScannedBadgeRef.current = null;
 
           // Resume scanner after overlay is hidden
-          if (html5QrcodeRef.current) {
-            try {
-              await html5QrcodeRef.current.resume();
-            } catch (err) {
-              console.error('Error resuming scanner:', err);
-            }
-          }
+          codeScannerRef.current?.resume();
         }, 2500);
       } else if (status === 409) {
         // Already scanned
@@ -412,13 +317,7 @@ const Scanner = ({ onScanningChange, client = staffScannerClient }) => {
           setLastScan(null);
           setError('');
           scanCooldownRef.current = false;
-          if (html5QrcodeRef.current) {
-            try {
-              await html5QrcodeRef.current.resume();
-            } catch (err) {
-              console.error('Error resuming scanner:', err);
-            }
-          }
+          codeScannerRef.current?.resume();
         }, 2500);
       } else if (status === 404) {
         // Vibrate on error (different pattern than success)
@@ -438,13 +337,7 @@ const Scanner = ({ onScanningChange, client = staffScannerClient }) => {
           setLastScan(null);
           setError('');
           scanCooldownRef.current = false;
-          if (html5QrcodeRef.current) {
-            try {
-              await html5QrcodeRef.current.resume();
-            } catch (err) {
-              console.error('Error resuming scanner:', err);
-            }
-          }
+          codeScannerRef.current?.resume();
         }, 2500);
       } else {
         // Vibrate on error (different pattern than success)
@@ -464,13 +357,7 @@ const Scanner = ({ onScanningChange, client = staffScannerClient }) => {
           setLastScan(null);
           setError('');
           scanCooldownRef.current = false;
-          if (html5QrcodeRef.current) {
-            try {
-              await html5QrcodeRef.current.resume();
-            } catch (err) {
-              console.error('Error resuming scanner:', err);
-            }
-          }
+          codeScannerRef.current?.resume();
         }, 2500);
       }
     } catch (error) {
@@ -493,13 +380,7 @@ const Scanner = ({ onScanningChange, client = staffScannerClient }) => {
         setLastScan(null);
         setError('');
         scanCooldownRef.current = false;
-        if (html5QrcodeRef.current) {
-          try {
-            await html5QrcodeRef.current.resume();
-          } catch (err) {
-            console.error('Error resuming scanner:', err);
-          }
-        }
+        codeScannerRef.current?.resume();
       }, 2500);
     } finally {
       setLoading(false);
@@ -507,13 +388,9 @@ const Scanner = ({ onScanningChange, client = staffScannerClient }) => {
   };
 
   const stopScanning = async () => {
-    if (html5QrcodeRef.current) {
-      try {
-        await html5QrcodeRef.current.stop();
-        html5QrcodeRef.current = null;
-      } catch (error) {
-        console.error('Error stopping scanner:', error);
-      }
+    if (codeScannerRef.current) {
+      await codeScannerRef.current.stop();
+      codeScannerRef.current = null;
     }
     setScanning(false);
     setSelectedScreening(null);
@@ -824,7 +701,7 @@ const Scanner = ({ onScanningChange, client = staffScannerClient }) => {
 
       {/* Scanner Container */}
       <div className="p-4">
-        <div id="scanner-container" className="rounded-lg overflow-hidden mb-4"></div>
+        <div ref={scannerContainerRef} className="rounded-lg overflow-hidden mb-4"></div>
 
         {cameras.length > 1 && (
           <button
