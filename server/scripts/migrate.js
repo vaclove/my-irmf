@@ -36,6 +36,17 @@ function getMigrationFiles() {
   });
 }
 
+// Applied migrations are tracked by version only, so of two files with the
+// same number the second is skipped silently (073 in BE v1.41.0). Returns
+// "version: a, b" for each clash.
+function findDuplicateVersions(migrationFiles) {
+  const byVersion = {};
+  for (const m of migrationFiles) (byVersion[m.version] = byVersion[m.version] || []).push(m.filename);
+  return Object.entries(byVersion)
+    .filter(([, filenames]) => filenames.length > 1)
+    .map(([version, filenames]) => `${version}: ${filenames.join(', ')}`);
+}
+
 // Get applied migrations from database
 async function getAppliedMigrations() {
   try {
@@ -114,6 +125,11 @@ async function runMigrations() {
     
     const migrationFiles = getMigrationFiles();
     console.log(`📁 Found ${migrationFiles.length} migration files`);
+    // Only a warning here: files left over from old deploys must not stop
+    // the server. CI fails on it (`npm run db:check`).
+    for (const duplicate of findDuplicateVersions(migrationFiles)) {
+      console.error(`⚠️ Duplicate migration version ${duplicate} — only the first is applied`);
+    }
     
     // Initialize migration tracking if needed
     const appliedMigrations = await getAppliedMigrations();
@@ -199,6 +215,19 @@ if (require.main === module) {
     case 'status':
       showStatus().then(() => process.exit(0));
       break;
+    case 'check':
+      // Files only, no database (run by CI before deploying)
+      {
+        const migrationFiles = getMigrationFiles();
+        const duplicates = findDuplicateVersions(migrationFiles);
+        if (duplicates.length) {
+          duplicates.forEach((d) => console.error(`❌ Duplicate migration version ${d} — renumber one of them`));
+          process.exit(1);
+        }
+        console.log(`✅ ${migrationFiles.length} migration files, versions unique`);
+        process.exit(0);
+      }
+      break;
     case 'migrate':
     case undefined:
       runMigrations().then(() => process.exit(0));
@@ -208,6 +237,7 @@ if (require.main === module) {
       console.log('Commands:');
       console.log('  migrate  - Run pending migrations (default)');
       console.log('  status   - Show migration status');
+      console.log('  check    - Check migration files for duplicate versions (no database)');
       process.exit(1);
   }
 }
