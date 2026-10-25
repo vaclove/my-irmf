@@ -18,7 +18,7 @@ const SLIDE_COLUMNS = `id, kind, title, movie_id, sort_order, hidden, display_se
 
 const SETTINGS_COLUMNS = `programme_days, screening_slides, default_photo_seconds, programme_seconds,
   screening_seconds, reload_requested_at, updated_by, updated_at`;
-// Slide times in seconds, see migrations 072 and 073
+// Slide times in seconds, see migrations 072 and 074
 const SECONDS_SETTINGS = ['default_photo_seconds', 'programme_seconds', 'screening_seconds'];
 
 async function readSettings() {
