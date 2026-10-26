@@ -12,6 +12,8 @@ const { getSummary: getBoxOfficeSummary } = require('./box-office');
  *   with `goout` null and the reason in `errors`.
  * - Box office: tickets sold at the venue (box_office_tickets), cancelled ones
  *   left out.
+ * - Head counts: screening_attendance, admissions entered by hand for screenings
+ *   nobody scans (school screenings, free events); added to the door scans
  * - Attendance: badge_scans, one row per admission, by entry type:
  *     ticket     GoOut ticket (checked in at GoOut, or unverified when GoOut did not answer)
  *     pass       GoOut festival pass
@@ -34,7 +36,14 @@ const SCAN_TYPE = `
     ELSE 'other'
   END`;
 
-const SCAN_TYPES = ['ticket', 'pass', 'boxOffice', 'badge', 'other'];
+const SCAN_TYPES = ['ticket', 'pass', 'boxOffice', 'badge', 'other', 'manual'];
+
+class DashboardError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
+}
 
 const emptyScans = () => Object.fromEntries([...SCAN_TYPES, 'total'].map(t => [t, 0]));
 const emptyBoxOffice = () => ({ sold: 0, paid: 0, free: 0, cashCents: 0, cardCents: 0, revenueCents: 0 });
@@ -95,7 +104,11 @@ async function loadScreenings(editionId) {
           'badge', COUNT(*) FILTER (WHERE ${SCAN_TYPE} = 'badge'),
           'other', COUNT(*) FILTER (WHERE ${SCAN_TYPE} = 'other'))
         FROM badge_scans bs
-        WHERE bs.programming_id = ps.id) AS scans
+        WHERE bs.programming_id = ps.id) AS scans,
+      (SELECT json_build_object(
+          'count', sa.count, 'note', sa.note, 'enteredBy', sa.entered_by, 'enteredAt', sa.entered_at)
+        FROM screening_attendance sa
+        WHERE sa.programming_id = ps.id) AS manual
     FROM programming_schedule ps
     JOIN venues v ON v.id = ps.venue_id
     LEFT JOIN movies m ON m.id = ps.movie_id
@@ -185,6 +198,11 @@ async function getEditionDashboard(editionId, { refresh = false } = {}) {
     const goout = gooutByScreening.get(row.id);
     const boxOffice = { ...emptyBoxOffice(), ...row.box_office };
     const scans = { ...emptyScans(), ...row.scans };
+    // A head count entered by hand joins the door scans, but is not tied to tickets
+    if (row.manual) {
+      scans.manual = row.manual.count;
+      scans.total += row.manual.count;
+    }
     const sold = (goout?.sold || 0) + boxOffice.sold;
     const paid = (goout?.paid || 0) + boxOffice.paid;
     const revenueCents = (goout?.revenueCents || 0) + boxOffice.revenueCents;
@@ -208,6 +226,7 @@ async function getEditionDashboard(editionId, { refresh = false } = {}) {
         : null,
       boxOffice,
       scans,
+      manual: row.manual,
       sold,
       paid,
       free: sold - paid,
@@ -324,4 +343,31 @@ async function getEditionDashboard(editionId, { refresh = false } = {}) {
   };
 }
 
-module.exports = { getEditionDashboard };
+// Head count for a screening, entered by hand (replaces an earlier one)
+async function setManualAttendance(programmingId, { count, note }, enteredBy) {
+  const people = Number(count);
+  if (!Number.isInteger(people) || people < 0 || people > 100000) {
+    throw new DashboardError(400, 'The head count must be a whole number between 0 and 100 000');
+  }
+  const text = typeof note === 'string' ? note.trim().slice(0, 500) : '';
+  try {
+    const { rows } = await pool.query(`
+      INSERT INTO screening_attendance (programming_id, count, note, entered_by)
+      VALUES ($1, $2, NULLIF($3, ''), $4)
+      ON CONFLICT (programming_id) DO UPDATE
+        SET count = EXCLUDED.count, note = EXCLUDED.note, entered_by = EXCLUDED.entered_by, entered_at = now()
+      RETURNING programming_id, count, note, entered_by, entered_at`,
+      [programmingId, people, text, enteredBy || null]);
+    return rows[0];
+  } catch (error) {
+    if (error.code === '23503') throw new DashboardError(404, 'Screening not found');
+    throw error;
+  }
+}
+
+async function clearManualAttendance(programmingId) {
+  const { rowCount } = await pool.query('DELETE FROM screening_attendance WHERE programming_id = $1', [programmingId]);
+  return rowCount > 0;
+}
+
+module.exports = { getEditionDashboard, setManualAttendance, clearManualAttendance, DashboardError };

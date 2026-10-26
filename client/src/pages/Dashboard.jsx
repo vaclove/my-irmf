@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, Fragment } from 'react'
 import axios from 'axios'
 import { useEdition } from '../contexts/EditionContext'
+import Modal from '../components/Modal'
 import { formatNumber, formatCzk, formatPercent, formatCompact, formatDay, formatShortDay, timeAgo } from '../utils/format'
 import {
   SERIES, GRID_COLOR, AXIS_TEXT, Delta, StatTile, Legend, useElementWidth, niceTicks, topRoundedRect
@@ -25,6 +26,7 @@ const ENTRY_TYPES = [
   { key: 'boxOffice', label: 'Box-office tickets', color: SERIES.orange },
   { key: 'pass', label: 'Festival passes', color: SERIES.aqua },
   { key: 'badge', label: 'Badges', color: SERIES.yellow },
+  { key: 'manual', label: 'Head count', color: SERIES.magenta },
   { key: 'other', label: 'Other', color: SERIES.gray }
 ]
 
@@ -273,7 +275,7 @@ const SORTS = {
   attendance: { label: 'Attendance', compare: (a, b) => b.scans.total - a.scans.total }
 }
 
-function ScreeningsTable({ screenings, sort }) {
+function ScreeningsTable({ screenings, sort, onEditAttendance }) {
   const compare = SORTS[sort].compare
   const groups = []
   if (compare) {
@@ -297,7 +299,7 @@ function ScreeningsTable({ screenings, sort }) {
             <th className="px-4 py-2 text-right font-medium" title="Tickets sold at the venue">Box office</th>
             <th className="px-4 py-2 text-right font-medium">Occupancy</th>
             <th className="px-4 py-2 text-right font-medium" title="GoOut and box office, without GoOut fees">Revenue</th>
-            <th className="px-4 py-2 text-right font-medium" title="Admissions at the door; show-up = ticket holders scanned of tickets sold">Attended</th>
+            <th className="px-4 py-2 text-right font-medium" title="Admissions at the door and head counts entered by hand; show-up = ticket holders scanned of tickets sold">Attended</th>
           </tr>
         </thead>
         <tbody>
@@ -348,6 +350,13 @@ function ScreeningsTable({ screenings, sort }) {
                     {row.showUp !== null && (
                       <span className="ml-1 text-xs text-gray-500">({formatPercent(row.showUp)})</span>
                     )}
+                    <button
+                      type="button"
+                      onClick={() => onEditAttendance(row)}
+                      className={`ml-2 text-sm ${row.manual ? 'text-pink-600 hover:text-pink-800' : 'text-gray-300 hover:text-gray-600'}`}
+                      title={row.manual ? `Head count ${formatNumber(row.manual.count)}${row.manual.note ? `: ${row.manual.note}` : ''}` : 'Enter a head count'}
+                      aria-label={`Head count for ${row.title}`}
+                    >✎</button>
                   </td>
                 </tr>
               ))}
@@ -359,8 +368,84 @@ function ScreeningsTable({ screenings, sort }) {
   )
 }
 
+// Attendance entered by hand, for screenings nobody scans: school screenings, free events
+function AttendanceModal({ row, onClose, onSaved }) {
+  const [count, setCount] = useState(row.manual ? String(row.manual.count) : '')
+  const [note, setNote] = useState(row.manual?.note || '')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const scanned = row.scans.total - (row.manual?.count || 0)
+
+  const request = async (fn) => {
+    setBusy(true)
+    setError('')
+    try {
+      await fn()
+      onSaved()
+    } catch (err) {
+      setError(err.response?.data?.error || err.message || 'Saving failed')
+      setBusy(false)
+    }
+  }
+  const save = (e) => {
+    e.preventDefault()
+    request(() => axios.put(`/api/dashboard/screenings/${row.programmingId}/attendance`, { count: Number(count), note }))
+  }
+  const remove = () => request(() => axios.delete(`/api/dashboard/screenings/${row.programmingId}/attendance`))
+
+  return (
+    <Modal isOpen onClose={onClose} title="Head count" size="small">
+      <div className="text-sm text-gray-600">
+        <span className="font-medium text-gray-900">{row.title}</span>
+        <span className="block text-xs text-gray-500">{formatDay(dayDate(row.date))} {row.time} · {row.venue}</span>
+      </div>
+      <form onSubmit={save} className="mt-4 space-y-4">
+        <label className="block">
+          <span className="block text-sm font-medium text-gray-700">People counted</span>
+          <input
+            type="number" min="0" max="100000" step="1" required autoFocus inputMode="numeric"
+            value={count} onChange={e => setCount(e.target.value)}
+            className="mt-1 w-40 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+          />
+        </label>
+        <label className="block">
+          <span className="block text-sm font-medium text-gray-700">Note</span>
+          <input
+            type="text" maxLength="500" placeholder="e.g. school screening, 8 classes"
+            value={note} onChange={e => setNote(e.target.value)}
+            className="mt-1 w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+          />
+        </label>
+        <p className="text-xs text-gray-500">
+          Added to the {formatNumber(scanned)} admissions scanned at this screening. Head counts stay out of the show-up rate.
+        </p>
+        {row.manual && (
+          <p className="text-xs text-gray-500">
+            Last entered by {row.manual.enteredBy || 'unknown'}, {new Date(row.manual.enteredAt).toLocaleString('cs-CZ', { dateStyle: 'short', timeStyle: 'short' })}
+          </p>
+        )}
+        {error && <p className="text-sm text-red-600">{error}</p>}
+        <div className="flex items-center justify-end gap-2">
+          {row.manual && (
+            <button type="button" onClick={remove} disabled={busy} className="mr-auto px-3 py-2 text-sm text-red-700 hover:bg-red-50 rounded-md disabled:opacity-50">
+              Remove
+            </button>
+          )}
+          <button type="button" onClick={onClose} disabled={busy} className="px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md disabled:opacity-50">
+            Cancel
+          </button>
+          <button type="submit" disabled={busy} className="px-3 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md disabled:opacity-50">
+            {busy ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
 const Dashboard = () => {
   const { selectedEdition } = useEdition()
+  const [editing, setEditing] = useState(null)
   const [dashboard, setDashboard] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -549,7 +634,10 @@ const Dashboard = () => {
             </label>
           </div>
         </div>
-        <ScreeningsTable screenings={dashboard.screenings} sort={sort} />
+        <ScreeningsTable screenings={dashboard.screenings} sort={sort} onEditAttendance={setEditing} />
+        {editing && (
+          <AttendanceModal row={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load() }} />
+        )}
       </div>
     </div>
   )

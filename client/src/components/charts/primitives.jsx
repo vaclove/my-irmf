@@ -4,12 +4,13 @@ import { formatPercent } from '../../utils/format'
 // Data-viz palette (categorical slots 1-4, validated as a set in this order,
 // plus a lighter step of the blue ramp and a neutral for "other").
 // A series keeps its colour on every chart: GoOut is blue, box office orange,
-// festival passes aqua, badges yellow.
+// festival passes aqua, badges yellow, head counts magenta.
 export const SERIES = {
   blue: '#2a78d6',
   orange: '#eb6834',
   aqua: '#1baf7a',
   yellow: '#eda100',
+  magenta: '#e87ba4',
   lightBlue: '#86b6ef',
   gray: '#c3c2b7'
 }
