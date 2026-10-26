@@ -74,6 +74,7 @@ function App() {
                   <Route path="/tickets/scan" element={<TicketsTabs />} />
                   <Route path="/tickets/presale" element={<TicketsTabs />} />
                   <Route path="/tickets/dashboard" element={<TicketsTabs />} />
+                  <Route path="/tickets/badges" element={<TicketsTabs />} />
                   <Route path="/badges/:editionId" element={<BadgeSettings />} />
                   <Route path="/settings" element={<Settings />} />
                   <Route path="/settings/sections" element={<Sections />} />
