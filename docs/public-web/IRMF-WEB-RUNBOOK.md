@@ -320,7 +320,7 @@ wp media import /path/to/hero.jpg --title="Hero banner 2027" --alt="…" --porce
 The "Dní do festivalu" counter is a **Sina Extension `sina_countdown`** widget, id `dc5f71d`, in
 footer #2444. Its target date lives in `settings.countdown_time` (format `YYYY-MM-DD HH:MM`).
 
-**Update this every year.** Currently `2026-10-22 19:00`.
+**Update this every year.** Currently `2027-10-20 19:00` (set 2026-10-26).
 
 Two bugs were found and fixed here; both will recur if the widget is rebuilt:
 
@@ -342,6 +342,12 @@ Two bugs were found and fixed here; both will recur if the widget is rebuilt:
 Labels ("Days") only render when `text_state == 'yes'`; it is empty here, which is what the design
 wants — the heading already says "Dní do festivalu".
 
+**After the target date passes** Sina shows `settings.message`; if that and `redirect` are both
+empty it prints *"May be you don't enter a valid redirect url"* (happened 2026-10-23). Since then
+`message` is set to "Termín IRMF 2027 brzy oznámíme" (CZ) / "IRMF 2027 dates coming soon" (EN),
+styled black IRMFont via `message_color` + `message_typography_*`. Update the year in the message
+when you set the new `countdown_time`.
+
 ---
 
 ## 8. Annual rollover checklist
@@ -350,6 +356,7 @@ Run this on **both sites** — every content item below exists twice (CZ id / EN
 
 1. **Back up both sites** (§2, §11).
 2. Countdown `countdown_time` in footer #2444 → new festival start (§7). Same ID on both sites.
+   Also bump the year in its expiry `message`.
 3. Top bar dates + edition number in header #3367 ("9. MEZINÁRODNÍ… / 22. - 25. října 2026" and
    the EN equivalents).
 4. Hero dates + edition on the homepage (CZ #7493 / EN #2454) and the hero banner image (§6).
@@ -365,6 +372,27 @@ Run this on **both sites** — every content item below exists twice (CZ id / EN
 10. New-season pages: CZ `galerie-<year>` + `ocenene-snimky-<year>`; EN `gallery-<year>` +
     `awards-<year>` (+ menu entries on both, EN menu term 54). Copy the page metas
     `page_header_type=Image`, `page_show_title=1` or the grey caption band appears (§11).
+    **CZ awards pages (all of 2018–2026; slugs `awards-2018…2021`, `ocenene-snimky-2022…`) are
+    card layouts** — clone the previous year's page and only
+    change texts, image and the film-title link. Each award = outer section `irmf-award-row` →
+    inner section `irmf-award` (+ `irmf-award--portrait` when the photos are portrait; default
+    crop is 3:2) → columns `irmf-award__media` / `irmf-award__body` → widgets
+    `irmf-award__label` (div heading, the category), `irmf-award__film` (h2 heading **with the
+    film's `/katalog/<year>/<slug>/` link** — CSS stretches it over the whole card, so there is no
+    separate link), `irmf-award__meta` (text-editor: `Režie: … <br> Země · rok` +
+    `<span class="irmf-award__more">Profil filmu →</span>`, a plain span). Title section
+    `irmf-awards-head` with an `irmf-awards-intro` text-editor (edition ordinal + dates). Styles
+    are the "IRMF awards pages" block in Additional CSS. Photos: the catalogue still from
+    my.irmf.cz (`image_urls.original`). Built 2026-10-26. A film missing from the catalogue just
+    gets no title link and no "Profil filmu →" span — the card is then not clickable (2018
+    „Pochod naděje", Jim Kroft — the diploma says *The March of Hope*; not in the 2018 catalogue).
+    **EN (irmf.net `awards-2018…2026`) is identical** — same classes, same CSS block in the EN
+    Additional CSS; meta reads `Directed by … <br> Country · year` + "Film profile →", links go to
+    `https://irmf.net/catalogue/<year>/<slug>/` (`paths.en`). The old EN links were mostly dead
+    numeric `/movie/<n>/` ids (pre-catalogue WP post ids — they match nothing in the API, not even
+    `mysql_id`); they were resolved through the CZ page of the same year, whose cards are in the
+    same order. Old EN widgets also carried per-widget typography overrides — strip
+    `typography_*` / `_margin` when converting, or they beat the shared CSS.
 11. Team/contact list (Kontakty CZ #2555 / Contact EN #2555) and the PR contact on Média (#3517).
 12. Default programme year: `$edition_year = <year>; // Default fallback` at the top of
     `MoviesSchedule.php` in **both** child themes — it decides what bare `/program/` (CZ) and
@@ -385,6 +413,18 @@ Run this on **both sites** — every content item below exists twice (CZ id / EN
 
 Used consistently on: homepage cards, festival guide pages. If the timeline changes, update all
 four pages (CZ #7493+#3947, EN #2454+#3888).
+
+### Season timeline 2027 (set 2026-10-26, between editions)
+
+| Fact | CZ wording | EN wording |
+|---|---|---|
+| Festival | 20.–24. října 2027, Moving Station, Plzeň (10. ročník, Wed–Sun, five days) | 20–24 October 2027, Moving Station, Pilsen (10th edition) |
+| Ticket/accreditation sales | „Prodej spustíme v průběhu roku 2027" + newsletter link | "Sales open during 2027" + newsletter link |
+| Programme published | „Program 10. ročníku zveřejníme v průběhu října 2027" | "The programme of the 10th edition will be published during October 2027" |
+
+When sales open: restore the "Kup si vstupenky" / "Buy your accreditation" card and un-hide the
+hero button (§19), repoint `/vstupenky` + `/tickets` to the 2027 GoOut event, and switch the
+guide wording to the "on sale" row above.
 
 ---
 
@@ -496,7 +536,9 @@ Accounts are CageFS-isolated — no direct file access between CZ and EN. Transf
   #3367 `_elementor_data`). Rebuilding the menu under a new name means repointing this setting.
 - `wp_update_nav_menu_item()` **dies under WP-CLI** on this install ("The link you followed has
   expired." — a plugin hook calls `check_admin_referer()`). Create `nav_menu_item` posts directly
-  with `wp_insert_post` + `_menu_item_*` metas + `wp_set_object_terms`.
+  with `wp_insert_post` + `_menu_item_*` metas + `wp_set_object_terms`. **CZ does the same**
+  (2026-10-26, "Vámi sledovaný odkaz vypršel."), but there the item and its metas were already
+  saved before the die — check `wp menu item list` before retrying, or you get a duplicate.
 - Font uploads: WP's MIME whitelist rejects `.ttf` via `wp media import`. Drop font files
   straight into `wp-content/uploads/...` (the `bsf_custom_fonts` post only needs a URL;
   `font_file` may be empty — CZ does the same).
@@ -947,3 +989,82 @@ synopsis next to the still.
 Backups of the previous templates on both accounts: `~/backups/MoviesSchedule-pre-all-day-20261013.php`,
 `~/backups/MoviesPage-pre-all-day-20261013.php`, then `MoviesPage-pre-accompanying-details-20261013.php`
 and `MoviesSchedule-pre-no-allday-heading-20261013.php`.
+
+## 16. Concerts listed after the day's programme (2026-10-16)
+
+`MoviesSchedule.php` (identical on both sites) now orders each day as: timed entries by time →
+concerts (`movie_section = 'concert'`, by time, regardless of when they start) → all-day entries.
+The concerts are DJ sets / parties around the screenings, so they no longer split the film
+programme. The API order is unchanged; the template re-sorts on its own.
+
+Backups of the previous template on both accounts: `~/backups/MoviesSchedule-pre-concerts-last-20261016-0922.php`.
+
+## 17. Partner logos added (2026-10-19)
+
+CZ *Partneři* (#2418), section *Festival si váží spolupráce*: new third row (Vakuum 8599, Blur 8598,
+LissWood 8600 — no links, none known). *Festivalové kavárny*: Walter swapped for the full
+"Walter Mitty · bakery · brunch · coffee" logo (8601; old 8585 left in the library). Logos are
+black on transparent, trimmed, max 1000 px wide — LissWood arrived white and was recoloured.
+Note: `2023/08/bar.ces_.poz_.jpg` (4770) is the **Ministerstvo kultury** logo despite the name.
+
+Fourth row, 3 × 33 like the third: Yoga v Plzni (8603, red brand colour, rendered from SVG with
+its #F4F4F4 background removed), Zlej Dildo (8604, black circle, 100 px — source is only ~500 px),
+Rodinná biofarma Belina Nežichov (8602, 240 px). No links on any of them.
+
+Still missing vs. the 2026 partner board: Johan (no source file yet). Backup: `~/backups/irmf-db-pre-partners-logos-20261019-0003.sql.gz`.
+
+## 18. Contact phone links fixed (2026-10-21)
+
+Kontakty / Contact (#2555, both sites): *Guest service* showed +420 724 558 981 but linked to
+`tel:+420733576641` — href corrected (widget `404093f`). *Production* +420 720 070 550 had no link —
+`tel:+420720070550` added (widget `61959bd`). All six phone numbers now match their `tel:` hrefs.
+Backups: `~/backups/elementor-2555-pre-tel-20261021-*.json` (pre-change `_elementor_data`).
+
+## 19. Post-festival rollover to IRMF 2027 (2026-10-26)
+
+The 9th edition ended on 25 October; the 10th runs **20–24 October 2027** (Wed–Sun), again at
+Moving Station. Applied on both sites with one dry-run-first `wp eval-file` script (CZ / EN ids
+from §6 and §11; the widget ids are the same on both sites):
+
+- Header #3367: `538ca75` "10. MEZINÁRODNÍ FILMOVÝ FESTIVAL ROAD MOVIE" / "10TH INTERNATIONAL ROAD
+  MOVIE FILM FESTIVAL", `46b6e82` "20.—24. října 2027" / "20—24 October 2027".
+- Footer #2444: countdown `dc5f71d` → `2027-10-20 19:00`, expiry message → "Termín IRMF 2028 brzy
+  oznámíme" / "IRMF 2028 dates coming soon".
+- Homepage (CZ #7493 / EN #2454): hero text `e25c393` → 10. ročník / 10th edition + new dates.
+  Hero button `a2c3495` ("Kup si vstupenky") was **already hidden** on all breakpoints
+  (`hide_desktop/tablet/mobile`) — left that way. The three CTA cards now read *Ocenění 2026* →
+  `/ocenene-snimky-2026/` (EN `/awards-2026/`), *Katalog filmů 2026* → `/movies/2026/`,
+  *Odebírej newsletter* → `#newsletter` (widgets `8c3eab2`/`7cd3d22`, `b7200b1`/`e18bd8d`,
+  `0f66e71`/`e5efde7`). News block `e7436d6` + `364b2ba` = thank-you for the 9th edition + save
+  the date for 2027.
+- Festival guide (CZ #3947 / EN #3888): Programme + Tickets texts (`24f01d0`/`e2beaee`,
+  EN `721e499`/`fd3a8f3`) — 2027 timeline, links to the 2026 programme/catalogue, newsletter link.
+  The EN tickets text was wrapped in pasted chat-UI `<div>/<span>` markup; replaced with plain `<p>`.
+- SEO (The SEO Framework): guide `_genesis_description` on both sites, and the homepage
+  description in option `autodescription-site-settings` → `homepage_description` on **both** sites
+  (EN has one too — feeds `og:`/`twitter:description` as well).
+- `.htaccess`: `/vstupenky` and `/tickets` now
+  `RewriteRule ^vstupenky/?$ https://irmf.cz/#newsletter [R=302,NE,L]` (EN analogous). `NE` keeps
+  the `#` from being escaped to `%23`. The old GoOut 2026 `Redirect` lines are left commented out.
+- `#newsletter` anchor: the footer newsletter column already carried `_element_id: newsletter` on
+  both sites, so `#newsletter` works on every page.
+- **`post_content` goes stale when you edit `_elementor_data` directly.** Elementor keeps a
+  plain-text copy of every page in `post_content` (used by WP search, RSS, excerpts); a raw meta
+  write does not refresh it, so the old "under way / 22–25 October" text lingered there. Regenerate
+  after every direct edit: `\Elementor\Plugin::$instance->db->save_plain_text( $id );` (public, in
+  `includes/db.php` — not a Document method). Done for home, guide, header and footer on both sites.
+- Not changed on purpose: copyright year (bump to 2027 in January), default programme year in
+  `MoviesSchedule.php` (stays 2026 until the 2027 programme exists), hero image (until the 2027
+  visual arrives), Galerie/Gallery 2026 (no photos selected yet).
+
+**Incident — never rewrite `.htaccess` in place without checking the result.** The first attempt
+used `python3` over SSH; the CZ account's locale is not UTF-8, so `open(p, "w").write(...)`
+truncated the file and then raised `UnicodeEncodeError` on the Czech comments, and the chained
+`mv` put an **empty** `.htaccess` live for ~30 s (pretty permalinks and WPFC cache rules gone;
+`/vstupenky` returned 404). Restored from the backup taken minutes earlier. Use
+`io.open(..., encoding="utf-8")` and only `mv` after checking the new file is non-empty and the
+`diff` is what you expect.
+
+Backups: `~/backups/irmf-db-pre-rollover-2027-20261026-1630.sql.gz`,
+`~/backups/htaccess-pre-rollover-2027-20261026-1630` (CZ); `irmf-net-db-pre-rollover-2027-20261026-1630.sql.gz`,
+`htaccess-pre-rollover-2027-20261026-1630` (EN).
