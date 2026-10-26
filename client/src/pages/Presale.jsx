@@ -1,89 +1,17 @@
 import React, { useState, useEffect, useRef, useCallback, Fragment } from 'react'
 import axios from 'axios'
 import { useEdition } from '../contexts/EditionContext'
+import { formatNumber, formatCzk, formatPercent, addDays, formatDay, timeAgo } from '../utils/format'
+import { SERIES, GRID_COLOR, Delta, StatTile, useElementWidth, niceTicks } from '../components/charts/primitives'
 
 // Chart colours: categorical slots 1 and 2 of the data-viz palette (validated as a pair)
-const CURRENT_COLOR = '#2a78d6'
-const PREVIOUS_COLOR = '#eb6834'
-const FREE_COLOR = '#86b6ef' // lighter step of the same blue ramp
-const GRID_COLOR = '#e5e7eb'
-
-const numberFormat = new Intl.NumberFormat('cs-CZ')
-const formatNumber = (n) => numberFormat.format(Math.round(n))
-const formatCzk = (cents) => `${numberFormat.format(Math.round(cents / 100))} Kč`
-const formatPercent = (ratio) => `${Math.round(ratio * 100)} %`
-
-const addDays = (date, days) => {
-  const d = new Date(`${date}T12:00:00`)
-  d.setDate(d.getDate() + days)
-  return d
-}
-const formatDay = (date) =>
-  date.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })
+const CURRENT_COLOR = SERIES.blue
+const PREVIOUS_COLOR = SERIES.orange
+const FREE_COLOR = SERIES.lightBlue // lighter step of the same blue ramp
 
 const relativeDay = (day) => {
   if (day < 0) return `${-day} ${day === -1 ? 'day' : 'days'} before`
   return `Festival day ${day + 1}`
-}
-
-const timeAgo = (iso, now) => {
-  const minutes = Math.floor((now - new Date(iso).getTime()) / 60000)
-  if (minutes < 1) return 'just now'
-  if (minutes < 60) return `${minutes} min ago`
-  return `${Math.floor(minutes / 60)} h ago`
-}
-
-// Change against the previous edition, as an arrow + percentage
-function Delta({ current, previous, year }) {
-  if (!previous) {
-    return <span className="text-gray-500">{year}: none at this point</span>
-  }
-  const change = (current - previous) / previous
-  if (Math.round(change * 100) === 0) {
-    return <span className="text-gray-500">same as {year} at this point</span>
-  }
-  const up = change > 0
-  return (
-    <span className={up ? 'text-green-700' : 'text-red-700'}>
-      {up ? '▲' : '▼'} {formatPercent(Math.abs(change))}
-      <span className="text-gray-500"> vs {year} at this point</span>
-    </span>
-  )
-}
-
-function StatTile({ label, value, children }) {
-  return (
-    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-      <div className="text-xs font-medium text-gray-500 uppercase tracking-wider">{label}</div>
-      <div className="mt-1 text-2xl font-semibold text-gray-900 tabular-nums">{value}</div>
-      <div className="mt-1 text-xs text-gray-500 space-y-0.5">{children}</div>
-    </div>
-  )
-}
-
-// Callback ref + width of the element it is attached to
-function useElementWidth() {
-  const [node, setNode] = useState(null)
-  const [width, setWidth] = useState(0)
-  useEffect(() => {
-    if (!node) return
-    const observer = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width))
-    observer.observe(node)
-    return () => observer.disconnect()
-  }, [node])
-  return [setNode, width]
-}
-
-// Round axis maximum to 1, 2 or 5 × 10^n per step
-function niceTicks(max, count = 4) {
-  if (max <= 0) return [0, 1]
-  const raw = max / count
-  const pow = 10 ** Math.floor(Math.log10(raw))
-  const step = [1, 2, 5, 10].map(m => m * pow).find(s => s >= raw)
-  const ticks = []
-  for (let v = 0; v <= max + step * 0.001; v += step) ticks.push(v)
-  if (ticks[ticks.length - 1] < max) ticks.push(ticks[ticks.length - 1] + step)
-  return ticks
 }
 
 /**

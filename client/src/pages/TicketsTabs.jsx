@@ -4,12 +4,14 @@ import Presale from './Presale'
 import Scanner from './Scanner'
 import BoxOffice from './BoxOffice'
 import Accreditations from './Accreditations'
+import Dashboard from './Dashboard'
 
 const TABS = [
   { key: 'box-office', path: '/tickets', label: '🎟️ Box office' },
   { key: 'accreditations', path: '/tickets/accreditations', label: '🪪 Accreditations' },
   { key: 'scan', path: '/tickets/scan', label: '📷 Scan' },
-  { key: 'presale', path: '/tickets/presale', label: '📊 Presale' }
+  { key: 'presale', path: '/tickets/presale', label: '📊 Presale' },
+  { key: 'dashboard', path: '/tickets/dashboard', label: '📈 Dashboard' }
 ]
 
 const TicketsTabs = () => {
@@ -24,8 +26,8 @@ const TicketsTabs = () => {
     <div className="space-y-6">
       {/* Tab Navigation, hidden while the scanner camera runs */}
       {!hideTabs && (
-        <div className="border-b border-gray-200">
-          <nav className="-mb-px flex space-x-8">
+        <div className="border-b border-gray-200 overflow-x-auto">
+          <nav className="-mb-px flex space-x-8 whitespace-nowrap">
             {TABS.map(tab => (
               <button
                 key={tab.key}
@@ -49,6 +51,7 @@ const TicketsTabs = () => {
         {activeTab === 'accreditations' && <Accreditations />}
         {activeTab === 'scan' && <Scanner onScanningChange={setScanning} />}
         {activeTab === 'presale' && <Presale />}
+        {activeTab === 'dashboard' && <Dashboard />}
       </div>
     </div>
   )

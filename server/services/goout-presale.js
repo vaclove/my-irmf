@@ -527,4 +527,4 @@ async function getEditionPassSales(editionId) {
     .flatMap(id => (salesBySchedule[id] || []).map(sale => ({ ...sale, scheduleId: id })));
 }
 
-module.exports = { getEditionPresale, getSoldBySchedule, getEditionPassSales, VALID_TICKET_STATES, relId };
+module.exports = { getEditionPresale, getSoldBySchedule, getEditionPassSales, VALID_TICKET_STATES, relId, pragueDate, dayOffset };
