@@ -129,12 +129,19 @@ function EntryTypes({ attendance }) {
   )
 }
 
+// One day's values as a sentence, for screen readers and keyboard users
+function describeDay(stack, spec) {
+  const parts = spec.series.map(s => `${s.label} ${spec.format(s.value(stack.day) || 0)}`)
+  return `${formatDay(dayDate(stack.day.date))}, ${stack.day.screenings} screenings: ${parts.join(', ')}, total ${spec.format(stack.total)}`
+}
+
 /**
  * Stacked columns, one per festival day; the metric picks the series.
  */
 function DayChart({ days, metric, today }) {
   const [containerRef, width] = useElementWidth()
   const [hover, setHover] = useState(null)
+  const [focused, setFocused] = useState(null)
   const spec = DAY_METRICS[metric]
   const height = 280
   const margin = { top: 24, right: 12, bottom: 28, left: 48 }
@@ -165,7 +172,7 @@ function DayChart({ days, metric, today }) {
   return (
     <div ref={containerRef} className="relative">
       {width > 0 && (
-        <svg width={width} height={height} className="block" role="img" aria-label={spec.description}>
+        <svg width={width} height={height} className="block" role="group" aria-label={spec.description}>
           {today !== null && days.some(d => d.day === today) && (
             <rect x={margin.left + band * days.findIndex(d => d.day === today)} y={margin.top} width={band} height={plotHeight} fill="#f3f4f6" />
           )}
@@ -203,7 +210,10 @@ function DayChart({ days, metric, today }) {
                   {formatShortDay(dayDate(s.day.date))}
                 </text>
                 <rect x={margin.left + band * i} y={margin.top} width={band} height={plotHeight} fill="transparent"
-                  onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} />
+                  tabIndex={0} role="img" aria-label={describeDay(s, spec)} className="outline-none"
+                  stroke={focused === i ? SERIES.blue : 'none'} strokeWidth="2" rx="4"
+                  onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}
+                  onFocus={() => { setFocused(i); setHover(i) }} onBlur={() => { setFocused(null); setHover(null) }} />
               </g>
             )
           })}
@@ -310,6 +320,7 @@ function ScreeningsTable({ screenings, sort }) {
                         <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">● Sold out</span>
                       )}
                       {row.freeEntry && <span className="ml-2 text-xs text-gray-400">free entry</span>}
+                      {row.hidden && <span className="ml-2 text-xs text-gray-400">hidden</span>}
                     </div>
                     <div className="text-xs text-gray-500">{row.venue}</div>
                   </td>

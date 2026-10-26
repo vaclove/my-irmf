@@ -61,7 +61,8 @@ async function loadEdition(editionId) {
   };
 }
 
-// Timed, public programme entries with their box-office tickets and admissions
+// Timed programme entries with their box-office tickets and admissions. Hidden entries
+// stay in, so the totals match the Presale tab and the box-office cash-up.
 async function loadScreenings(editionId) {
   const { rows } = await pool.query(`
     SELECT
@@ -72,6 +73,7 @@ async function loadScreenings(editionId) {
       v.name_cs AS venue,
       COALESCE(ps.ticket_capacity, v.capacity) AS capacity,
       ps.free_entry,
+      ps.hidden_from_public IS TRUE AS hidden,
       ps.goout_schedule_id IS NOT NULL AS goout_linked,
       ((ps.scheduled_date + ps.scheduled_time) AT TIME ZONE 'Europe/Prague') <= now() AS started,
       ((ps.scheduled_date + ps.scheduled_time) AT TIME ZONE 'Europe/Prague')
@@ -100,7 +102,6 @@ async function loadScreenings(editionId) {
     LEFT JOIN movie_blocks mb ON mb.id = ps.block_id
     WHERE ps.edition_id = $1
       AND ps.scheduled_time IS NOT NULL
-      AND ps.hidden_from_public IS NOT TRUE
     ORDER BY ps.scheduled_date, ps.scheduled_time, v.sort_order
   `, [editionId]);
   return rows;
@@ -198,6 +199,7 @@ async function getEditionDashboard(editionId, { refresh = false } = {}) {
       venue: row.venue,
       capacity: row.capacity,
       freeEntry: row.free_entry,
+      hidden: row.hidden,
       gooutLinked: row.goout_linked,
       started: row.started,
       ended: row.ended,
