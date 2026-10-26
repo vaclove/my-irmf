@@ -9,6 +9,10 @@ const LANGS = [
   { lang: 'cs', label: 'Czech', original: 'subtitles_cs', synced: 'subtitles_cs_synced' },
   { lang: 'en', label: 'English', original: 'subtitles_en', synced: 'subtitles_en_synced' },
 ]
+const RESOLUTIONS = [
+  { value: 'auto', label: 'Same as the master (1080p, or 2160p for 4K masters)' },
+  { value: '1080p', label: '1080p (HD) — also from a 4K master: faster, smaller file' },
+]
 const MAX_LINE_CHARS = 42
 // Below this share of EN cues timed like a CS cue, the two languages change
 // at visibly different moments.
@@ -80,6 +84,7 @@ function SubtitleExportModal({ onClose, movieId, kind, sources, lastAdded, onCre
   const addedLang = existingLang ? LANGS.find((l) => l.lang !== existingLang) : null
   const addedKind = addedLang ? choice[addedLang.lang] : ''
   const [startText, setStartText] = useState('')
+  const [resolution, setResolution] = useState('auto')
   const [check, setCheck] = useState(null)
   const [checkError, setCheckError] = useState(null)
   const [checking, setChecking] = useState(false)
@@ -131,6 +136,7 @@ function SubtitleExportModal({ onClose, movieId, kind, sources, lastAdded, onCre
         existing_subtitles_lang: existingLang || null,
         added_position: existingLang ? placement.edge : null,
         added_align: existingLang ? placement.align : null,
+        resolution,
       })
       info(kind === 'preview' ? 'Preview clip queued' : 'Export queued')
       if (onCreated) await onCreated()
@@ -156,7 +162,7 @@ function SubtitleExportModal({ onClose, movieId, kind, sources, lastAdded, onCre
         <p className="text-sm text-gray-600">
           {kind === 'preview'
             ? 'Renders about 60 seconds of the movie exactly as the full export will look — by default the part with the most subtitles. Takes a few minutes.'
-            : 'Renders the whole movie from the master: 1080p, or 2160p for 4K masters, with the original audio. A feature film takes roughly 1–2 hours in HD, longer in 4K; the worker handles one job at a time.'}
+            : 'Renders the whole movie from the master with the original audio. A feature film takes roughly 1–2 hours in HD and several hours in 4K; one render may take at most 8 hours.'}
         </p>
 
         <div className="grid grid-cols-2 gap-4">
@@ -190,6 +196,21 @@ function SubtitleExportModal({ onClose, movieId, kind, sources, lastAdded, onCre
             {LANGS.map((l) => (
               <option key={l.lang} value={l.lang}>
                 {l.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Resolution</label>
+          <select
+            value={resolution}
+            onChange={(e) => setResolution(e.target.value)}
+            className="block w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+          >
+            {RESOLUTIONS.map((r) => (
+              <option key={r.value} value={r.value}>
+                {r.label}
               </option>
             ))}
           </select>

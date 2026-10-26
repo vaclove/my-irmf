@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
 import { formatBytes } from '../../utils/fileSize'
 
-const PHOTO_SECONDS_OPTIONS = [4, 6, 8, 10, 15, 20, 30]
-const DEFAULT_PHOTO_SECONDS = 8 // keep in sync with PHOTO_SECONDS in client/public/tv/app.js
+export const PHOTO_SECONDS_OPTIONS = [4, 6, 8, 10, 15, 20, 30]
+// Before the TV settings load; keep in sync with PHOTO_SECONDS in client/public/tv/app.js
+export const DEFAULT_PHOTO_SECONDS = 8
 
 function formatDuration(seconds) {
   if (!seconds) return ''
@@ -74,7 +75,7 @@ function Status({ slide, onRetry }) {
   return null
 }
 
-function SlideRow({ slide, index, movies, programmeLabel, dragging, onHandleDown, onDragStart, onDragOver, onDragEnd, onUpdate, onDelete, onRetry }) {
+function SlideRow({ slide, index, movies, programmeLabel, defaultPhotoSeconds, dragging, onHandleDown, onDragStart, onDragOver, onDragEnd, onUpdate, onDelete, onRetry }) {
   const [title, setTitle] = useState(slide.title || '')
   useEffect(() => setTitle(slide.title || ''), [slide.title])
 
@@ -140,8 +141,8 @@ function SlideRow({ slide, index, movies, programmeLabel, dragging, onHandleDown
                     onChange={(e) => onUpdate(slide, { display_seconds: e.target.value ? Number(e.target.value) : null })}
                     className="border border-gray-300 rounded px-1 py-0.5 text-xs"
                   >
-                    <option value="">{DEFAULT_PHOTO_SECONDS} s (default)</option>
-                    {PHOTO_SECONDS_OPTIONS.filter((s) => s !== DEFAULT_PHOTO_SECONDS).map((s) => (
+                    <option value="">{defaultPhotoSeconds} s (default)</option>
+                    {PHOTO_SECONDS_OPTIONS.map((s) => (
                       <option key={s} value={s}>{s} s</option>
                     ))}
                   </select>
@@ -202,7 +203,7 @@ function SlideRow({ slide, index, movies, programmeLabel, dragging, onHandleDown
  * The TV player's slides in play order. Drag a row by its handle to reorder;
  * the new order is saved when the drag ends.
  */
-function TvSlideList({ slides, movies, programmeLabel, onReorder, onUpdate, onDelete, onRetry }) {
+function TvSlideList({ slides, movies, programmeLabel, defaultPhotoSeconds = DEFAULT_PHOTO_SECONDS, onReorder, onUpdate, onDelete, onRetry }) {
   const [items, setItems] = useState(slides)
   const [dragId, setDragId] = useState(null) // row whose handle is pressed
   const [dragIndex, setDragIndex] = useState(null)
@@ -244,6 +245,7 @@ function TvSlideList({ slides, movies, programmeLabel, onReorder, onUpdate, onDe
           index={index}
           movies={movies}
           programmeLabel={programmeLabel}
+          defaultPhotoSeconds={defaultPhotoSeconds}
           dragging={dragId === slide.id}
           onHandleDown={() => setDragId(slide.id)}
           onDragStart={handleDragStart}

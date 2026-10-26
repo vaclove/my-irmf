@@ -68,6 +68,7 @@ function App() {
                   <Route path="/programme/blocks" element={<ProgrammingTabs />} />
                   <Route path="/programme/venues" element={<ProgrammingTabs />} />
                   <Route path="/programme/tv" element={<ProgrammingTabs />} />
+                  <Route path="/programme/qlab" element={<ProgrammingTabs />} />
                   <Route path="/tickets" element={<TicketsTabs />} />
                   <Route path="/tickets/accreditations" element={<TicketsTabs />} />
                   <Route path="/tickets/scan" element={<TicketsTabs />} />

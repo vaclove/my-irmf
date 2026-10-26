@@ -38,6 +38,7 @@ const associationRoutes = require('./routes/associations');
 const scannerRoutes = require('./routes/scanner');
 const scannerSessionRoutes = require('./routes/scanner-session');
 const tvRoutes = require('./routes/tv');
+const qlabRoutes = require('./routes/qlab');
 const gooutRoutes = require('./routes/goout');
 const boxOfficeRoutes = require('./routes/boxOffice');
 const dashboardRoutes = require('./routes/dashboard');
@@ -77,6 +78,8 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+      // The ticket scanner decodes barcodes with a WebAssembly build of zxing-cpp
+      "script-src": ["'self'", "'wasm-unsafe-eval'"],
       "img-src": ["'self'", "data:", "https://irmf.cz", "https://lh3.googleusercontent.com", "https://s3.irmf.cz"],
       // Browser uploads movie files straight to Google Drive resumable-session
       // URLs (legacy editions) or Azure Blob SAS URLs. The TV player (/tv/)
@@ -204,6 +207,7 @@ app.use('/api/box-office', requireIrmfDomain, boxOfficeRoutes);
 app.use('/api/dashboard', requireIrmfDomain, dashboardRoutes);
 app.use('/api/db-backup', requireIrmfDomain, dbBackupRoutes);
 app.use('/api/tv', requireIrmfDomain, tvRoutes.adminRouter);
+app.use('/api/qlab', requireIrmfDomain, qlabRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
