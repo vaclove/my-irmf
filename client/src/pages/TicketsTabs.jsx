@@ -5,13 +5,15 @@ import Scanner from './Scanner'
 import BoxOffice from './BoxOffice'
 import Accreditations from './Accreditations'
 import Dashboard from './Dashboard'
+import BadgeAttendance from './BadgeAttendance'
 
 const TABS = [
   { key: 'box-office', path: '/tickets', label: '🎟️ Box office' },
   { key: 'accreditations', path: '/tickets/accreditations', label: '🪪 Accreditations' },
   { key: 'scan', path: '/tickets/scan', label: '📷 Scan' },
   { key: 'presale', path: '/tickets/presale', label: '📊 Presale' },
-  { key: 'dashboard', path: '/tickets/dashboard', label: '📈 Dashboard' }
+  { key: 'dashboard', path: '/tickets/dashboard', label: '📈 Dashboard' },
+  { key: 'badges', path: '/tickets/badges', label: '👥 Badges' }
 ]
 
 const TicketsTabs = () => {
@@ -53,6 +55,7 @@ const TicketsTabs = () => {
         {activeTab === 'scan' && <Scanner onScanningChange={setScanning} />}
         {activeTab === 'presale' && <Presale />}
         {activeTab === 'dashboard' && <Dashboard />}
+        {activeTab === 'badges' && <BadgeAttendance />}
       </div>
     </div>
   )

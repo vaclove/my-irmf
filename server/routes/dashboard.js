@@ -1,6 +1,7 @@
 const express = require('express');
 const { auditMiddleware } = require('../utils/auditLogger');
 const { getEditionDashboard, setManualAttendance, clearManualAttendance, DashboardError } = require('../services/edition-dashboard');
+const { getBadgeAttendance } = require('../services/badge-attendance');
 
 // Management dashboard (Tickets → Dashboard), see server/services/edition-dashboard.js
 
@@ -22,6 +23,22 @@ router.get('/:edition_id', async (req, res) => {
   } catch (error) {
     console.error('Dashboard: load failed:', error);
     res.status(500).json({ error: 'Failed to load the dashboard' });
+  }
+});
+
+/**
+ * Badge holders of an edition and how many screenings each attended
+ * GET /api/dashboard/:edition_id/badges  (Tickets → Badges, server/services/badge-attendance.js)
+ */
+router.get('/:edition_id/badges', async (req, res) => {
+  if (!UUID_RE.test(req.params.edition_id)) return res.status(404).json({ error: 'Edition not found' });
+  try {
+    const data = await getBadgeAttendance(req.params.edition_id);
+    if (!data) return res.status(404).json({ error: 'Edition not found' });
+    res.json(data);
+  } catch (error) {
+    console.error('Dashboard: load badge attendance failed:', error);
+    res.status(500).json({ error: 'Failed to load badge attendance' });
   }
 });
 
