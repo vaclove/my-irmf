@@ -26,13 +26,14 @@ const TicketsTabs = () => {
     <div className="space-y-6">
       {/* Tab Navigation, hidden while the scanner camera runs */}
       {!hideTabs && (
-        <div className="border-b border-gray-200 overflow-x-auto">
-          <nav className="-mb-px flex space-x-8 whitespace-nowrap">
+        <div className="overflow-x-auto">
+          {/* The border sits on the strip itself, so nothing hangs below the scroll area */}
+          <nav className="flex min-w-full w-max space-x-8 whitespace-nowrap border-b border-gray-200">
             {TABS.map(tab => (
               <button
                 key={tab.key}
                 onClick={() => navigate(tab.path)}
-                className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                className={`-mb-px py-2 px-1 border-b-2 font-medium text-sm ${
                   activeTab === tab.key
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
